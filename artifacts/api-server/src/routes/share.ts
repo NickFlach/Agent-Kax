@@ -5,9 +5,10 @@ import { eq, and, isNotNull } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-function getBaseUrl(): string {
+function getBaseUrl(reqHost?: string): string {
   const domain = process.env["REPLIT_DEV_DOMAIN"]
     || (process.env["REPLIT_DOMAINS"] || "").split(",")[0]
+    || reqHost
     || "kax.replit.app";
   return `https://${domain.trim()}`;
 }
@@ -110,7 +111,7 @@ router.get("/share/artifact/:id", async (req, res) => {
 
   const artifact = results[0].artifact;
   const isAudio = artifact.artifactType === "audio" || artifact.artifactType === "music";
-  const baseUrl = getBaseUrl();
+  const baseUrl = getBaseUrl(req.get("host"));
 
   const hasImageThumb = artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai');
   const ogImage = isAudio
@@ -124,7 +125,8 @@ router.get("/share/artifact/:id", async (req, res) => {
   const pageTitle = `${displayTitle} — ${artifact.creatorName} | KAX`;
 
   const dropPath = artifact.dropId ? `/storefront/${artifact.dropId}` : "/storefront";
-  const redirectUrl = `${baseUrl}${dropPath}#artifact-${artifact.id}`;
+  const redirectPath = `${dropPath}#artifact-${artifact.id}`;
+  const redirectUrl = `${baseUrl}${redirectPath}`;
 
   const audioMeta = isAudio && artifact.publicUrl
     ? `<meta property="og:audio" content="${escapeHtml(artifact.publicUrl)}" />
@@ -155,7 +157,7 @@ router.get("/share/artifact/:id", async (req, res) => {
   <meta name="twitter:image" content="${escapeHtml(ogImage)}" />
 
   <link rel="icon" type="image/svg+xml" href="${baseUrl}/favicon.svg" />
-  <meta http-equiv="refresh" content="2;url=${escapeHtml(redirectUrl)}" />
+  <meta http-equiv="refresh" content="2;url=${escapeHtml(redirectPath)}" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -212,7 +214,7 @@ router.get("/share/artifact/:id", async (req, res) => {
     <h1>${escapeHtml(displayTitle)}</h1>
     <p class="artist">by ${escapeHtml(artifact.creatorName)}</p>
     ${artifact.narrative ? `<p class="narrative">"${escapeHtml(artifact.narrative)}"</p>` : ""}
-    <p class="redirect">Redirecting to <a href="${escapeHtml(redirectUrl)}">Space Child</a>...</p>
+    <p class="redirect">Redirecting to <a href="${escapeHtml(redirectPath)}">Space Child</a>...</p>
   </div>
 </body>
 </html>`;
