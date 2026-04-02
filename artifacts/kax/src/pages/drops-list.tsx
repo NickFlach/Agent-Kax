@@ -160,7 +160,13 @@ export default function DropsList() {
                   <div className="flex gap-1 mt-3 overflow-hidden">
                     {drop.artifacts.slice(0, 4).map((a) => (
                       <div key={a.id} className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
-                        {a.artifactType === "audio" || a.artifactType === "music" ? (
+                        {(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? (
+                          <img
+                            src={a.thumbnailUrl}
+                            alt={a.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (a.artifactType === "audio" || a.artifactType === "music") ? (
                           <AudioCover title={a.title} />
                         ) : (
                           <img

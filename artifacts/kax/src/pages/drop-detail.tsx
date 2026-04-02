@@ -126,7 +126,7 @@ export default function DropDetail() {
                           >
                             <div className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
                               <img
-                                src={a.publicUrl}
+                                src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? a.thumbnailUrl : a.publicUrl}
                                 alt={a.title}
                                 className="w-full h-full object-cover"
                                 onError={(e) => {
@@ -160,14 +160,22 @@ export default function DropDetail() {
                     <div key={artifact.id} className="group relative" data-testid={`drop-artifact-${artifact.id}`}>
                       <Link href={`/artifacts/${artifact.id}`}>
                         <div className="aspect-square bg-secondary overflow-hidden">
-                          <img
-                            src={artifact.publicUrl}
-                            alt={artifact.title}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
-                            }}
-                          />
+                          {(artifact.artifactType === "audio" || artifact.artifactType === "music") && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
+                            <img
+                              src={artifact.thumbnailUrl}
+                              alt={artifact.title}
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <img
+                              src={artifact.publicUrl}
+                              alt={artifact.title}
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
+                              }}
+                            />
+                          )}
                         </div>
                       </Link>
                       <div className="mt-1">
