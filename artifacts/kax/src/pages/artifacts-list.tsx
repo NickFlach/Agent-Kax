@@ -108,7 +108,13 @@ export default function ArtifactsList() {
             <Card key={artifact.id} className="overflow-hidden group" data-testid={`card-artifact-${artifact.id}`}>
               <Link href={`/artifacts/${artifact.id}`}>
                 <div className="aspect-square relative overflow-hidden bg-secondary">
-                  {isAudio(artifact.artifactType) ? (
+                  {isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
+                    <img
+                      src={artifact.thumbnailUrl}
+                      alt={artifact.title}
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : isAudio(artifact.artifactType) ? (
                     <AudioCover title={artifact.title} />
                   ) : (
                     <img

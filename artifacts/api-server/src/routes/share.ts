@@ -112,8 +112,9 @@ router.get("/share/artifact/:id", async (req, res) => {
   const isAudio = artifact.artifactType === "audio" || artifact.artifactType === "music";
   const baseUrl = getBaseUrl();
 
+  const hasImageThumb = artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai');
   const ogImage = isAudio
-    ? `${baseUrl}/api/share/audio-cover/${artifact.id}.svg`
+    ? (hasImageThumb ? artifact.thumbnailUrl : `${baseUrl}/api/share/audio-cover/${artifact.id}.svg`)
     : artifact.publicUrl;
 
   const displayTitle = artifact.narrativeTitle || artifact.title;

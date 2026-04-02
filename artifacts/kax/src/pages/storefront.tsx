@@ -16,7 +16,10 @@ export default function Storefront() {
 
   const isAudio = (type: string) => type === "audio" || type === "music";
 
-  function ArtifactImage({ artifact, className = "" }: { artifact: { id: number; title: string; publicUrl: string; artifactType: string }; className?: string }) {
+  function ArtifactImage({ artifact, className = "" }: { artifact: { id: number; title: string; publicUrl: string; artifactType: string; thumbnailUrl?: string | null }; className?: string }) {
+    if (isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai')) {
+      return <img src={artifact.thumbnailUrl} alt={artifact.title} className={`w-full h-full object-cover ${className}`} />;
+    }
     if (isAudio(artifact.artifactType)) {
       return <AudioCover title={artifact.title} className={className} />;
     }

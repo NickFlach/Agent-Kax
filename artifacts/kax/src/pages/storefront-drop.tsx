@@ -89,7 +89,13 @@ export default function StorefrontDrop() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 <div className={`${idx % 2 === 1 ? "lg:order-2" : ""}`}>
                   <div className="aspect-square bg-secondary overflow-hidden">
-                    {isAudio(artifact.artifactType) ? (
+                    {isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
+                      <img
+                        src={artifact.thumbnailUrl}
+                        alt={artifact.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : isAudio(artifact.artifactType) ? (
                       <AudioCover title={artifact.title} />
                     ) : (
                       <img
