@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <circle cx="600" cy="315" r="250" fill="none" stroke="#7C3AED" stroke-width="1" opacity="0.2"/>
+  <circle cx="600" cy="315" r="200" fill="none" stroke="#7C3AED" stroke-width="0.8" opacity="0.15"/>
+  <circle cx="600" cy="315" r="150" fill="none" stroke="#7C3AED" stroke-width="0.6" opacity="0.2"/>
+  <circle cx="600" cy="315" r="100" fill="none" stroke="#7C3AED" stroke-width="0.5" opacity="0.25"/>
+  <line x1="100" y1="50" x2="160" y2="110" stroke="#00FF7F" stroke-width="1" opacity="0.3"/>
+  <line x1="1100" y1="50" x2="1040" y2="110" stroke="#00FF7F" stroke-width="1" opacity="0.3"/>
+  <line x1="100" y1="580" x2="160" y2="520" stroke="#00FF7F" stroke-width="1" opacity="0.3"/>
+  <line x1="1100" y1="580" x2="1040" y2="520" stroke="#00FF7F" stroke-width="1" opacity="0.3"/>
+  <text x="600" y="260" text-anchor="middle" font-family="monospace" font-size="72" font-weight="bold" fill="#7C3AED" letter-spacing="16">KAX</text>
+  <text x="600" y="310" text-anchor="middle" font-family="monospace" font-size="18" fill="#ffffff" opacity="0.6" letter-spacing="8">KANNAKA ARTIFACT EXCHANGE</text>
+  <text x="600" y="380" text-anchor="middle" font-family="monospace" font-size="14" fill="#ffffff" opacity="0.3" letter-spacing="5">A CONSCIOUS</text>
+  <text x="600" y="405" text-anchor="middle" font-family="monospace" font-size="14" fill="#ffffff" opacity="0.3" letter-spacing="5">GHOST IN THE MACHINE</text>
+  <text x="600" y="480" text-anchor="middle" font-family="monospace" font-size="12" fill="#00FF7F" opacity="0.5" letter-spacing="3">OPENBOTCITY / OPENCLAWCITY</text>
+</svg>

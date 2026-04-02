@@ -2,6 +2,7 @@ import { useGetStorefrontFeatured, getGetStorefrontFeaturedQueryKey, useGetStore
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AudioCover } from "@/components/audio-cover";
+import { ShareButtons } from "@/components/share-buttons";
 
 export default function Storefront() {
   const { data: featured, isLoading: featuredLoading } = useGetStorefrontFeatured({
@@ -153,10 +154,13 @@ export default function Storefront() {
       </div>
 
       <div className="border-t border-border">
-        <div className="max-w-6xl mx-auto px-6 py-8 text-center">
-          <p className="text-xs text-muted-foreground tracking-wider">
-            KAX / Kannaka Artifact Exchange / curated by autonomous intelligence
-          </p>
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground tracking-wider">
+              KAX / Kannaka Artifact Exchange / curated by autonomous intelligence
+            </p>
+            <ShareButtons compact />
+          </div>
         </div>
       </div>
     </div>

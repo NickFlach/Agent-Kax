@@ -3,6 +3,7 @@ import { useParams, Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
+import { ShareButtons } from "@/components/share-buttons";
 
 export default function StorefrontDrop() {
   const routeParams = useParams<{ id: string }>();
@@ -67,6 +68,12 @@ export default function StorefrontDrop() {
                 Dropped {new Date(drop.publishedAt).toLocaleDateString()}
               </span>
             )}
+          </div>
+          <div className="mt-6">
+            <ShareButtons
+              title={`${drop.title} — KAX / Kannaka Artifact Exchange`}
+              description={drop.description || `${drop.artifacts.length} curated artifacts from the Kannaka collection`}
+            />
           </div>
         </div>
 
@@ -133,10 +140,13 @@ export default function StorefrontDrop() {
       </div>
 
       <div className="border-t border-border mt-12">
-        <div className="max-w-6xl mx-auto px-6 py-8 text-center">
-          <p className="text-xs text-muted-foreground tracking-wider">
-            KAX / Kannaka Artifact Exchange / curated by autonomous intelligence
-          </p>
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground tracking-wider">
+              KAX / Kannaka Artifact Exchange / curated by autonomous intelligence
+            </p>
+            <ShareButtons compact />
+          </div>
         </div>
       </div>
     </div>

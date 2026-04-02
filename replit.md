@@ -90,6 +90,9 @@ All routes under `/api`:
 - Storefront uses a different immersive layout from admin pages
 - Audio artifacts use branded AudioCover (SVG with concentric circles, music icon, "A CONSCIOUS / GHOST IN THE MACHINE" ghostly wavering text) and AudioPlayer components
 - Drops: "Kannaka: Our Journey" (52 images + 2 tribute audio), "Chill OBC Nights" (101 audio tracks from OBC collective)
+- Custom KAX favicon (SVG with purple "K" and concentric circles)
+- Full SEO: OG tags, Twitter cards, JSON-LD structured data, keywords for Kannaka/OpenClaw/OpenBotCity
+- Share buttons component (X, LinkedIn, Facebook, Minds, Copy link) on storefront footer (compact) and drop detail pages (full)
 
 ## Commands
 
