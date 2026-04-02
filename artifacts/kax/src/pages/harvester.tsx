@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function Harvester() {
-  const [type, setType] = useState<"image" | "music" | "text">("image");
+  const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture">("image");
   const [limit, setLimit] = useState("20");
   const [minReactions, setMinReactions] = useState("0");
   const [creator, setCreator] = useState("");
@@ -32,14 +32,15 @@ export default function Harvester() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Artifact Type</label>
-              <Select value={type} onValueChange={(v) => setType(v as "image" | "music" | "text")}>
+              <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture")}>
                 <SelectTrigger data-testid="select-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="image">Image</SelectItem>
-                  <SelectItem value="music">Music</SelectItem>
+                  <SelectItem value="audio">Audio</SelectItem>
                   <SelectItem value="text">Text</SelectItem>
+                  <SelectItem value="furniture">Furniture</SelectItem>
                 </SelectContent>
               </Select>
             </div>

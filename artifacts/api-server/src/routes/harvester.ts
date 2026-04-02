@@ -90,6 +90,7 @@ router.post("/harvester/run", async (req, res) => {
           continue;
         }
 
+        const artifactType = item.type || type;
         await db.insert(artifactsTable).values({
           externalId: item.id,
           title: item.title || "Untitled",
@@ -97,7 +98,7 @@ router.post("/harvester/run", async (req, res) => {
           publicUrl: item.public_url,
           thumbnailUrl: item.public_url,
           reactionCount: item.reaction_count ?? 0,
-          artifactType: (item.type || type) as "image" | "music" | "text",
+          artifactType: artifactType as "image" | "music" | "text" | "audio" | "furniture",
           tags: [],
         });
         newArtifacts++;

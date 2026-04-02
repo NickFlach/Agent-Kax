@@ -602,7 +602,7 @@ components:
       properties:
         type:
           type: string
-          enum: [image, music, text]
+          enum: [image, audio, text, music, furniture]
           default: image
         limit:
           type: integer

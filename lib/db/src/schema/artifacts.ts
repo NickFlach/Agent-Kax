@@ -2,7 +2,7 @@ import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum } from "
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text"]);
+export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture"]);
 export const artifactStatusEnum = pgEnum("artifact_status", ["raw", "scored", "narrated", "dropped"]);
 
 export const artifactsTable = pgTable("artifacts", {

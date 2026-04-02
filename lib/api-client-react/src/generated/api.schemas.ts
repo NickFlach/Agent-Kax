@@ -130,8 +130,10 @@ export type HarvesterRunBodyType =
 
 export const HarvesterRunBodyType = {
   image: "image",
-  music: "music",
+  audio: "audio",
   text: "text",
+  music: "music",
+  furniture: "furniture",
 } as const;
 
 export interface HarvesterRunBody {

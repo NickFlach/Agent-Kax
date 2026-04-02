@@ -404,7 +404,7 @@ export const runHarvesterBodyMinReactionsDefault = 0;
 
 export const RunHarvesterBody = zod.object({
   type: zod
-    .enum(["image", "music", "text"])
+    .enum(["image", "audio", "text", "music", "furniture"])
     .default(runHarvesterBodyTypeDefault),
   limit: zod.number().default(runHarvesterBodyLimitDefault),
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
