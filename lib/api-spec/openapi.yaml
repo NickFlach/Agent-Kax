@@ -1,15 +1,25 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: KAX - Kannaka Artifact Exchange API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: artifacts
+    description: Artifact management
+  - name: drops
+    description: Drop management
+  - name: harvester
+    description: Artifact harvesting from OpenBotCity
+  - name: storefront
+    description: Public storefront endpoints
+  - name: dashboard
+    description: Dashboard summaries
+
 paths:
   /healthz:
     get:
@@ -24,6 +34,385 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /artifacts:
+    get:
+      operationId: listArtifacts
+      tags: [artifacts]
+      summary: List all artifacts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [raw, scored, narrated, dropped]
+        - name: minScore
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of artifacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactListResponse"
+
+  /artifacts/{id}:
+    get:
+      operationId: getArtifact
+      tags: [artifacts]
+      summary: Get artifact by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Artifact details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+
+  /artifacts/{id}/score:
+    post:
+      operationId: scoreArtifact
+      tags: [artifacts]
+      summary: Run taste engine scoring on an artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Scored artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+
+  /artifacts/{id}/narrate:
+    post:
+      operationId: narrateArtifact
+      tags: [artifacts]
+      summary: Generate narrative for an artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Narrated artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+
+  /drops:
+    get:
+      operationId: listDrops
+      tags: [drops]
+      summary: List all drops
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, sold]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of drops
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DropListResponse"
+    post:
+      operationId: createDrop
+      tags: [drops]
+      summary: Create a new drop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDropBody"
+      responses:
+        "201":
+          description: Drop created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+
+  /drops/{id}:
+    get:
+      operationId: getDrop
+      tags: [drops]
+      summary: Get drop by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Drop details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+    patch:
+      operationId: updateDrop
+      tags: [drops]
+      summary: Update a drop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDropBody"
+      responses:
+        "200":
+          description: Drop updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+    delete:
+      operationId: deleteDrop
+      tags: [drops]
+      summary: Delete a drop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Drop deleted
+
+  /drops/{id}/publish:
+    post:
+      operationId: publishDrop
+      tags: [drops]
+      summary: Publish a drop to the storefront
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Drop published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+
+  /drops/{dropId}/artifacts:
+    post:
+      operationId: addArtifactToDrop
+      tags: [drops]
+      summary: Add an artifact to a drop
+      parameters:
+        - name: dropId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddArtifactToDropBody"
+      responses:
+        "200":
+          description: Artifact added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+
+  /drops/{dropId}/artifacts/{artifactId}:
+    delete:
+      operationId: removeArtifactFromDrop
+      tags: [drops]
+      summary: Remove an artifact from a drop
+      parameters:
+        - name: dropId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Artifact removed
+
+  /harvester/run:
+    post:
+      operationId: runHarvester
+      tags: [harvester]
+      summary: Trigger artifact harvesting from OpenBotCity
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HarvesterRunBody"
+      responses:
+        "200":
+          description: Harvesting results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HarvesterResult"
+
+  /storefront/drops:
+    get:
+      operationId: getStorefrontDrops
+      tags: [storefront]
+      summary: Get published drops for the storefront
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Published drops
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DropListResponse"
+
+  /storefront/drops/{id}:
+    get:
+      operationId: getStorefrontDrop
+      tags: [storefront]
+      summary: Get a single published drop for storefront
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Published drop detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+
+  /storefront/featured:
+    get:
+      operationId: getStorefrontFeatured
+      tags: [storefront]
+      summary: Get featured artifacts for the storefront hero
+      responses:
+        "200":
+          description: Featured artifacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeaturedResponse"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard overview stats
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity feed
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityFeed"
+
+  /dashboard/score-distribution:
+    get:
+      operationId: getScoreDistribution
+      tags: [dashboard]
+      summary: Get distribution of artifact scores
+      responses:
+        "200":
+          description: Score distribution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoreDistribution"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +423,299 @@ components:
       required:
         - status
 
+    Artifact:
+      type: object
+      properties:
+        id:
+          type: integer
+        externalId:
+          type: string
+        title:
+          type: string
+        creatorName:
+          type: string
+        publicUrl:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        reactionCount:
+          type: integer
+        artifactType:
+          type: string
+          enum: [image, music, text]
+        status:
+          type: string
+          enum: [raw, scored, narrated, dropped]
+        kannakaScore:
+          type: number
+          nullable: true
+        rarityScore:
+          type: number
+          nullable: true
+        narrative:
+          type: string
+          nullable: true
+        narrativeTitle:
+          type: string
+          nullable: true
+        transmissionId:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        ingestedAt:
+          type: string
+          format: date-time
+        scoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        narratedAt:
+          type: string
+          format: date-time
+          nullable: true
+        dropId:
+          type: integer
+          nullable: true
+      required:
+        - id
+        - externalId
+        - title
+        - creatorName
+        - publicUrl
+        - reactionCount
+        - artifactType
+        - status
+        - tags
+        - ingestedAt
+
+    ArtifactListResponse:
+      type: object
+      properties:
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        total:
+          type: integer
+      required:
+        - artifacts
+        - total
+
+    Drop:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        dropType:
+          type: string
+          enum: [single, collection, bundle]
+        status:
+          type: string
+          enum: [draft, published, sold]
+        price:
+          type: number
+          nullable: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        createdAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - title
+        - dropType
+        - status
+        - artifacts
+        - createdAt
+
+    DropListResponse:
+      type: object
+      properties:
+        drops:
+          type: array
+          items:
+            $ref: "#/components/schemas/Drop"
+        total:
+          type: integer
+      required:
+        - drops
+        - total
+
+    CreateDropBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        dropType:
+          type: string
+          enum: [single, collection, bundle]
+        price:
+          type: number
+        artifactIds:
+          type: array
+          items:
+            type: integer
+      required:
+        - title
+        - dropType
+
+    UpdateDropBody:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        status:
+          type: string
+          enum: [draft, published, sold]
+
+    AddArtifactToDropBody:
+      type: object
+      properties:
+        artifactId:
+          type: integer
+      required:
+        - artifactId
+
+    HarvesterRunBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [image, music, text]
+          default: image
+        limit:
+          type: integer
+          default: 20
+        minReactions:
+          type: integer
+          default: 0
+
+    HarvesterResult:
+      type: object
+      properties:
+        harvested:
+          type: integer
+        newArtifacts:
+          type: integer
+        duplicates:
+          type: integer
+      required:
+        - harvested
+        - newArtifacts
+        - duplicates
+
+    FeaturedResponse:
+      type: object
+      properties:
+        featured:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        latestDrop:
+          $ref: "#/components/schemas/Drop"
+      required:
+        - featured
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalArtifacts:
+          type: integer
+        scoredArtifacts:
+          type: integer
+        narratedArtifacts:
+          type: integer
+        totalDrops:
+          type: integer
+        publishedDrops:
+          type: integer
+        averageScore:
+          type: number
+        topCreators:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              count:
+                type: integer
+            required:
+              - name
+              - count
+      required:
+        - totalArtifacts
+        - scoredArtifacts
+        - narratedArtifacts
+        - totalDrops
+        - publishedDrops
+        - averageScore
+        - topCreators
+
+    ActivityFeed:
+      type: object
+      properties:
+        activities:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              type:
+                type: string
+                enum: [harvested, scored, narrated, dropped, published]
+              message:
+                type: string
+              artifactTitle:
+                type: string
+                nullable: true
+              timestamp:
+                type: string
+                format: date-time
+            required:
+              - id
+              - type
+              - message
+              - timestamp
+      required:
+        - activities
+
+    ScoreDistribution:
+      type: object
+      properties:
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              range:
+                type: string
+              count:
+                type: integer
+            required:
+              - range
+              - count
+      required:
+        - buckets
