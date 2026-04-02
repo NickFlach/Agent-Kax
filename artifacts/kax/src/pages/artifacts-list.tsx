@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { AudioCover } from "@/components/audio-cover";
+import { AudioPlayer } from "@/components/audio-player";
 
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
@@ -46,6 +48,8 @@ export default function ArtifactsList() {
     narrated: "bg-green-500/20 text-green-400",
     dropped: "bg-yellow-500/20 text-yellow-400",
   };
+
+  const isAudio = (type: string) => type === "audio" || type === "music";
 
   return (
     <div className="space-y-6">
@@ -89,14 +93,18 @@ export default function ArtifactsList() {
             <Card key={artifact.id} className="overflow-hidden group" data-testid={`card-artifact-${artifact.id}`}>
               <Link href={`/artifacts/${artifact.id}`}>
                 <div className="aspect-square relative overflow-hidden bg-secondary">
-                  <img
-                    src={artifact.publicUrl}
-                    alt={artifact.title}
-                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
-                    }}
-                  />
+                  {isAudio(artifact.artifactType) ? (
+                    <AudioCover title={artifact.title} />
+                  ) : (
+                    <img
+                      src={artifact.publicUrl}
+                      alt={artifact.title}
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
+                      }}
+                    />
+                  )}
                   <div className="absolute top-2 right-2">
                     <Badge variant="outline" className={statusColors[artifact.status] || ""}>
                       {artifact.status}
@@ -116,6 +124,9 @@ export default function ArtifactsList() {
                   </h3>
                 </Link>
                 <p className="text-xs text-muted-foreground mt-1">{artifact.creatorName}</p>
+                {isAudio(artifact.artifactType) && (
+                  <AudioPlayer src={artifact.publicUrl} title={artifact.title} compact />
+                )}
                 <div className="flex gap-2 mt-2">
                   {artifact.status === "raw" && (
                     <button

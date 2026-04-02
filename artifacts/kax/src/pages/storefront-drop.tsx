@@ -1,6 +1,8 @@
 import { useGetStorefrontDrop, getGetStorefrontDropQueryKey } from "@workspace/api-client-react";
 import { useParams, Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AudioCover } from "@/components/audio-cover";
+import { AudioPlayer } from "@/components/audio-player";
 
 export default function StorefrontDrop() {
   const routeParams = useParams<{ id: string }>();
@@ -9,6 +11,8 @@ export default function StorefrontDrop() {
   const { data: drop, isLoading } = useGetStorefrontDrop(id, {
     query: { enabled: !!id, queryKey: getGetStorefrontDropQueryKey(id) },
   });
+
+  const isAudio = (type: string) => type === "audio" || type === "music";
 
   if (isLoading) {
     return (
@@ -72,15 +76,22 @@ export default function StorefrontDrop() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 <div className={`${idx % 2 === 1 ? "lg:order-2" : ""}`}>
                   <div className="aspect-square bg-secondary overflow-hidden">
-                    <img
-                      src={artifact.publicUrl}
-                      alt={artifact.title}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-                      }}
-                    />
+                    {isAudio(artifact.artifactType) ? (
+                      <AudioCover title={artifact.title} />
+                    ) : (
+                      <img
+                        src={artifact.publicUrl}
+                        alt={artifact.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
+                        }}
+                      />
+                    )}
                   </div>
+                  {isAudio(artifact.artifactType) && (
+                    <AudioPlayer src={artifact.publicUrl} title={artifact.title} />
+                  )}
                 </div>
                 <div className={`${idx % 2 === 1 ? "lg:order-1" : ""} py-8`}>
                   {artifact.transmissionId && (

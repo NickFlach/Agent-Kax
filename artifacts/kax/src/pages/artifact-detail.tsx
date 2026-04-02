@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
+import { AudioCover } from "@/components/audio-cover";
+import { AudioPlayer } from "@/components/audio-player";
 
 export default function ArtifactDetail() {
   const params = useParams<{ id: string }>();
@@ -36,6 +38,8 @@ export default function ArtifactDetail() {
     narrated: "bg-green-500/20 text-green-400",
     dropped: "bg-yellow-500/20 text-yellow-400",
   };
+
+  const isAudio = (type: string) => type === "audio" || type === "music";
 
   if (isLoading) {
     return (
@@ -75,15 +79,24 @@ export default function ArtifactDetail() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="aspect-square bg-secondary overflow-hidden">
-          <img
-            src={artifact.publicUrl}
-            alt={artifact.title}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-            }}
-          />
+        <div className="space-y-4">
+          <div className="aspect-square bg-secondary overflow-hidden">
+            {isAudio(artifact.artifactType) ? (
+              <AudioCover title={artifact.title} />
+            ) : (
+              <img
+                src={artifact.publicUrl}
+                alt={artifact.title}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
+                }}
+              />
+            )}
+          </div>
+          {isAudio(artifact.artifactType) && (
+            <AudioPlayer src={artifact.publicUrl} title={artifact.title} />
+          )}
         </div>
 
         <div className="space-y-4">

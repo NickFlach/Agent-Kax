@@ -1,6 +1,7 @@
 import { useGetStorefrontFeatured, getGetStorefrontFeaturedQueryKey, useGetStorefrontDrops, getGetStorefrontDropsQueryKey } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AudioCover } from "@/components/audio-cover";
 
 export default function Storefront() {
   const { data: featured, isLoading: featuredLoading } = useGetStorefrontFeatured({
@@ -11,6 +12,24 @@ export default function Storefront() {
     { limit: 20, offset: 0 },
     { query: { queryKey: getGetStorefrontDropsQueryKey({ limit: 20, offset: 0 }) } }
   );
+
+  const isAudio = (type: string) => type === "audio" || type === "music";
+
+  function ArtifactImage({ artifact, className = "" }: { artifact: { id: number; title: string; publicUrl: string; artifactType: string }; className?: string }) {
+    if (isAudio(artifact.artifactType)) {
+      return <AudioCover title={artifact.title} className={className} />;
+    }
+    return (
+      <img
+        src={artifact.publicUrl}
+        alt={artifact.title}
+        className={`w-full h-full object-cover ${className}`}
+        onError={(e) => {
+          (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -40,15 +59,8 @@ export default function Storefront() {
                 className={`relative overflow-hidden group ${idx === 0 ? "col-span-2 row-span-2" : ""}`}
                 data-testid={`featured-artifact-${artifact.id}`}
               >
-                <div className={`${idx === 0 ? "aspect-square" : "aspect-square"} bg-secondary`}>
-                  <img
-                    src={artifact.publicUrl}
-                    alt={artifact.title}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-                    }}
-                  />
+                <div className="aspect-square bg-secondary">
+                  <ArtifactImage artifact={artifact} className="transition-transform duration-500 group-hover:scale-105" />
                 </div>
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <div className="absolute bottom-0 left-0 right-0 p-4">
@@ -79,14 +91,7 @@ export default function Storefront() {
                 <div className="flex gap-1 flex-shrink-0">
                   {featured.latestDrop.artifacts.slice(0, 3).map((a) => (
                     <div key={a.id} className="w-20 h-20 bg-secondary overflow-hidden">
-                      <img
-                        src={a.publicUrl}
-                        alt={a.title}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/200/200`;
-                        }}
-                      />
+                      <ArtifactImage artifact={a} />
                     </div>
                   ))}
                 </div>
@@ -123,14 +128,7 @@ export default function Storefront() {
                     <div className="flex gap-1 mb-4">
                       {drop.artifacts.slice(0, 4).map((a) => (
                         <div key={a.id} className="flex-1 aspect-square bg-secondary overflow-hidden">
-                          <img
-                            src={a.publicUrl}
-                            alt={a.title}
-                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/200/200`;
-                            }}
-                          />
+                          <ArtifactImage artifact={a} className="transition-transform duration-300 group-hover:scale-105" />
                         </div>
                       ))}
                     </div>
