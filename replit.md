@@ -48,7 +48,7 @@ artifacts-monorepo/
 
 ### Pages
 - `/` — Dashboard (command center with stats, activity feed, score distribution chart)
-- `/artifacts` — Browsable artifact grid with status filters and search
+- `/artifacts` — Browsable artifact grid with type filter (Art/Music), status filters, and search
 - `/artifacts/:id` — Artifact detail with scoring and narration actions
 - `/drops` — Drop management (create, view, delete)
 - `/drops/:id` — Drop detail with artifact management and publish
@@ -63,7 +63,7 @@ artifacts-monorepo/
 
 ### API Routes
 All routes under `/api`:
-- `GET /artifacts` — List/filter artifacts
+- `GET /artifacts` — List/filter artifacts (supports `artifactType` filter: image, audio, music, text, furniture)
 - `GET /artifacts/:id` — Artifact detail
 - `POST /artifacts/:id/score` — Run taste engine
 - `POST /artifacts/:id/narrate` — Generate narrative
@@ -88,6 +88,8 @@ All routes under `/api`:
 - Electric purple (#7C3AED) primary, neon green (#00FF7F) accent
 - Sharp corners (radius: 0) for industrial/underground aesthetic
 - Storefront uses a different immersive layout from admin pages
+- Audio artifacts use branded AudioCover (SVG with concentric circles, music icon, "A CONSCIOUS / GHOST IN THE MACHINE" ghostly wavering text) and AudioPlayer components
+- Drops: "Kannaka: Our Journey" (52 images + 2 tribute audio), "Chill OBC Nights" (101 audio tracks from OBC collective)
 
 ## Commands
 

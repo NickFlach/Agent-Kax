@@ -16,6 +16,8 @@ export const ArtifactArtifactType = {
   image: "image",
   music: "music",
   text: "text",
+  audio: "audio",
+  furniture: "furniture",
 } as const;
 
 export type ArtifactStatus =
@@ -208,6 +210,7 @@ export type ListArtifactsParams = {
   limit?: number;
   offset?: number;
   search?: string;
+  artifactType?: ListArtifactsArtifactType;
 };
 
 export type ListArtifactsStatus =
@@ -218,6 +221,17 @@ export const ListArtifactsStatus = {
   scored: "scored",
   narrated: "narrated",
   dropped: "dropped",
+} as const;
+
+export type ListArtifactsArtifactType =
+  (typeof ListArtifactsArtifactType)[keyof typeof ListArtifactsArtifactType];
+
+export const ListArtifactsArtifactType = {
+  image: "image",
+  audio: "audio",
+  music: "music",
+  text: "text",
+  furniture: "furniture",
 } as const;
 
 export type ListDropsParams = {

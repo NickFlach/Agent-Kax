@@ -5,6 +5,7 @@
  * KAX - Kannaka Artifact Exchange API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListArtifactsArtifactType } from "./listArtifactsArtifactType";
 import type { ListArtifactsStatus } from "./listArtifactsStatus";
 
 export type ListArtifactsParams = {
@@ -13,4 +14,5 @@ export type ListArtifactsParams = {
   limit?: number;
   offset?: number;
   search?: string;
+  artifactType?: ListArtifactsArtifactType;
 };

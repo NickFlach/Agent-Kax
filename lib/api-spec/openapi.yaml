@@ -64,6 +64,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: artifactType
+          in: query
+          schema:
+            type: string
+            enum: [image, audio, music, text, furniture]
       responses:
         "200":
           description: List of artifacts
@@ -443,7 +448,7 @@ components:
           type: integer
         artifactType:
           type: string
-          enum: [image, music, text]
+          enum: [image, music, text, audio, furniture]
         status:
           type: string
           enum: [raw, scored, narrated, dropped]

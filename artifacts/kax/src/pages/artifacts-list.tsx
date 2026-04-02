@@ -12,11 +12,13 @@ import { AudioPlayer } from "@/components/audio-player";
 
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
 
   const params = {
     ...(status !== "all" ? { status: status as "raw" | "scored" | "narrated" | "dropped" } : {}),
+    ...(typeFilter !== "all" ? { artifactType: typeFilter as "image" | "audio" | "music" | "text" | "furniture" } : {}),
     ...(search ? { search } : {}),
     limit: 50,
     offset: 0,
@@ -67,12 +69,22 @@ export default function ArtifactsList() {
           data-testid="input-search"
           type="search"
         />
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-40" data-testid="select-type">
+            <SelectValue placeholder="Filter type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="image">Art</SelectItem>
+            <SelectItem value="audio">Music</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="w-40" data-testid="select-status">
             <SelectValue placeholder="Filter status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="raw">Raw</SelectItem>
             <SelectItem value="scored">Scored</SelectItem>
             <SelectItem value="narrated">Narrated</SelectItem>

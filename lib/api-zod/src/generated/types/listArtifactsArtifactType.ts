@@ -6,13 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ArtifactArtifactType =
-  (typeof ArtifactArtifactType)[keyof typeof ArtifactArtifactType];
+export type ListArtifactsArtifactType =
+  (typeof ListArtifactsArtifactType)[keyof typeof ListArtifactsArtifactType];
 
-export const ArtifactArtifactType = {
+export const ListArtifactsArtifactType = {
   image: "image",
+  audio: "audio",
   music: "music",
   text: "text",
-  audio: "audio",
   furniture: "furniture",
 } as const;

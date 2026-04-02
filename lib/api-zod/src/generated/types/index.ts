@@ -29,6 +29,7 @@ export * from "./harvesterResult";
 export * from "./harvesterRunBody";
 export * from "./harvesterRunBodyType";
 export * from "./healthStatus";
+export * from "./listArtifactsArtifactType";
 export * from "./listArtifactsParams";
 export * from "./listArtifactsStatus";
 export * from "./listDropsParams";

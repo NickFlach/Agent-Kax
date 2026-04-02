@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { AudioCover } from "@/components/audio-cover";
 
 export default function DropsList() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -159,14 +160,18 @@ export default function DropsList() {
                   <div className="flex gap-1 mt-3 overflow-hidden">
                     {drop.artifacts.slice(0, 4).map((a) => (
                       <div key={a.id} className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
-                        <img
-                          src={a.publicUrl}
-                          alt={a.title}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
-                          }}
-                        />
+                        {a.artifactType === "audio" || a.artifactType === "music" ? (
+                          <AudioCover title={a.title} />
+                        ) : (
+                          <img
+                            src={a.publicUrl}
+                            alt={a.title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
+                            }}
+                          />
+                        )}
                       </div>
                     ))}
                     {drop.artifacts.length > 4 && (

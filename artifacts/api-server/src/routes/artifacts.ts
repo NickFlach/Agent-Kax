@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, desc, gte, ilike, sql, and, count } from "drizzle-orm";
+import { eq, desc, gte, ilike, sql, and, count, inArray } from "drizzle-orm";
 import {
   ListArtifactsQueryParams,
   GetArtifactParams,
@@ -23,6 +23,13 @@ router.get("/artifacts", async (req, res) => {
   }
   if (query.search) {
     conditions.push(ilike(artifactsTable.title, `%${query.search}%`));
+  }
+  if (query.artifactType) {
+    if (query.artifactType === "audio" || query.artifactType === "music") {
+      conditions.push(inArray(artifactsTable.artifactType, ["audio", "music"]));
+    } else {
+      conditions.push(eq(artifactsTable.artifactType, query.artifactType));
+    }
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
