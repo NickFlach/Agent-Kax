@@ -610,6 +610,9 @@ components:
         minReactions:
           type: integer
           default: 0
+        creator:
+          type: string
+          description: Filter by creator display name (case-insensitive match)
 
     HarvesterResult:
       type: object

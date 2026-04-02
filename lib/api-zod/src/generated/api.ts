@@ -408,6 +408,10 @@ export const RunHarvesterBody = zod.object({
     .default(runHarvesterBodyTypeDefault),
   limit: zod.number().default(runHarvesterBodyLimitDefault),
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
+  creator: zod
+    .string()
+    .optional()
+    .describe("Filter by creator display name (case-insensitive match)"),
 });
 
 export const RunHarvesterResponse = zod.object({

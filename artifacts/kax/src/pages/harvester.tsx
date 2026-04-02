@@ -8,6 +8,7 @@ export default function Harvester() {
   const [type, setType] = useState<"image" | "music" | "text">("image");
   const [limit, setLimit] = useState("20");
   const [minReactions, setMinReactions] = useState("0");
+  const [creator, setCreator] = useState("");
   const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number } | null>(null);
 
   const mutation = useRunHarvester({
@@ -66,6 +67,17 @@ export default function Harvester() {
               />
             </div>
 
+            <div>
+              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Creator Filter</label>
+              <Input
+                type="text"
+                value={creator}
+                onChange={(e) => setCreator(e.target.value)}
+                placeholder="e.g. Kannaka (leave empty for all)"
+                data-testid="input-creator"
+              />
+            </div>
+
             <button
               onClick={() => {
                 mutation.mutate({
@@ -73,6 +85,7 @@ export default function Harvester() {
                     type,
                     limit: parseInt(limit) || 20,
                     minReactions: parseInt(minReactions) || 0,
+                    ...(creator.trim() ? { creator: creator.trim() } : {}),
                   },
                 });
               }}

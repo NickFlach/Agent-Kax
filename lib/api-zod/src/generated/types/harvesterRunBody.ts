@@ -11,4 +11,6 @@ export interface HarvesterRunBody {
   type?: HarvesterRunBodyType;
   limit?: number;
   minReactions?: number;
+  /** Filter by creator display name (case-insensitive match) */
+  creator?: string;
 }
