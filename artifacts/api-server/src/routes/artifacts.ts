@@ -22,7 +22,10 @@ router.get("/artifacts", async (req, res) => {
     conditions.push(gte(artifactsTable.kannakaScore, query.minScore));
   }
   if (query.search) {
-    conditions.push(ilike(artifactsTable.title, `%${query.search}%`));
+    const searchPattern = `%${query.search}%`;
+    conditions.push(
+      sql`(${ilike(artifactsTable.title, searchPattern)} OR ${ilike(artifactsTable.creatorName, searchPattern)})`
+    );
   }
   if (query.artifactType) {
     if (query.artifactType === "audio" || query.artifactType === "music") {

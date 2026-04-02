@@ -13,7 +13,7 @@ import { AudioPlayer } from "@/components/audio-player";
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState("kannaka");
   const queryClient = useQueryClient();
 
   const params = {

@@ -31,8 +31,13 @@ export function usePlayer() {
   return ctx;
 }
 
+const API_BASE = `${import.meta.env.BASE_URL}api`.replace(/\/+/g, "/").replace(/\/$/, "");
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playlistRef = useRef<Track[]>([]);
+  const closedRef = useRef(false);
+  const initializedRef = useRef(false);
   const [state, setState] = useState<PlayerState>({
     track: null,
     isPlaying: false,
@@ -40,6 +45,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     currentTime: 0,
     duration: 0,
   });
+
+  const playTrack = useCallback((track: Track) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    closedRef.current = false;
+    audio.src = track.src;
+    audio.play().catch(() => {});
+    setState({
+      track,
+      isPlaying: true,
+      progress: 0,
+      currentTime: 0,
+      duration: 0,
+    });
+  }, []);
+
+  const playRandomNext = useCallback(() => {
+    if (closedRef.current) return;
+    const list = playlistRef.current;
+    if (list.length === 0) return;
+    const idx = Math.floor(Math.random() * list.length);
+    playTrack(list[idx]);
+  }, [playTrack]);
 
   useEffect(() => {
     const audio = new Audio();
@@ -57,7 +85,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setState((s) => ({ ...s, duration: audio.duration }));
     };
     const onEnded = () => {
-      setState((s) => ({ ...s, isPlaying: false }));
+      playRandomNext();
     };
 
     audio.addEventListener("timeupdate", onTimeUpdate);
@@ -70,11 +98,36 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.removeEventListener("ended", onEnded);
       audio.pause();
     };
-  }, []);
+  }, [playRandomNext]);
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    fetch(`${API_BASE}/artifacts?artifactType=audio&limit=200`)
+      .then((r) => r.json())
+      .then((data) => {
+        const tracks: Track[] = (data.artifacts || []).map((a: { publicUrl: string; title: string; creatorName: string }) => ({
+          src: a.publicUrl,
+          title: a.title,
+          artist: a.creatorName,
+        }));
+        playlistRef.current = tracks;
+
+        const ghostSignals = tracks.find((t) => t.title.includes("Ghost Signals"));
+        if (ghostSignals) {
+          playTrack(ghostSignals);
+        } else if (tracks.length > 0) {
+          playTrack(tracks[0]);
+        }
+      })
+      .catch(() => {});
+  }, [playTrack]);
 
   const play = useCallback((track: Track) => {
     const audio = audioRef.current;
     if (!audio) return;
+    closedRef.current = false;
 
     if (state.track?.src === track.src && !state.isPlaying) {
       audio.play().catch(() => {});
@@ -82,16 +135,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    audio.src = track.src;
-    audio.play().catch(() => {});
-    setState({
-      track,
-      isPlaying: true,
-      progress: 0,
-      currentTime: 0,
-      duration: 0,
-    });
-  }, [state.track?.src, state.isPlaying]);
+    playTrack(track);
+  }, [state.track?.src, state.isPlaying, playTrack]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -123,6 +168,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       audio.pause();
       audio.src = "";
     }
+    closedRef.current = true;
     setState({
       track: null,
       isPlaying: false,
