@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
+import { ShareButtons } from "@/components/share-buttons";
 
 export default function ArtifactDetail() {
   const params = useParams<{ id: string }>();
@@ -183,6 +184,11 @@ export default function ArtifactDetail() {
               </button>
             )}
           </div>
+
+          <ShareButtons
+            url={`${window.location.origin}/api/share/artifact/${artifact.id}`}
+            title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
+          />
         </div>
       </div>
     </div>

@@ -9,6 +9,7 @@ import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
+import { ShareButtons } from "@/components/share-buttons";
 
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
@@ -52,6 +53,8 @@ export default function ArtifactsList() {
   };
 
   const isAudio = (type: string) => type === "audio" || type === "music";
+  const getShareUrl = (artifactId: number) =>
+    `${window.location.origin}/api/share/artifact/${artifactId}`;
 
   return (
     <div className="space-y-6">
@@ -139,27 +142,34 @@ export default function ArtifactsList() {
                 {isAudio(artifact.artifactType) && (
                   <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} compact />
                 )}
-                <div className="flex gap-2 mt-2">
-                  {artifact.status === "raw" && (
-                    <button
-                      onClick={() => scoreMutation.mutate({ id: artifact.id })}
-                      disabled={scoreMutation.isPending}
-                      className="text-xs px-2 py-1 bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
-                      data-testid={`button-score-${artifact.id}`}
-                    >
-                      Score
-                    </button>
-                  )}
-                  {artifact.status === "scored" && (
-                    <button
-                      onClick={() => narrateMutation.mutate({ id: artifact.id })}
-                      disabled={narrateMutation.isPending}
-                      className="text-xs px-2 py-1 bg-accent/20 text-accent hover:bg-accent/30 transition-colors"
-                      data-testid={`button-narrate-${artifact.id}`}
-                    >
-                      Narrate
-                    </button>
-                  )}
+                <div className="flex items-center justify-between mt-2">
+                  <div className="flex gap-2">
+                    {artifact.status === "raw" && (
+                      <button
+                        onClick={() => scoreMutation.mutate({ id: artifact.id })}
+                        disabled={scoreMutation.isPending}
+                        className="text-xs px-2 py-1 bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+                        data-testid={`button-score-${artifact.id}`}
+                      >
+                        Score
+                      </button>
+                    )}
+                    {artifact.status === "scored" && (
+                      <button
+                        onClick={() => narrateMutation.mutate({ id: artifact.id })}
+                        disabled={narrateMutation.isPending}
+                        className="text-xs px-2 py-1 bg-accent/20 text-accent hover:bg-accent/30 transition-colors"
+                        data-testid={`button-narrate-${artifact.id}`}
+                      >
+                        Narrate
+                      </button>
+                    )}
+                  </div>
+                  <ShareButtons
+                    compact
+                    url={getShareUrl(artifact.id)}
+                    title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
+                  />
                 </div>
               </CardContent>
             </Card>
