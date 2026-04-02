@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, desc, count, avg, sql } from "drizzle-orm";
+import { eq, desc, count, avg, sql, isNotNull } from "drizzle-orm";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -17,8 +17,8 @@ router.get("/dashboard/summary", async (req, res) => {
     topCreatorsResult,
   ] = await Promise.all([
     db.select({ count: count() }).from(artifactsTable),
-    db.select({ count: count() }).from(artifactsTable).where(eq(artifactsTable.status, "scored")),
-    db.select({ count: count() }).from(artifactsTable).where(eq(artifactsTable.status, "narrated")),
+    db.select({ count: count() }).from(artifactsTable).where(isNotNull(artifactsTable.scoredAt)),
+    db.select({ count: count() }).from(artifactsTable).where(isNotNull(artifactsTable.narratedAt)),
     db.select({ count: count() }).from(dropsTable),
     db.select({ count: count() }).from(dropsTable).where(eq(dropsTable.status, "published")),
     db.select({ avg: avg(artifactsTable.kannakaScore) }).from(artifactsTable),

@@ -87,7 +87,6 @@ router.post("/harvester/run", async (req, res) => {
 
         if (existing.length > 0) {
           duplicates++;
-          collected++;
           continue;
         }
 
