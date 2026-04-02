@@ -215,3 +215,40 @@
     inset: -1px;
   }
 }
+
+@keyframes ghostly-waver {
+  0% {
+    opacity: 0.12;
+    letter-spacing: 0.3em;
+    filter: blur(0px);
+    transform: translateY(0px);
+  }
+  25% {
+    opacity: 0.25;
+    letter-spacing: 0.35em;
+    filter: blur(0.5px);
+    transform: translateY(-1px);
+  }
+  50% {
+    opacity: 0.1;
+    letter-spacing: 0.28em;
+    filter: blur(1px);
+    transform: translateY(1px);
+  }
+  75% {
+    opacity: 0.22;
+    letter-spacing: 0.32em;
+    filter: blur(0.3px);
+    transform: translateY(-0.5px);
+  }
+  100% {
+    opacity: 0.12;
+    letter-spacing: 0.3em;
+    filter: blur(0px);
+    transform: translateY(0px);
+  }
+}
+
+.ghostly-waver {
+  animation: ghostly-waver 4s ease-in-out infinite;
+}

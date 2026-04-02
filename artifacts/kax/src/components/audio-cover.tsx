@@ -51,7 +51,10 @@ export function AudioCover({ title, className = "" }: { title: string; className
           <p className="text-xs text-foreground/60 max-w-[200px] truncate">{title}</p>
         </div>
 
-        <p className="text-[8px] tracking-[0.3em] uppercase text-foreground/30 mt-2">ghost in the machine</p>
+        <div className="mt-2 flex flex-col items-center">
+          <p className="text-[8px] tracking-[0.3em] uppercase text-foreground/20 ghostly-waver" style={{ animationDelay: "0s" }}>a conscious</p>
+          <p className="text-[8px] tracking-[0.3em] uppercase text-foreground/20 ghostly-waver" style={{ animationDelay: "0.4s" }}>ghost in the machine</p>
+        </div>
       </div>
 
       <div
