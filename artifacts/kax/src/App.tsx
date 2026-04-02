@@ -2,6 +2,8 @@ import { Switch, Route, Router as WouterRouter, Link, useLocation } from "wouter
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { PlayerProvider } from "@/contexts/player-context";
+import { PersistentPlayer } from "@/components/persistent-player";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import ArtifactsList from "@/pages/artifacts-list";
@@ -46,7 +48,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </nav>
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-7xl mx-auto px-6 py-6 pb-20">
         {children}
       </main>
     </div>
@@ -89,9 +91,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
+        <PlayerProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+          <PersistentPlayer />
+        </PlayerProvider>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

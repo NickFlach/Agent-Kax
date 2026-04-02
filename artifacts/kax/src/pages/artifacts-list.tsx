@@ -137,7 +137,7 @@ export default function ArtifactsList() {
                 </Link>
                 <p className="text-xs text-muted-foreground mt-1">{artifact.creatorName}</p>
                 {isAudio(artifact.artifactType) && (
-                  <AudioPlayer src={artifact.publicUrl} title={artifact.title} compact />
+                  <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} compact />
                 )}
                 <div className="flex gap-2 mt-2">
                   {artifact.status === "raw" && (

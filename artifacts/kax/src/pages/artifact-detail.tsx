@@ -95,7 +95,7 @@ export default function ArtifactDetail() {
             )}
           </div>
           {isAudio(artifact.artifactType) && (
-            <AudioPlayer src={artifact.publicUrl} title={artifact.title} />
+            <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} />
           )}
         </div>
 

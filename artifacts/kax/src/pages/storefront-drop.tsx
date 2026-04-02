@@ -90,7 +90,7 @@ export default function StorefrontDrop() {
                     )}
                   </div>
                   {isAudio(artifact.artifactType) && (
-                    <AudioPlayer src={artifact.publicUrl} title={artifact.title} />
+                    <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} />
                   )}
                 </div>
                 <div className={`${idx % 2 === 1 ? "lg:order-1" : ""} py-8`}>
