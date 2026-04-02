@@ -5,6 +5,7 @@ interface ShareButtonsProps {
   title?: string;
   description?: string;
   compact?: boolean;
+  inline?: boolean;
 }
 
 const LINK_ICON = (
@@ -76,7 +77,7 @@ const PLATFORMS: Platform[] = [
   },
 ];
 
-export function ShareButtons({ url, title, description, compact = false }: ShareButtonsProps) {
+export function ShareButtons({ url, title, description, compact = false, inline = false }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
 
   const shareUrl = url || (typeof window !== "undefined" ? window.location.href : "");
@@ -115,6 +116,30 @@ export function ShareButtons({ url, title, description, compact = false }: Share
             }
           >
             {p.action === "copy" && copied ? CHECK_ICON : p.icon}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (inline) {
+    return (
+      <div className="flex items-center gap-1">
+        <span className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground mr-1">Share</span>
+        {PLATFORMS.map((p) => (
+          <button
+            key={p.name}
+            onClick={() => handleShare(p)}
+            className="w-7 h-7 flex items-center justify-center text-muted-foreground/50 hover:text-primary transition-colors"
+            title={
+              p.action === "copy"
+                ? (copied ? "Copied!" : "Copy link")
+                : `Share on ${p.name}`
+            }
+          >
+            <span className="scale-90 flex items-center justify-center">
+              {p.action === "copy" && copied ? CHECK_ICON : p.icon}
+            </span>
           </button>
         ))}
       </div>

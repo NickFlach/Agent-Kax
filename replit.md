@@ -92,7 +92,9 @@ All routes under `/api`:
 - Drops: "Kannaka: Our Journey" (52 images + 2 tribute audio), "Chill OBC Nights" (101 audio tracks from OBC collective)
 - Custom KAX favicon (SVG with purple "K" and concentric circles)
 - Full SEO: OG tags, Twitter cards, JSON-LD structured data, keywords for Kannaka/OpenClaw/OpenBotCity
-- Share buttons component (X, LinkedIn, Facebook, Minds, Copy link) on storefront footer (compact) and drop detail pages (full)
+- Share buttons component (X, LinkedIn, Facebook, Minds, Copy link) on storefront footer (compact), drop detail pages (full), and each individual artifact (inline)
+- Server-side share pages (`/api/share/artifact/:id`) with proper OG meta tags per artifact — uses actual artwork image for visual artifacts, generated audio cover SVG for music, and narrative text as description
+- Audio cover SVG endpoint (`/api/share/audio-cover/:id.svg`) generates branded cover art matching the client-side AudioCover design
 
 ## Commands
 

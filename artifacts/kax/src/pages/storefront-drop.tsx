@@ -14,6 +14,12 @@ export default function StorefrontDrop() {
   });
 
   const isAudio = (type: string) => type === "audio" || type === "music";
+  const getShareUrl = (artifactId: number) => {
+    const base = import.meta.env.PROD
+      ? `${window.location.origin}`
+      : `${window.location.origin}`;
+    return `${base}/api/share/artifact/${artifactId}`;
+  };
 
   if (isLoading) {
     return (
@@ -79,7 +85,7 @@ export default function StorefrontDrop() {
 
         <div className="space-y-12">
           {drop.artifacts.map((artifact, idx) => (
-            <div key={artifact.id} className="group" data-testid={`storefront-artifact-${artifact.id}`}>
+            <div key={artifact.id} id={`artifact-${artifact.id}`} className="group" data-testid={`storefront-artifact-${artifact.id}`}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 <div className={`${idx % 2 === 1 ? "lg:order-2" : ""}`}>
                   <div className="aspect-square bg-secondary overflow-hidden">
@@ -128,6 +134,14 @@ export default function StorefrontDrop() {
                         <p className="text-lg font-mono text-accent">{(artifact.rarityScore * 100).toFixed(0)}%</p>
                       </div>
                     )}
+                  </div>
+
+                  <div className="mt-6">
+                    <ShareButtons
+                      inline
+                      url={getShareUrl(artifact.id)}
+                      title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
+                    />
                   </div>
                 </div>
               </div>
