@@ -2,6 +2,7 @@ import { useState } from "react";
 
 interface ShareButtonsProps {
   url?: string;
+  pageUrl?: string;
   title?: string;
   description?: string;
   compact?: boolean;
@@ -77,14 +78,15 @@ const PLATFORMS: Platform[] = [
   },
 ];
 
-export function ShareButtons({ url, title, description, compact = false, inline = false }: ShareButtonsProps) {
+export function ShareButtons({ url, pageUrl, title, description, compact = false, inline = false }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
 
   const shareUrl = url || (typeof window !== "undefined" ? window.location.href : "");
+  const copyUrl = pageUrl || (typeof window !== "undefined" ? window.location.href : "");
   const shareTitle = title || "KAX - Kannaka Artifact Exchange";
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(shareUrl).then(() => {
+    navigator.clipboard.writeText(copyUrl).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

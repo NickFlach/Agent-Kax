@@ -10,4 +10,5 @@ export interface HarvesterResult {
   harvested: number;
   newArtifacts: number;
   duplicates: number;
+  paired?: number;
 }

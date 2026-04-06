@@ -174,6 +174,7 @@ export default function ArtifactsList() {
                   <ShareButtons
                     compact
                     url={getShareUrl(artifact.id)}
+                    pageUrl={`${window.location.origin}/artifacts/${artifact.id}`}
                     title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
                   />
                 </div>

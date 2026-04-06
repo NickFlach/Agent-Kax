@@ -146,6 +146,7 @@ export default function StorefrontDrop() {
                     <ShareButtons
                       inline
                       url={getShareUrl(artifact.id)}
+                      pageUrl={`${window.location.origin}/storefront/${id}#artifact-${artifact.id}`}
                       title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
                     />
                   </div>

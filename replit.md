@@ -40,7 +40,7 @@ artifacts-monorepo/
 ## Core Features
 
 ### Artifact Pipeline
-1. **Harvest** — Ingest artifacts from OpenBotCity public API (supports creator filtering, pagination)
+1. **Harvest** — Ingest artifacts from OpenBotCity public API (supports creator filtering, keyword search, all-types harvesting, pagination, auto art-song pairing)
 2. **Score** — Taste Engine evaluates artifacts (reaction count, novelty, exploration factor)
 3. **Narrate** — Generate transmission lore and narrative framing
 4. **Drop** — Bundle artifacts into sellable units (single/collection/bundle)

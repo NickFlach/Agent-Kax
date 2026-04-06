@@ -413,7 +413,7 @@ export const runHarvesterBodyMinReactionsDefault = 0;
 
 export const RunHarvesterBody = zod.object({
   type: zod
-    .enum(["image", "audio", "text", "music", "furniture"])
+    .enum(["image", "audio", "text", "music", "furniture", "all"])
     .default(runHarvesterBodyTypeDefault),
   limit: zod.number().default(runHarvesterBodyLimitDefault),
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
@@ -421,12 +421,17 @@ export const RunHarvesterBody = zod.object({
     .string()
     .optional()
     .describe("Filter by creator display name (case-insensitive match)"),
+  keyword: zod
+    .string()
+    .optional()
+    .describe("Filter by keyword in artifact title (case-insensitive match)"),
 });
 
 export const RunHarvesterResponse = zod.object({
   harvested: zod.number(),
   newArtifacts: zod.number(),
   duplicates: zod.number(),
+  paired: zod.number().optional(),
 });
 
 /**

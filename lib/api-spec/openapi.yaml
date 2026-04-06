@@ -607,7 +607,7 @@ components:
       properties:
         type:
           type: string
-          enum: [image, audio, text, music, furniture]
+          enum: [image, audio, text, music, furniture, all]
           default: image
         limit:
           type: integer
@@ -618,6 +618,9 @@ components:
         creator:
           type: string
           description: Filter by creator display name (case-insensitive match)
+        keyword:
+          type: string
+          description: Filter by keyword in artifact title (case-insensitive match)
 
     HarvesterResult:
       type: object
@@ -627,6 +630,8 @@ components:
         newArtifacts:
           type: integer
         duplicates:
+          type: integer
+        paired:
           type: integer
       required:
         - harvested

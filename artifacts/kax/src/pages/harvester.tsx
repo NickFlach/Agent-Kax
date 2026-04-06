@@ -5,11 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function Harvester() {
-  const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture">("image");
+  const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture" | "all">("image");
   const [limit, setLimit] = useState("20");
   const [minReactions, setMinReactions] = useState("0");
   const [creator, setCreator] = useState("");
-  const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number } | null>(null);
+  const [keyword, setKeyword] = useState("");
+  const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number; paired?: number } | null>(null);
 
   const mutation = useRunHarvester({
     mutation: {
@@ -32,13 +33,15 @@ export default function Harvester() {
           <CardContent className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Artifact Type</label>
-              <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture")}>
+              <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture" | "all")}>
                 <SelectTrigger data-testid="select-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
                   <SelectItem value="image">Image</SelectItem>
                   <SelectItem value="audio">Audio</SelectItem>
+                  <SelectItem value="music">Music</SelectItem>
                   <SelectItem value="text">Text</SelectItem>
                   <SelectItem value="furniture">Furniture</SelectItem>
                 </SelectContent>
@@ -79,6 +82,17 @@ export default function Harvester() {
               />
             </div>
 
+            <div>
+              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Keyword Search</label>
+              <Input
+                type="text"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="e.g. journey, still here (leave empty for all)"
+                data-testid="input-keyword"
+              />
+            </div>
+
             <button
               onClick={() => {
                 mutation.mutate({
@@ -87,6 +101,7 @@ export default function Harvester() {
                     limit: parseInt(limit) || 20,
                     minReactions: parseInt(minReactions) || 0,
                     ...(creator.trim() ? { creator: creator.trim() } : {}),
+                    ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
                   },
                 });
               }}
@@ -115,7 +130,7 @@ export default function Harvester() {
 
             {lastResult && !mutation.isPending && (
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                   <div>
                     <p className="text-3xl font-bold font-mono text-primary" data-testid="text-harvested">{lastResult.harvested}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Processed</p>
@@ -128,6 +143,12 @@ export default function Harvester() {
                     <p className="text-3xl font-bold font-mono text-muted-foreground" data-testid="text-duplicates">{lastResult.duplicates}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Duplicates</p>
                   </div>
+                  {lastResult.paired !== undefined && (
+                    <div>
+                      <p className="text-3xl font-bold font-mono text-blue-400" data-testid="text-paired">{lastResult.paired}</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Paired</p>
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-center text-muted-foreground mt-4">
                   Head to the Artifacts page to view and process the harvested items.

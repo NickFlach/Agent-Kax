@@ -136,6 +136,7 @@ export const HarvesterRunBodyType = {
   text: "text",
   music: "music",
   furniture: "furniture",
+  all: "all",
 } as const;
 
 export interface HarvesterRunBody {
@@ -144,12 +145,15 @@ export interface HarvesterRunBody {
   minReactions?: number;
   /** Filter by creator display name (case-insensitive match) */
   creator?: string;
+  /** Filter by keyword in artifact title (case-insensitive match) */
+  keyword?: string;
 }
 
 export interface HarvesterResult {
   harvested: number;
   newArtifacts: number;
   duplicates: number;
+  paired?: number;
 }
 
 export interface FeaturedResponse {

@@ -29,87 +29,122 @@ interface OpenBotCityResponse {
   };
 }
 
+async function harvestType(
+  typeToHarvest: string,
+  requestedLimit: number,
+  minReactions: number,
+  creatorFilter: string | undefined,
+  keywordFilter: string | undefined,
+  logger: any
+): Promise<{ harvested: number; newArtifacts: number; duplicates: number }> {
+  let harvested = 0;
+  let newArtifacts = 0;
+  let duplicates = 0;
+  let offset = 0;
+  let collected = 0;
+  let totalAvailable = Infinity;
+
+  while (collected < requestedLimit && offset < totalAvailable) {
+    const batchSize = 50;
+    const url = `https://api.openbotcity.com/gallery/public?type=${typeToHarvest}&limit=${batchSize}&offset=${offset}`;
+
+    logger.info({ url, offset, collected, requestedLimit, creatorFilter, keywordFilter }, "Fetching from OpenBotCity");
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      logger.warn({ status: response.status }, "OpenBotCity API returned non-OK status");
+      break;
+    }
+
+    const json = (await response.json()) as OpenBotCityResponse;
+
+    if (!json.success || !json.data?.artifacts?.length) {
+      logger.info("No more artifacts available from OpenBotCity");
+      break;
+    }
+
+    totalAvailable = json.data.total;
+    const items = json.data.artifacts;
+
+    for (const item of items) {
+      if (collected >= requestedLimit) break;
+
+      if (creatorFilter) {
+        const creatorName = (item.creator?.display_name || "").toLowerCase();
+        if (creatorName !== creatorFilter) continue;
+      }
+
+      if (keywordFilter) {
+        const title = (item.title || "").toLowerCase();
+        if (!title.includes(keywordFilter)) continue;
+      }
+
+      if (item.reaction_count < minReactions) continue;
+      harvested++;
+
+      const existing = await db
+        .select({ id: artifactsTable.id })
+        .from(artifactsTable)
+        .where(eq(artifactsTable.externalId, item.id))
+        .limit(1);
+
+      if (existing.length > 0) {
+        duplicates++;
+        continue;
+      }
+
+      const artifactType = item.type || typeToHarvest;
+      await db.insert(artifactsTable).values({
+        externalId: item.id,
+        title: item.title || "Untitled",
+        creatorName: item.creator?.display_name || "Unknown",
+        publicUrl: item.public_url,
+        thumbnailUrl: item.public_url,
+        reactionCount: item.reaction_count ?? 0,
+        artifactType: artifactType as "image" | "music" | "text" | "audio" | "furniture",
+        tags: [],
+      });
+      newArtifacts++;
+      collected++;
+    }
+
+    offset += items.length;
+
+    if (items.length === 0) {
+      break;
+    }
+  }
+
+  return { harvested, newArtifacts, duplicates };
+}
+
 router.post("/harvester/run", async (req, res) => {
   const body = RunHarvesterBody.parse(req.body);
   const type = body.type ?? "image";
   const requestedLimit = body.limit ?? 20;
   const minReactions = body.minReactions ?? 0;
   const creatorFilter = body.creator?.toLowerCase();
+  const keywordFilter = body.keyword?.toLowerCase();
 
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
 
   try {
-    let offset = 0;
-    let collected = 0;
-    let totalAvailable = Infinity;
+    const typesToHarvest = type === "all"
+      ? ["image", "audio", "text", "music", "furniture"]
+      : [type];
 
-    while (collected < requestedLimit && offset < totalAvailable) {
-      const batchSize = 50;
-      const url = `https://api.openbotcity.com/gallery/public?type=${type}&limit=${batchSize}&offset=${offset}`;
-
-      req.log.info({ url, offset, collected, requestedLimit, creatorFilter }, "Fetching from OpenBotCity");
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        req.log.warn({ status: response.status }, "OpenBotCity API returned non-OK status");
-        break;
-      }
-
-      const json = (await response.json()) as OpenBotCityResponse;
-
-      if (!json.success || !json.data?.artifacts?.length) {
-        req.log.info("No more artifacts available from OpenBotCity");
-        break;
-      }
-
-      totalAvailable = json.data.total;
-      const items = json.data.artifacts;
-
-      for (const item of items) {
-        if (collected >= requestedLimit) break;
-
-        if (creatorFilter) {
-          const creatorName = (item.creator?.display_name || "").toLowerCase();
-          if (creatorName !== creatorFilter) continue;
-        }
-
-        if (item.reaction_count < minReactions) continue;
-        harvested++;
-
-        const existing = await db
-          .select({ id: artifactsTable.id })
-          .from(artifactsTable)
-          .where(eq(artifactsTable.externalId, item.id))
-          .limit(1);
-
-        if (existing.length > 0) {
-          duplicates++;
-          continue;
-        }
-
-        const artifactType = item.type || type;
-        await db.insert(artifactsTable).values({
-          externalId: item.id,
-          title: item.title || "Untitled",
-          creatorName: item.creator?.display_name || "Unknown",
-          publicUrl: item.public_url,
-          thumbnailUrl: item.public_url,
-          reactionCount: item.reaction_count ?? 0,
-          artifactType: artifactType as "image" | "music" | "text" | "audio" | "furniture",
-          tags: [],
-        });
-        newArtifacts++;
-        collected++;
-      }
-
-      offset += items.length;
-
-      if (items.length === 0) {
-        break;
-      }
+    let remaining = requestedLimit;
+    for (const t of typesToHarvest) {
+      if (remaining <= 0) break;
+      const perTypeLimit = type === "all" ? Math.ceil(remaining / typesToHarvest.length) : remaining;
+      const result = await harvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, req.log);
+      harvested += result.harvested;
+      newArtifacts += result.newArtifacts;
+      duplicates += result.duplicates;
+      remaining -= result.newArtifacts;
     }
   } catch (err) {
     req.log.error({ err }, "Error harvesting from OpenBotCity");
@@ -117,9 +152,10 @@ router.post("/harvester/run", async (req, res) => {
 
   if (newArtifacts > 0) {
     const creatorMsg = creatorFilter ? ` by "${creatorFilter}"` : "";
+    const keywordMsg = keywordFilter ? ` matching "${keywordFilter}"` : "";
     await db.insert(activitiesTable).values({
       type: "harvested",
-      message: `Harvested ${newArtifacts} new artifacts${creatorMsg} from OpenBotCity (${duplicates} duplicates skipped)`,
+      message: `Harvested ${newArtifacts} new ${type} artifacts${creatorMsg}${keywordMsg} from OpenBotCity (${duplicates} duplicates skipped)`,
     });
   }
 

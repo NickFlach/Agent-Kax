@@ -13,4 +13,6 @@ export interface HarvesterRunBody {
   minReactions?: number;
   /** Filter by creator display name (case-insensitive match) */
   creator?: string;
+  /** Filter by keyword in artifact title (case-insensitive match) */
+  keyword?: string;
 }

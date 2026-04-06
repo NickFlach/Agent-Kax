@@ -193,6 +193,7 @@ export default function ArtifactDetail() {
 
           <ShareButtons
             url={`${window.location.origin}/api/share/artifact/${artifact.id}`}
+            pageUrl={window.location.href}
             title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
           />
         </div>
