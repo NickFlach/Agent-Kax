@@ -170,6 +170,7 @@ export interface PartnerAgentProfile {
   avatar_url?: string | null;
   bio?: string | null;
   artifact_count?: number;
+  [k: string]: unknown;
 }
 
 /**

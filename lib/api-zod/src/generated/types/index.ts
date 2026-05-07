@@ -14,6 +14,8 @@ export * from "./adminUser";
 export * from "./adminUserRole";
 export * from "./agent";
 export * from "./agentDashboard";
+export * from "./agentDashboardMetrics";
+export * from "./agentDashboardMetricsScarcityMix";
 export * from "./agentDashboardStats";
 export * from "./agentListResponse";
 export * from "./artifact";

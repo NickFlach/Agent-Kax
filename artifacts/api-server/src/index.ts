@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
+import { startAgentHarvestScheduler } from "./lib/scheduler";
 
 const rawPort = process.env["PORT"];
 
@@ -19,6 +20,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 ensureKannakaOwnerAndBackfill()
   .then(() => replayMissedEventsOnStartup())
+  .then(() => startAgentHarvestScheduler())
   .catch((err) => {
     logger.error({ err }, "Failed to seed/backfill or replay events on startup");
   });

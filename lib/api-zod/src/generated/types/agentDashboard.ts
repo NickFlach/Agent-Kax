@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Agent } from "./agent";
+import type { AgentDashboardMetrics } from "./agentDashboardMetrics";
 import type { AgentDashboardStats } from "./agentDashboardStats";
 import type { Artifact } from "./artifact";
 
 export interface AgentDashboard {
   agent: Agent;
   stats: AgentDashboardStats;
+  metrics: AgentDashboardMetrics;
   recentArtifacts: Artifact[];
 }

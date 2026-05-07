@@ -15,7 +15,7 @@ import {
   AddArtifactToDropBody,
   RemoveArtifactFromDropParams,
 } from "@workspace/api-zod";
-import { canMutate, requireAuth } from "../middlewares/requireAuth";
+import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -93,12 +93,17 @@ router.get("/drops/suggestions", requireAuth, async (req, res) => {
   res.json({ suggestions });
 });
 
-router.get("/drops", async (req, res) => {
+router.get("/drops", requireAuth, async (req, res) => {
   const query = ListDropsQueryParams.parse(req.query);
   const conditions = [];
 
   if (query.status) {
     conditions.push(eq(dropsTable.status, query.status));
+  }
+
+  const ownerScope = await getOwnerScope(req);
+  if (ownerScope !== null) {
+    conditions.push(eq(dropsTable.ownerId, ownerScope));
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

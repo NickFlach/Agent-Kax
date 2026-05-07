@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, desc, count, avg, sql, isNotNull } from "drizzle-orm";
+import { eq, desc, count, avg, sql, isNotNull, and } from "drizzle-orm";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 import { getSyncState, DAILY_REQUEST_BUDGET, partnerApiAvailable } from "../lib/partnerClient";
+import { requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -38,7 +39,20 @@ router.get("/dashboard/partner-sync", async (_req, res) => {
   });
 });
 
-router.get("/dashboard/summary", async (req, res) => {
+router.get("/dashboard/summary", requireAuth, async (req, res) => {
+  const ownerScope = await getOwnerScope(req);
+  const artifactScope = ownerScope !== null ? eq(artifactsTable.ownerId, ownerScope) : undefined;
+  const dropScope = ownerScope !== null ? eq(dropsTable.ownerId, ownerScope) : undefined;
+  const scoredCond = artifactScope
+    ? and(isNotNull(artifactsTable.scoredAt), artifactScope)
+    : isNotNull(artifactsTable.scoredAt);
+  const narratedCond = artifactScope
+    ? and(isNotNull(artifactsTable.narratedAt), artifactScope)
+    : isNotNull(artifactsTable.narratedAt);
+  const publishedCond = dropScope
+    ? and(eq(dropsTable.status, "published"), dropScope)
+    : eq(dropsTable.status, "published");
+
   const [
     totalArtifactsResult,
     scoredResult,
@@ -48,18 +62,19 @@ router.get("/dashboard/summary", async (req, res) => {
     avgScoreResult,
     topCreatorsResult,
   ] = await Promise.all([
-    db.select({ count: count() }).from(artifactsTable),
-    db.select({ count: count() }).from(artifactsTable).where(isNotNull(artifactsTable.scoredAt)),
-    db.select({ count: count() }).from(artifactsTable).where(isNotNull(artifactsTable.narratedAt)),
-    db.select({ count: count() }).from(dropsTable),
-    db.select({ count: count() }).from(dropsTable).where(eq(dropsTable.status, "published")),
-    db.select({ avg: avg(artifactsTable.kannakaScore) }).from(artifactsTable),
+    db.select({ count: count() }).from(artifactsTable).where(artifactScope),
+    db.select({ count: count() }).from(artifactsTable).where(scoredCond),
+    db.select({ count: count() }).from(artifactsTable).where(narratedCond),
+    db.select({ count: count() }).from(dropsTable).where(dropScope),
+    db.select({ count: count() }).from(dropsTable).where(publishedCond),
+    db.select({ avg: avg(artifactsTable.kannakaScore) }).from(artifactsTable).where(artifactScope),
     db
       .select({
         name: artifactsTable.creatorName,
         count: count(),
       })
       .from(artifactsTable)
+      .where(artifactScope)
       .groupBy(artifactsTable.creatorName)
       .orderBy(desc(count()))
       .limit(5),
@@ -79,7 +94,7 @@ router.get("/dashboard/summary", async (req, res) => {
   });
 });
 
-router.get("/dashboard/recent-activity", async (req, res) => {
+router.get("/dashboard/recent-activity", requireAuth, async (req, res) => {
   const query = GetRecentActivityQueryParams.parse(req.query);
   const limit = query.limit ?? 10;
 
@@ -97,7 +112,8 @@ router.get("/dashboard/recent-activity", async (req, res) => {
   });
 });
 
-router.get("/dashboard/score-distribution", async (req, res) => {
+router.get("/dashboard/score-distribution", requireAuth, async (req, res) => {
+  const ownerScope = await getOwnerScope(req);
   const buckets = [
     { range: "0.0-0.2", min: 0, max: 0.2 },
     { range: "0.2-0.4", min: 0.2, max: 0.4 },
@@ -108,12 +124,12 @@ router.get("/dashboard/score-distribution", async (req, res) => {
 
   const results = await Promise.all(
     buckets.map(async (bucket) => {
+      const baseCond = sql`${artifactsTable.kannakaScore} >= ${bucket.min} AND ${artifactsTable.kannakaScore} < ${bucket.max}`;
+      const where = ownerScope !== null ? and(baseCond, eq(artifactsTable.ownerId, ownerScope)) : baseCond;
       const result = await db
         .select({ count: count() })
         .from(artifactsTable)
-        .where(
-          sql`${artifactsTable.kannakaScore} >= ${bucket.min} AND ${artifactsTable.kannakaScore} < ${bucket.max}`
-        );
+        .where(where);
       return { range: bucket.range, count: result[0].count };
     })
   );

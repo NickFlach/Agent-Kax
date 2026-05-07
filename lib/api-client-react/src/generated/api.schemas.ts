@@ -320,9 +320,22 @@ export type AgentDashboardStats = {
   droppedArtifacts: number;
 };
 
+export type AgentDashboardMetricsScarcityMix = {
+  open: number;
+  limited: number;
+  oneOfOne: number;
+};
+
+export type AgentDashboardMetrics = {
+  /** @nullable */
+  averageScore: number | null;
+  scarcityMix: AgentDashboardMetricsScarcityMix;
+};
+
 export interface AgentDashboard {
   agent: Agent;
   stats: AgentDashboardStats;
+  metrics: AgentDashboardMetrics;
   recentArtifacts: Artifact[];
 }
 

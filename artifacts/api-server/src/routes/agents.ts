@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { agentsTable, artifactsTable, type Agent } from "@workspace/db/schema";
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, count, avg } from "drizzle-orm";
 import {
   CreateAgentBody,
   GetAgentParams,
@@ -67,6 +67,7 @@ router.post("/agents", requireAuth, async (req, res) => {
 
   let displayName = body.displayName ?? slug;
   let avatarUrl: string | null = null;
+  let profileJson: Record<string, unknown> | null = null;
   try {
     const profile = await getPartnerAgent(slug);
     if (!profile) {
@@ -75,6 +76,7 @@ router.post("/agents", requireAuth, async (req, res) => {
     }
     displayName = body.displayName?.trim() || profile.display_name || slug;
     avatarUrl = profile.avatar_url ?? null;
+    profileJson = { ...profile };
   } catch (err) {
     if (err instanceof PartnerApiError) {
       req.log.warn({ err, slug }, "Partner API error while validating agent");
@@ -90,6 +92,7 @@ router.post("/agents", requireAuth, async (req, res) => {
       slug,
       displayName,
       avatarUrl,
+      profileJson,
       ownerId: req.user!.id,
     })
     .returning();
@@ -112,29 +115,55 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
     return;
   }
 
-  const [statsRow] = await db
-    .select({ total: count() })
-    .from(artifactsTable)
-    .where(eq(artifactsTable.agentId, agent.id));
-  const scoredRow = await db
-    .select({ total: count() })
-    .from(artifactsTable)
-    .where(and(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.status, "scored")));
-  const narratedRow = await db
-    .select({ total: count() })
-    .from(artifactsTable)
-    .where(and(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.status, "narrated")));
-  const droppedRow = await db
-    .select({ total: count() })
-    .from(artifactsTable)
-    .where(and(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.status, "dropped")));
+  const agentScope = eq(artifactsTable.agentId, agent.id);
+  const [
+    [statsRow],
+    scoredRow,
+    narratedRow,
+    droppedRow,
+    [avgRow],
+    scarcityRows,
+    recent,
+  ] = await Promise.all([
+    db.select({ total: count() }).from(artifactsTable).where(agentScope),
+    db
+      .select({ total: count() })
+      .from(artifactsTable)
+      .where(and(agentScope, eq(artifactsTable.status, "scored"))),
+    db
+      .select({ total: count() })
+      .from(artifactsTable)
+      .where(and(agentScope, eq(artifactsTable.status, "narrated"))),
+    db
+      .select({ total: count() })
+      .from(artifactsTable)
+      .where(and(agentScope, eq(artifactsTable.status, "dropped"))),
+    db
+      .select({ avg: avg(artifactsTable.kannakaScore) })
+      .from(artifactsTable)
+      .where(agentScope),
+    db
+      .select({
+        editionType: artifactsTable.editionType,
+        total: count(),
+      })
+      .from(artifactsTable)
+      .where(agentScope)
+      .groupBy(artifactsTable.editionType),
+    db
+      .select()
+      .from(artifactsTable)
+      .where(agentScope)
+      .orderBy(desc(artifactsTable.ingestedAt))
+      .limit(12),
+  ]);
 
-  const recent = await db
-    .select()
-    .from(artifactsTable)
-    .where(eq(artifactsTable.agentId, agent.id))
-    .orderBy(desc(artifactsTable.ingestedAt))
-    .limit(12);
+  const scarcityMix = { open: 0, limited: 0, oneOfOne: 0 };
+  for (const row of scarcityRows) {
+    if (row.editionType === "open") scarcityMix.open = row.total;
+    else if (row.editionType === "limited") scarcityMix.limited = row.total;
+    else if (row.editionType === "1_of_1") scarcityMix.oneOfOne = row.total;
+  }
 
   res.json({
     agent: formatAgent(agent),
@@ -143,6 +172,10 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
       scoredArtifacts: scoredRow[0].total,
       narratedArtifacts: narratedRow[0].total,
       droppedArtifacts: droppedRow[0].total,
+    },
+    metrics: {
+      averageScore: avgRow.avg !== null ? Number(avgRow.avg) : null,
+      scarcityMix,
     },
     recentArtifacts: recent.map(formatArtifact),
   });

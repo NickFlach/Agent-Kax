@@ -48,7 +48,7 @@ export default function AgentDetail() {
     );
   }
 
-  const { agent, stats, recentArtifacts } = data;
+  const { agent, stats, metrics, recentArtifacts } = data;
 
   return (
     <div className="space-y-6">
@@ -86,6 +86,52 @@ export default function AgentDetail() {
         <StatCard label="Scored" value={stats.scoredArtifacts} />
         <StatCard label="Narrated" value={stats.narratedArtifacts} />
         <StatCard label="Dropped" value={stats.droppedArtifacts} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Average Score
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold font-mono text-primary" data-testid="stat-avg-score">
+              {metrics.averageScore !== null
+                ? `${(metrics.averageScore * 100).toFixed(0)}%`
+                : "—"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+              Scarcity Mix
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-xl font-bold font-mono" data-testid="stat-mix-open">
+                  {metrics.scarcityMix.open}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Open</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold font-mono text-accent" data-testid="stat-mix-limited">
+                  {metrics.scarcityMix.limited}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Limited</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold font-mono text-primary" data-testid="stat-mix-oneofone">
+                  {metrics.scarcityMix.oneOfOne}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">1-of-1</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>

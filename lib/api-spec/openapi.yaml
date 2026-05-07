@@ -1165,7 +1165,7 @@ components:
 
     AgentDashboard:
       type: object
-      required: [agent, stats, recentArtifacts]
+      required: [agent, stats, metrics, recentArtifacts]
       properties:
         agent:
           $ref: "#/components/schemas/Agent"
@@ -1181,6 +1181,22 @@ components:
               type: integer
             droppedArtifacts:
               type: integer
+        metrics:
+          type: object
+          required: [averageScore, scarcityMix]
+          properties:
+            averageScore:
+              type: [number, "null"]
+            scarcityMix:
+              type: object
+              required: [open, limited, oneOfOne]
+              properties:
+                open:
+                  type: integer
+                limited:
+                  type: integer
+                oneOfOne:
+                  type: integer
         recentArtifacts:
           type: array
           items:

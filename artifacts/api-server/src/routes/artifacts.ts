@@ -8,14 +8,19 @@ import {
   ScoreArtifactParams,
   NarrateArtifactParams,
 } from "@workspace/api-zod";
-import { canMutate, requireAuth } from "../middlewares/requireAuth";
+import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 import { computeScore } from "../lib/tasteEngine";
 
 const router: IRouter = Router();
 
-router.get("/artifacts", async (req, res) => {
+router.get("/artifacts", requireAuth, async (req, res) => {
   const query = ListArtifactsQueryParams.parse(req.query);
   const conditions = [];
+
+  const ownerScope = await getOwnerScope(req);
+  if (ownerScope !== null) {
+    conditions.push(eq(artifactsTable.ownerId, ownerScope));
+  }
 
   if (query.status) {
     conditions.push(eq(artifactsTable.status, query.status));

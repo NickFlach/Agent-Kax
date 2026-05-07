@@ -41,3 +41,22 @@ export async function canMutate(req: Request, ownerId: string | null): Promise<b
   if (user.role === "admin") return true;
   return ownerId !== null && ownerId === user.id;
 }
+
+/**
+ * Determine which ownerId(s) a list/aggregate endpoint should be scoped to.
+ * Regular users always see only their own data. Admins see only their own data
+ * by default, but can pass `?all=true` to query across every user.
+ *
+ * Returns `null` to indicate "no owner filter" (admin + all=true). Otherwise
+ * returns the user id to scope by.
+ *
+ * Must be called *after* `requireAuth` middleware.
+ */
+export async function getOwnerScope(req: Request): Promise<string | null> {
+  const userId = req.user!.id;
+  const wantsAll = req.query["all"] === "true";
+  if (!wantsAll) return userId;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (user?.role === "admin") return null;
+  return userId;
+}

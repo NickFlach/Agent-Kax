@@ -194,6 +194,14 @@ export const GetAgentResponse = zod.object({
     narratedArtifacts: zod.number(),
     droppedArtifacts: zod.number(),
   }),
+  metrics: zod.object({
+    averageScore: zod.number().nullable(),
+    scarcityMix: zod.object({
+      open: zod.number(),
+      limited: zod.number(),
+      oneOfOne: zod.number(),
+    }),
+  }),
   recentArtifacts: zod.array(
     zod.object({
       id: zod.number(),
