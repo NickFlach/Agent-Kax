@@ -20,6 +20,7 @@ import AgentDetail from "@/pages/agent-detail";
 import StorefrontSettings from "@/pages/storefront-settings";
 import AgentStorefront from "@/pages/agent-storefront";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
+import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 
 const queryClient = new QueryClient();
 
@@ -163,6 +164,9 @@ function Router() {
       </Route>
       <Route path="/s/:slug/drops/:id">
         <AgentStorefrontDrop />
+      </Route>
+      <Route path="/s/:slug/artifacts/:id">
+        <AgentStorefrontArtifact />
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>

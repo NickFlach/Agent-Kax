@@ -3012,6 +3012,105 @@ export function useGetAgentStorefrontDrops<
 }
 
 /**
+ * @summary A single published artifact for an agent
+ */
+export const getGetAgentStorefrontArtifactUrl = (slug: string, id: number) => {
+  return `/api/storefront/by-agent/${slug}/artifacts/${id}`;
+};
+
+export const getAgentStorefrontArtifact = async (
+  slug: string,
+  id: number,
+  options?: RequestInit,
+): Promise<Artifact> => {
+  return customFetch<Artifact>(getGetAgentStorefrontArtifactUrl(slug, id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAgentStorefrontArtifactQueryKey = (
+  slug: string,
+  id: number,
+) => {
+  return [`/api/storefront/by-agent/${slug}/artifacts/${id}`] as const;
+};
+
+export const getGetAgentStorefrontArtifactQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentStorefrontArtifact>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontArtifact>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentStorefrontArtifactQueryKey(slug, id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentStorefrontArtifact>>
+  > = ({ signal }) =>
+    getAgentStorefrontArtifact(slug, id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(slug && id),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStorefrontArtifact>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentStorefrontArtifactQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentStorefrontArtifact>>
+>;
+export type GetAgentStorefrontArtifactQueryError = ErrorType<unknown>;
+
+/**
+ * @summary A single published artifact for an agent
+ */
+
+export function useGetAgentStorefrontArtifact<
+  TData = Awaited<ReturnType<typeof getAgentStorefrontArtifact>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontArtifact>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentStorefrontArtifactQueryOptions(
+    slug,
+    id,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary A published drop for an agent
  */
 export const getGetAgentStorefrontDropUrl = (slug: string, id: number) => {

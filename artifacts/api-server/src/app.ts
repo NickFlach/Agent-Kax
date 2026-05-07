@@ -45,6 +45,12 @@ app.use((req, res, next) => {
 });
 app.use(authMiddleware);
 
+app.get(/^\/storefront(?:\/(\d+))?\/?$/, (req, res) => {
+  const dropId = req.params[0];
+  const target = dropId ? `/s/kannaka/drops/${dropId}` : "/s/kannaka";
+  res.redirect(301, target);
+});
+
 app.use("/api", router);
 
 export default app;

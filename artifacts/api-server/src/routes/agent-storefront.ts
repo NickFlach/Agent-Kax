@@ -8,7 +8,7 @@ import {
   type AgentStorefrontSettings,
   type Agent,
 } from "@workspace/db/schema";
-import { eq, and, desc, count, isNotNull } from "drizzle-orm";
+import { eq, and, desc, count, isNotNull, inArray } from "drizzle-orm";
 import {
   GetAgentStorefrontSettingsParams,
   UpdateAgentStorefrontSettingsParams,
@@ -17,6 +17,7 @@ import {
   GetAgentStorefrontDropsParams,
   GetAgentStorefrontDropsQueryParams,
   GetAgentStorefrontDropParams,
+  GetAgentStorefrontArtifactParams,
 } from "@workspace/api-zod";
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
 import { formatArtifact } from "./artifacts";
@@ -200,6 +201,12 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
     return;
   }
 
+  const agentDropIdsRows = await db
+    .selectDistinct({ dropId: artifactsTable.dropId })
+    .from(artifactsTable)
+    .where(and(eq(artifactsTable.agentId, agent.id), isNotNull(artifactsTable.dropId)));
+  const agentDropIds = agentDropIdsRows.map((r) => r.dropId).filter((id): id is number => id !== null);
+
   const [settingsRow, featuredRows, latestDropRow] = await Promise.all([
     loadSettingsForAgent(agent.id),
     db
@@ -208,12 +215,14 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
       .where(and(eq(artifactsTable.agentId, agent.id), isNotNull(artifactsTable.kannakaScore)))
       .orderBy(desc(artifactsTable.kannakaScore))
       .limit(6),
-    db
-      .select()
-      .from(dropsTable)
-      .where(and(eq(dropsTable.status, "published"), eq(dropsTable.ownerId, agent.ownerId)))
-      .orderBy(desc(dropsTable.publishedAt))
-      .limit(1),
+    agentDropIds.length > 0
+      ? db
+          .select()
+          .from(dropsTable)
+          .where(and(eq(dropsTable.status, "published"), inArray(dropsTable.id, agentDropIds)))
+          .orderBy(desc(dropsTable.publishedAt))
+          .limit(1)
+      : Promise.resolve([] as Array<typeof dropsTable.$inferSelect>),
   ]);
 
   let latestDropWithArtifacts:
@@ -224,7 +233,7 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
     const dropArtifacts = await db
       .select()
       .from(artifactsTable)
-      .where(eq(artifactsTable.dropId, d.id));
+      .where(and(eq(artifactsTable.dropId, d.id), eq(artifactsTable.agentId, agent.id)));
     latestDropWithArtifacts = {
       ...d,
       artifacts: dropArtifacts.map(formatArtifact),
@@ -250,16 +259,27 @@ router.get("/storefront/by-agent/:slug/drops", async (req, res) => {
     return;
   }
 
-  const ownerScope = and(eq(dropsTable.status, "published"), eq(dropsTable.ownerId, agent.ownerId));
+  const agentDropIdsRows = await db
+    .selectDistinct({ dropId: artifactsTable.dropId })
+    .from(artifactsTable)
+    .where(and(eq(artifactsTable.agentId, agent.id), isNotNull(artifactsTable.dropId)));
+  const agentDropIds = agentDropIdsRows.map((r) => r.dropId).filter((id): id is number => id !== null);
+
+  if (agentDropIds.length === 0) {
+    res.json({ drops: [], total: 0 });
+    return;
+  }
+
+  const agentScope = and(eq(dropsTable.status, "published"), inArray(dropsTable.id, agentDropIds));
   const [drops, totalResult] = await Promise.all([
     db
       .select()
       .from(dropsTable)
-      .where(ownerScope)
+      .where(agentScope)
       .orderBy(desc(dropsTable.publishedAt))
       .limit(query.limit)
       .offset(query.offset),
-    db.select({ count: count() }).from(dropsTable).where(ownerScope),
+    db.select({ count: count() }).from(dropsTable).where(agentScope),
   ]);
 
   const dropsWithArtifacts = await Promise.all(
@@ -267,7 +287,7 @@ router.get("/storefront/by-agent/:slug/drops", async (req, res) => {
       const artifacts = await db
         .select()
         .from(artifactsTable)
-        .where(eq(artifactsTable.dropId, drop.id));
+        .where(and(eq(artifactsTable.dropId, drop.id), eq(artifactsTable.agentId, agent.id)));
       return {
         ...drop,
         artifacts: artifacts.map(formatArtifact),
@@ -290,7 +310,7 @@ router.get("/storefront/by-agent/:slug/drops/:id", async (req, res) => {
   const [drop] = await db
     .select()
     .from(dropsTable)
-    .where(and(eq(dropsTable.id, id), eq(dropsTable.ownerId, agent.ownerId)))
+    .where(eq(dropsTable.id, id))
     .limit(1);
   if (!drop || drop.status !== "published") {
     res.status(404).json({ error: "Drop not found" });
@@ -299,13 +319,50 @@ router.get("/storefront/by-agent/:slug/drops/:id", async (req, res) => {
   const artifacts = await db
     .select()
     .from(artifactsTable)
-    .where(eq(artifactsTable.dropId, id));
+    .where(and(eq(artifactsTable.dropId, id), eq(artifactsTable.agentId, agent.id)));
+  if (artifacts.length === 0) {
+    res.status(404).json({ error: "Drop not found" });
+    return;
+  }
   res.json({
     ...drop,
     artifacts: artifacts.map(formatArtifact),
     createdAt: drop.createdAt.toISOString(),
     publishedAt: drop.publishedAt?.toISOString() ?? null,
   });
+});
+
+router.get("/storefront/by-agent/:slug/artifacts/:id", async (req, res) => {
+  const { slug, id } = GetAgentStorefrontArtifactParams.parse(req.params);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const [artifact] = await db
+    .select()
+    .from(artifactsTable)
+    .where(and(eq(artifactsTable.id, id), eq(artifactsTable.agentId, agent.id)))
+    .limit(1);
+  if (!artifact) {
+    res.status(404).json({ error: "Artifact not found" });
+    return;
+  }
+  if (artifact.dropId) {
+    const [drop] = await db
+      .select({ status: dropsTable.status })
+      .from(dropsTable)
+      .where(eq(dropsTable.id, artifact.dropId))
+      .limit(1);
+    if (!drop || drop.status !== "published") {
+      res.status(404).json({ error: "Artifact not published" });
+      return;
+    }
+  } else {
+    res.status(404).json({ error: "Artifact not published" });
+    return;
+  }
+  res.json(formatArtifact(artifact));
 });
 
 export default router;

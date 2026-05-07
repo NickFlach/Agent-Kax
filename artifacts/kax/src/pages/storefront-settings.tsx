@@ -212,6 +212,25 @@ export default function StorefrontSettings() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+            Custom CSS Variables
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">
+            Allowed keys: <code>--background</code>, <code>--foreground</code>, <code>--card</code>,{" "}
+            <code>--primary</code>, <code>--accent</code>, <code>--muted</code>, <code>--border</code>,{" "}
+            <code>--radius</code>, <code>--font-family</code>. Values longer than 64 chars are dropped.
+          </p>
+          <CssVarsEditor
+            value={draft.customCssVars ?? null}
+            onChange={(v) => setField("customCssVars", v)}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
             Live Preview
           </CardTitle>
         </CardHeader>
@@ -253,6 +272,50 @@ export default function StorefrontSettings() {
           </StorefrontTheme>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+const ALLOWED_CSS_VAR_KEYS = [
+  "--background",
+  "--foreground",
+  "--card",
+  "--primary",
+  "--accent",
+  "--muted",
+  "--border",
+  "--radius",
+  "--font-family",
+] as const;
+
+function CssVarsEditor({
+  value,
+  onChange,
+}: {
+  value: Record<string, string> | null;
+  onChange: (v: Record<string, string> | null) => void;
+}) {
+  function setVar(key: string, v: string) {
+    const next: Record<string, string> = { ...(value ?? {}) };
+    if (v.trim()) next[key] = v.trim();
+    else delete next[key];
+    onChange(Object.keys(next).length ? next : null);
+  }
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {ALLOWED_CSS_VAR_KEYS.map((k) => (
+        <label key={k} className="block">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+            {k}
+          </span>
+          <Input
+            value={value?.[k] ?? ""}
+            onChange={(e) => setVar(k, e.target.value)}
+            placeholder={k === "--radius" ? "0px" : k === "--font-family" ? "monospace" : "#…"}
+            data-testid={`input-cssvar-${k.replace("--", "")}`}
+          />
+        </label>
+      ))}
     </div>
   );
 }

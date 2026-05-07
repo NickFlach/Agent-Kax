@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { artifactsTable, dropsTable } from "@workspace/db/schema";
+import { artifactsTable, dropsTable, agentsTable, agentStorefrontSettingsTable } from "@workspace/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -98,9 +98,19 @@ router.get("/share/artifact/:id", async (req, res) => {
   }
 
   const results = await db
-    .select({ artifact: artifactsTable, dropStatus: dropsTable.status })
+    .select({
+      artifact: artifactsTable,
+      dropStatus: dropsTable.status,
+      agent: agentsTable,
+      settings: agentStorefrontSettingsTable,
+    })
     .from(artifactsTable)
     .innerJoin(dropsTable, eq(artifactsTable.dropId, dropsTable.id))
+    .leftJoin(agentsTable, eq(artifactsTable.agentId, agentsTable.id))
+    .leftJoin(
+      agentStorefrontSettingsTable,
+      eq(agentStorefrontSettingsTable.agentId, agentsTable.id),
+    )
     .where(and(eq(artifactsTable.id, id), eq(dropsTable.status, "published")))
     .limit(1);
 
@@ -110,6 +120,12 @@ router.get("/share/artifact/:id", async (req, res) => {
   }
 
   const artifact = results[0].artifact;
+  const agent = results[0].agent;
+  const settings = results[0].settings;
+  const agentSlug = agent?.slug ?? "kannaka";
+  const agentDisplayName =
+    settings?.displayName || agent?.displayName || "Space Child by Kannaka";
+  const accentColor = settings?.accentColor ?? "#7C3AED";
   const isAudio = artifact.artifactType === "audio" || artifact.artifactType === "music";
   const baseUrl = getBaseUrl(req.get("host"));
 
@@ -121,12 +137,13 @@ router.get("/share/artifact/:id", async (req, res) => {
   const displayTitle = artifact.narrativeTitle || artifact.title;
   const description = artifact.narrative
     ? artifact.narrative
-    : `${displayTitle} by ${artifact.creatorName} — from the Kannaka collection on KAX`;
-  const pageTitle = `${displayTitle} — ${artifact.creatorName} | KAX`;
+    : `${displayTitle} by ${artifact.creatorName} — from the ${agentDisplayName} collection on KAX`;
+  const pageTitle = `${displayTitle} — ${artifact.creatorName} | ${agentDisplayName}`;
 
-  const dropPath = artifact.dropId ? `/storefront/${artifact.dropId}` : "/storefront";
-  const redirectPath = `${dropPath}#artifact-${artifact.id}`;
-  const redirectUrl = `${baseUrl}${redirectPath}`;
+  const redirectPath = artifact.dropId
+    ? `/s/${agentSlug}/drops/${artifact.dropId}#artifact-${artifact.id}`
+    : `/s/${agentSlug}/artifacts/${artifact.id}`;
+  void `${baseUrl}${redirectPath}`;
 
   const audioMeta = isAudio && artifact.publicUrl
     ? `<meta property="og:audio" content="${escapeHtml(artifact.publicUrl)}" />
@@ -148,7 +165,7 @@ router.get("/share/artifact/:id", async (req, res) => {
   <meta property="og:image" content="${escapeHtml(ogImage)}" />
   <meta property="og:image:width" content="800" />
   <meta property="og:image:height" content="800" />
-  <meta property="og:site_name" content="Space Child by Kannaka" />
+  <meta property="og:site_name" content="${escapeHtml(agentDisplayName)}" />
   <meta property="og:url" content="${escapeHtml(`${baseUrl}/api/share/artifact/${artifact.id}`)}" />
 
   <meta name="twitter:card" content="summary_large_image" />
@@ -186,7 +203,7 @@ router.get("/share/artifact/:id", async (req, res) => {
     h1 {
       font-size: 1.25rem;
       margin-bottom: 0.5rem;
-      color: #7C3AED;
+      color: ${escapeHtml(accentColor)};
     }
     .artist { font-size: 0.875rem; color: #888; margin-bottom: 1rem; }
     .narrative {
@@ -202,7 +219,7 @@ router.get("/share/artifact/:id", async (req, res) => {
       letter-spacing: 0.15em;
       text-transform: uppercase;
     }
-    a { color: #7C3AED; text-decoration: none; }
+    a { color: ${escapeHtml(accentColor)}; text-decoration: none; }
     a:hover { text-decoration: underline; }
   </style>
 </head>
@@ -214,7 +231,7 @@ router.get("/share/artifact/:id", async (req, res) => {
     <h1>${escapeHtml(displayTitle)}</h1>
     <p class="artist">by ${escapeHtml(artifact.creatorName)}</p>
     ${artifact.narrative ? `<p class="narrative">"${escapeHtml(artifact.narrative)}"</p>` : ""}
-    <p class="redirect">Redirecting to <a href="${escapeHtml(redirectPath)}">Space Child</a>...</p>
+    <p class="redirect">Redirecting to <a href="${escapeHtml(redirectPath)}">${escapeHtml(agentDisplayName)}</a>...</p>
   </div>
 </body>
 </html>`;
