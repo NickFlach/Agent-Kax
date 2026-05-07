@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
+import adminRouter from "./admin";
 import artifactsRouter from "./artifacts";
 import dropsRouter from "./drops";
 import harvesterRouter from "./harvester";
@@ -10,6 +12,8 @@ import shareRouter from "./share";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
+router.use(adminRouter);
 router.use(artifactsRouter);
 router.use(dropsRouter);
 router.use(harvesterRouter);

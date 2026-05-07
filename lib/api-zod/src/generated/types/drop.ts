@@ -16,6 +16,7 @@ export interface Drop {
   dropType: DropDropType;
   status: DropStatus;
   price?: number | null;
+  ownerId?: string | null;
   artifacts: Artifact[];
   createdAt: Date;
   publishedAt?: Date | null;

@@ -15,8 +15,22 @@ import {
   AddArtifactToDropBody,
   RemoveArtifactFromDropParams,
 } from "@workspace/api-zod";
+import { canMutate, requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
+
+async function checkDropOwnership(req: any, res: any, dropId: number): Promise<boolean> {
+  const [drop] = await db.select().from(dropsTable).where(eq(dropsTable.id, dropId)).limit(1);
+  if (!drop) {
+    res.status(404).json({ error: "Drop not found" });
+    return false;
+  }
+  if (!(await canMutate(req, drop.ownerId))) {
+    res.status(403).json({ error: "Not authorized to modify this drop" });
+    return false;
+  }
+  return true;
+}
 
 async function getDropWithArtifacts(dropId: number) {
   const drop = await db.select().from(dropsTable).where(eq(dropsTable.id, dropId)).limit(1);
@@ -75,7 +89,7 @@ router.get("/drops", async (req, res) => {
   res.json({ drops: dropsWithArtifacts, total: totalResult[0].count });
 });
 
-router.post("/drops", async (req, res) => {
+router.post("/drops", requireAuth, async (req, res) => {
   const body = CreateDropBody.parse(req.body);
   const [drop] = await db
     .insert(dropsTable)
@@ -84,15 +98,19 @@ router.post("/drops", async (req, res) => {
       description: body.description,
       dropType: body.dropType,
       price: body.price,
+      ownerId: req.user!.id,
     })
     .returning();
 
   if (body.artifactIds && body.artifactIds.length > 0) {
     for (const artifactId of body.artifactIds) {
-      await db
-        .update(artifactsTable)
-        .set({ dropId: drop.id, status: "dropped" })
-        .where(eq(artifactsTable.id, artifactId));
+      const [a] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, artifactId)).limit(1);
+      if (a && (await canMutate(req, a.ownerId))) {
+        await db
+          .update(artifactsTable)
+          .set({ dropId: drop.id, status: "dropped" })
+          .where(eq(artifactsTable.id, artifactId));
+      }
     }
   }
 
@@ -110,8 +128,9 @@ router.get("/drops/:id", async (req, res) => {
   res.json(result);
 });
 
-router.patch("/drops/:id", async (req, res) => {
+router.patch("/drops/:id", requireAuth, async (req, res) => {
   const { id } = UpdateDropParams.parse(req.params);
+  if (!(await checkDropOwnership(req, res, id))) return;
   const body = UpdateDropBody.parse(req.body);
 
   const updates: Record<string, unknown> = {};
@@ -130,8 +149,9 @@ router.patch("/drops/:id", async (req, res) => {
   res.json(result);
 });
 
-router.delete("/drops/:id", async (req, res) => {
+router.delete("/drops/:id", requireAuth, async (req, res) => {
   const { id } = DeleteDropParams.parse(req.params);
+  if (!(await checkDropOwnership(req, res, id))) return;
   await db
     .update(artifactsTable)
     .set({ dropId: null, status: "narrated" })
@@ -140,8 +160,9 @@ router.delete("/drops/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/drops/:id/publish", async (req, res) => {
+router.post("/drops/:id/publish", requireAuth, async (req, res) => {
   const { id } = PublishDropParams.parse(req.params);
+  if (!(await checkDropOwnership(req, res, id))) return;
 
   await db
     .update(dropsTable)
@@ -161,9 +182,16 @@ router.post("/drops/:id/publish", async (req, res) => {
   res.json(result);
 });
 
-router.post("/drops/:dropId/artifacts", async (req, res) => {
+router.post("/drops/:dropId/artifacts", requireAuth, async (req, res) => {
   const { dropId } = AddArtifactToDropParams.parse(req.params);
+  if (!(await checkDropOwnership(req, res, dropId))) return;
   const { artifactId } = AddArtifactToDropBody.parse(req.body);
+
+  const [a] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, artifactId)).limit(1);
+  if (!a || !(await canMutate(req, a.ownerId))) {
+    res.status(403).json({ error: "Not authorized to use this artifact" });
+    return;
+  }
 
   await db
     .update(artifactsTable)
@@ -183,8 +211,9 @@ router.post("/drops/:dropId/artifacts", async (req, res) => {
   res.json(result);
 });
 
-router.delete("/drops/:dropId/artifacts/:artifactId", async (req, res) => {
+router.delete("/drops/:dropId/artifacts/:artifactId", requireAuth, async (req, res) => {
   const params = RemoveArtifactFromDropParams.parse(req.params);
+  if (!(await checkDropOwnership(req, res, params.dropId))) return;
 
   await db
     .update(artifactsTable)

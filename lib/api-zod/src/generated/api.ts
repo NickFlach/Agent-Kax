@@ -16,6 +16,132 @@ export const HealthCheckResponse = zod.object({
 });
 
 /**
+ * @summary Get the currently authenticated user
+ */
+export const GetCurrentAuthUserHeader = zod.object({
+  Authorization: zod
+    .string()
+    .optional()
+    .describe("Opaque session token — `Bearer <sid>`."),
+});
+
+export const GetCurrentAuthUserResponse = zod.object({
+  user: zod.union([
+    zod.object({
+      id: zod.string(),
+      email: zod.string().email().nullable(),
+      firstName: zod.string().nullable(),
+      lastName: zod.string().nullable(),
+      profileImageUrl: zod.string().nullable(),
+      displayName: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]).optional(),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
+ * @summary Start the browser OIDC login flow
+ */
+export const BeginBrowserLoginQueryParams = zod.object({
+  returnTo: zod.coerce.string().optional(),
+});
+
+/**
+ * @summary Complete the browser OIDC login flow
+ */
+export const HandleBrowserLoginCallbackQueryParams = zod.object({
+  code: zod.coerce.string().optional(),
+  state: zod.coerce.string().optional(),
+  iss: zod.coerce.string().url().optional(),
+});
+
+/**
+ * @summary Clear the session and begin OIDC logout
+ */
+export const LogoutBrowserSessionHeader = zod.object({
+  Authorization: zod
+    .string()
+    .optional()
+    .describe("Opaque session token — `Bearer <sid>`."),
+});
+
+/**
+ * @summary Exchange a mobile OIDC code for a session token
+ */
+
+export const ExchangeMobileAuthorizationCodeBody = zod.object({
+  code: zod.string().min(1),
+  code_verifier: zod.string().min(1),
+  redirect_uri: zod.string().url().min(1),
+  state: zod.string().min(1),
+  nonce: zod.string().min(1).optional(),
+});
+
+export const ExchangeMobileAuthorizationCodeResponse = zod.object({
+  token: zod.string(),
+});
+
+/**
+ * @summary Delete a mobile session token
+ */
+export const LogoutMobileSessionHeader = zod.object({
+  Authorization: zod
+    .string()
+    .optional()
+    .describe("Opaque session token — `Bearer <sid>`."),
+});
+
+export const LogoutMobileSessionResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary List all users (admin only)
+ */
+export const ListAdminUsersResponse = zod.object({
+  users: zod.array(
+    zod.object({
+      id: zod.string(),
+      email: zod.string().nullish(),
+      firstName: zod.string().nullish(),
+      lastName: zod.string().nullish(),
+      displayName: zod.string().nullish(),
+      profileImageUrl: zod.string().nullish(),
+      bio: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]),
+      disabledAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Update a user's role or disabled status (admin only)
+ */
+export const UpdateAdminUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateAdminUserBody = zod.object({
+  role: zod.enum(["user", "admin"]).optional(),
+  disabled: zod.boolean().optional(),
+});
+
+export const UpdateAdminUserResponse = zod.object({
+  id: zod.string(),
+  email: zod.string().nullish(),
+  firstName: zod.string().nullish(),
+  lastName: zod.string().nullish(),
+  displayName: zod.string().nullish(),
+  profileImageUrl: zod.string().nullish(),
+  bio: zod.string().nullish(),
+  role: zod.enum(["user", "admin"]),
+  disabledAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
  * @summary List all artifacts
  */
 export const listArtifactsQueryLimitDefault = 50;
@@ -54,6 +180,7 @@ export const ListArtifactsResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   total: zod.number(),
@@ -86,6 +213,7 @@ export const GetArtifactResponse = zod.object({
   scoredAt: zod.coerce.date().nullish(),
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
 });
 
 /**
@@ -115,6 +243,7 @@ export const ScoreArtifactResponse = zod.object({
   scoredAt: zod.coerce.date().nullish(),
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
 });
 
 /**
@@ -144,6 +273,7 @@ export const NarrateArtifactResponse = zod.object({
   scoredAt: zod.coerce.date().nullish(),
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
 });
 
 /**
@@ -167,6 +297,7 @@ export const ListDropsResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
           id: zod.number(),
@@ -194,6 +325,7 @@ export const ListDropsResponse = zod.object({
           scoredAt: zod.coerce.date().nullish(),
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -228,6 +360,7 @@ export const GetDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
       id: zod.number(),
@@ -249,6 +382,7 @@ export const GetDropResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -276,6 +410,7 @@ export const UpdateDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
       id: zod.number(),
@@ -297,6 +432,7 @@ export const UpdateDropResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -324,6 +460,7 @@ export const PublishDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
       id: zod.number(),
@@ -345,6 +482,7 @@ export const PublishDropResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -369,6 +507,7 @@ export const AddArtifactToDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
       id: zod.number(),
@@ -390,6 +529,7 @@ export const AddArtifactToDropResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -417,14 +557,8 @@ export const RunHarvesterBody = zod.object({
     .default(runHarvesterBodyTypeDefault),
   limit: zod.number().default(runHarvesterBodyLimitDefault),
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
-  creator: zod
-    .string()
-    .optional()
-    .describe("Filter by creator display name (case-insensitive match)"),
-  keyword: zod
-    .string()
-    .optional()
-    .describe("Filter by keyword in artifact title (case-insensitive match)"),
+  creator: zod.string().optional(),
+  keyword: zod.string().optional(),
 });
 
 export const RunHarvesterResponse = zod.object({
@@ -454,6 +588,7 @@ export const GetStorefrontDropsResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
           id: zod.number(),
@@ -481,6 +616,7 @@ export const GetStorefrontDropsResponse = zod.object({
           scoredAt: zod.coerce.date().nullish(),
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -504,6 +640,7 @@ export const GetStorefrontDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
       id: zod.number(),
@@ -525,6 +662,7 @@ export const GetStorefrontDropResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -556,6 +694,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
       scoredAt: zod.coerce.date().nullish(),
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
     }),
   ),
   latestDrop: zod
@@ -566,6 +705,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
           id: zod.number(),
@@ -593,6 +733,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
           scoredAt: zod.coerce.date().nullish(),
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),

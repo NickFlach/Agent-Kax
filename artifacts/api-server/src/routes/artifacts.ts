@@ -8,6 +8,7 @@ import {
   ScoreArtifactParams,
   NarrateArtifactParams,
 } from "@workspace/api-zod";
+import { canMutate, requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -69,7 +70,7 @@ router.get("/artifacts/:id", async (req, res) => {
   res.json(formatArtifact(artifact[0]));
 });
 
-router.post("/artifacts/:id/score", async (req, res) => {
+router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
   const { id } = ScoreArtifactParams.parse(req.params);
   const artifact = await db.select().from(artifactsTable).where(eq(artifactsTable.id, id)).limit(1);
 
@@ -79,6 +80,10 @@ router.post("/artifacts/:id/score", async (req, res) => {
   }
 
   const a = artifact[0];
+  if (!(await canMutate(req, a.ownerId))) {
+    res.status(403).json({ error: "Not authorized to modify this artifact" });
+    return;
+  }
   const reactionSignal = Math.min(a.reactionCount / 100, 1);
   const noveltyFactor = Math.random() * 0.3;
   const explorationBonus = Math.random() * 0.1;
@@ -105,7 +110,7 @@ router.post("/artifacts/:id/score", async (req, res) => {
   res.json(formatArtifact(updated[0]));
 });
 
-router.post("/artifacts/:id/narrate", async (req, res) => {
+router.post("/artifacts/:id/narrate", requireAuth, async (req, res) => {
   const { id } = NarrateArtifactParams.parse(req.params);
   const artifact = await db.select().from(artifactsTable).where(eq(artifactsTable.id, id)).limit(1);
 
@@ -115,6 +120,10 @@ router.post("/artifacts/:id/narrate", async (req, res) => {
   }
 
   const a = artifact[0];
+  if (!(await canMutate(req, a.ownerId))) {
+    res.status(403).json({ error: "Not authorized to modify this artifact" });
+    return;
+  }
   const transmissionNum = Math.floor(Math.random() * 999) + 1;
   const transmissionId = `TX-${String(transmissionNum).padStart(3, "0")}`;
 

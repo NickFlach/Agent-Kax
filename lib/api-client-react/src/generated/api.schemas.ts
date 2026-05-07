@@ -9,6 +9,102 @@ export interface HealthStatus {
   status: string;
 }
 
+export type AuthUserRole = (typeof AuthUserRole)[keyof typeof AuthUserRole];
+
+export const AuthUserRole = {
+  user: "user",
+  admin: "admin",
+} as const;
+
+export interface AuthUser {
+  id: string;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  firstName: string | null;
+  /** @nullable */
+  lastName: string | null;
+  /** @nullable */
+  profileImageUrl: string | null;
+  /** @nullable */
+  displayName?: string | null;
+  role?: AuthUserRole;
+}
+
+export interface AuthUserEnvelope {
+  user: AuthUser | null;
+}
+
+export interface MobileTokenExchangeRequest {
+  /** @minLength 1 */
+  code: string;
+  /** @minLength 1 */
+  code_verifier: string;
+  /** @minLength 1 */
+  redirect_uri: string;
+  /** @minLength 1 */
+  state: string;
+  /** @minLength 1 */
+  nonce?: string;
+}
+
+export interface MobileTokenExchangeSuccess {
+  token: string;
+}
+
+export const LogoutSuccessValue = {
+  success: true,
+} as const;
+export type LogoutSuccess = typeof LogoutSuccessValue;
+
+export interface ErrorEnvelope {
+  error: string;
+}
+
+export type AdminUserRole = (typeof AdminUserRole)[keyof typeof AdminUserRole];
+
+export const AdminUserRole = {
+  user: "user",
+  admin: "admin",
+} as const;
+
+export interface AdminUser {
+  id: string;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  firstName?: string | null;
+  /** @nullable */
+  lastName?: string | null;
+  /** @nullable */
+  displayName?: string | null;
+  /** @nullable */
+  profileImageUrl?: string | null;
+  /** @nullable */
+  bio?: string | null;
+  role: AdminUserRole;
+  /** @nullable */
+  disabledAt?: string | null;
+  createdAt: string;
+}
+
+export interface ListAdminUsersResponse {
+  users: AdminUser[];
+}
+
+export type UpdateAdminUserBodyRole =
+  (typeof UpdateAdminUserBodyRole)[keyof typeof UpdateAdminUserBodyRole];
+
+export const UpdateAdminUserBodyRole = {
+  user: "user",
+  admin: "admin",
+} as const;
+
+export interface UpdateAdminUserBody {
+  role?: UpdateAdminUserBodyRole;
+  disabled?: boolean;
+}
+
 export type ArtifactArtifactType =
   (typeof ArtifactArtifactType)[keyof typeof ArtifactArtifactType];
 
@@ -50,6 +146,7 @@ export interface Artifact {
   scoredAt?: string | null;
   narratedAt?: string | null;
   dropId?: number | null;
+  ownerId?: string | null;
 }
 
 export interface ArtifactListResponse {
@@ -80,6 +177,7 @@ export interface Drop {
   dropType: DropDropType;
   status: DropStatus;
   price?: number | null;
+  ownerId?: string | null;
   artifacts: Artifact[];
   createdAt: string;
   publishedAt?: string | null;
@@ -143,9 +241,7 @@ export interface HarvesterRunBody {
   type?: HarvesterRunBodyType;
   limit?: number;
   minReactions?: number;
-  /** Filter by creator display name (case-insensitive match) */
   creator?: string;
-  /** Filter by keyword in artifact title (case-insensitive match) */
   keyword?: string;
 }
 
@@ -207,6 +303,21 @@ export type ScoreDistributionBucketsItem = {
 export interface ScoreDistribution {
   buckets: ScoreDistributionBucketsItem[];
 }
+
+/**
+ * Opaque session token — `Bearer <sid>`.
+ */
+export type AuthorizationSessionHeaderParameter = string;
+
+export type BeginBrowserLoginParams = {
+  returnTo?: string;
+};
+
+export type HandleBrowserLoginCallbackParams = {
+  code?: string;
+  state?: string;
+  iss?: string;
+};
 
 export type ListArtifactsParams = {
   status?: ListArtifactsStatus;

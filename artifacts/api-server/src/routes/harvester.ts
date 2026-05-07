@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, and, inArray, isNull, sql, or, ilike } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -35,6 +36,7 @@ async function harvestType(
   minReactions: number,
   creatorFilter: string | undefined,
   keywordFilter: string | undefined,
+  ownerId: string,
   logger: any
 ): Promise<{ harvested: number; newArtifacts: number; duplicates: number }> {
   let harvested = 0;
@@ -104,6 +106,7 @@ async function harvestType(
         reactionCount: item.reaction_count ?? 0,
         artifactType: artifactType as "image" | "music" | "text" | "audio" | "furniture",
         tags: [],
+        ownerId,
       });
       newArtifacts++;
       collected++;
@@ -119,8 +122,9 @@ async function harvestType(
   return { harvested, newArtifacts, duplicates };
 }
 
-router.post("/harvester/run", async (req, res) => {
+router.post("/harvester/run", requireAuth, async (req, res) => {
   const body = RunHarvesterBody.parse(req.body);
+  const ownerId = req.user!.id;
   const type = body.type ?? "image";
   const requestedLimit = body.limit ?? 20;
   const minReactions = body.minReactions ?? 0;
@@ -140,7 +144,7 @@ router.post("/harvester/run", async (req, res) => {
     for (const t of typesToHarvest) {
       if (remaining <= 0) break;
       const perTypeLimit = type === "all" ? Math.ceil(remaining / typesToHarvest.length) : remaining;
-      const result = await harvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, req.log);
+      const result = await harvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, ownerId, req.log);
       harvested += result.harvested;
       newArtifacts += result.newArtifacts;
       duplicates += result.duplicates;

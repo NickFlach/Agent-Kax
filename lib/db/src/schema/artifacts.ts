@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -22,6 +22,7 @@ export const artifactsTable = pgTable("artifacts", {
   transmissionId: text("transmission_id"),
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   dropId: integer("drop_id"),
+  ownerId: varchar("owner_id"),
   ingestedAt: timestamp("ingested_at").notNull().defaultNow(),
   scoredAt: timestamp("scored_at"),
   narratedAt: timestamp("narrated_at"),

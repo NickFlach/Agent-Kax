@@ -28,4 +28,5 @@ export interface Artifact {
   scoredAt?: Date | null;
   narratedAt?: Date | null;
   dropId?: number | null;
+  ownerId?: string | null;
 }
