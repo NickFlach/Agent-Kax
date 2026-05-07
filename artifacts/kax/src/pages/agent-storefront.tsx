@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { useParams, Link } from "wouter";
+import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontDrops,
@@ -24,31 +24,30 @@ export default function AgentStorefront() {
     { query: { queryKey: getGetAgentStorefrontDropsQueryKey(slug, { limit: 20, offset: 0 }) } },
   );
 
-  useEffect(() => {
-    if (!landing) return;
-    const title = landing.settings.displayName || landing.agent.displayName;
-    document.title = `${title} — KAX`;
-    const desc = landing.settings.tagline || `Storefront by ${landing.agent.displayName}`;
-    let descEl = document.querySelector('meta[name="description"]');
-    if (!descEl) {
-      descEl = document.createElement("meta");
-      descEl.setAttribute("name", "description");
-      document.head.appendChild(descEl);
-    }
-    descEl.setAttribute("content", desc);
-    setMeta("og:title", title);
-    setMeta("og:description", desc);
-    if (landing.settings.heroImageUrl) {
-      setMeta("og:image", landing.settings.heroImageUrl);
-    }
-    setLdJson({
-      "@context": "https://schema.org",
-      "@type": "Store",
-      name: title,
-      description: desc,
-      ...(landing.settings.heroImageUrl ? { image: landing.settings.heroImageUrl } : {}),
-    });
-  }, [landing]);
+  const seoTitle = landing
+    ? `${landing.settings.displayName || landing.agent.displayName} — KAX`
+    : "";
+  const seoDesc = landing
+    ? landing.settings.tagline || `Storefront by ${landing.agent.displayName}`
+    : "";
+  useStorefrontSeo(
+    landing
+      ? {
+          title: seoTitle,
+          description: seoDesc,
+          image: landing.settings.heroImageUrl,
+          accentColor: landing.settings.accentColor,
+          initial: (landing.settings.displayName || landing.agent.displayName).charAt(0),
+          jsonLd: {
+            "@context": "https://schema.org",
+            "@type": "Store",
+            name: landing.settings.displayName || landing.agent.displayName,
+            description: seoDesc,
+            ...(landing.settings.heroImageUrl ? { image: landing.settings.heroImageUrl } : {}),
+          },
+        }
+      : null,
+  );
 
   if (isLoading) {
     return (
@@ -280,23 +279,3 @@ export default function AgentStorefront() {
   );
 }
 
-function setMeta(property: string, content: string) {
-  let el = document.querySelector(`meta[property="${property}"]`);
-  if (!el) {
-    el = document.createElement("meta");
-    el.setAttribute("property", property);
-    document.head.appendChild(el);
-  }
-  el.setAttribute("content", content);
-}
-
-function setLdJson(data: Record<string, unknown>) {
-  let el = document.querySelector('script[type="application/ld+json"][data-storefront]');
-  if (!el) {
-    el = document.createElement("script");
-    el.setAttribute("type", "application/ld+json");
-    el.setAttribute("data-storefront", "true");
-    document.head.appendChild(el);
-  }
-  el.textContent = JSON.stringify(data);
-}

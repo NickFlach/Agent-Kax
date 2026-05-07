@@ -143,7 +143,6 @@ router.get("/share/artifact/:id", async (req, res) => {
   const redirectPath = artifact.dropId
     ? `/s/${agentSlug}/drops/${artifact.dropId}#artifact-${artifact.id}`
     : `/s/${agentSlug}/artifacts/${artifact.id}`;
-  void `${baseUrl}${redirectPath}`;
 
   const audioMeta = isAudio && artifact.publicUrl
     ? `<meta property="og:audio" content="${escapeHtml(artifact.publicUrl)}" />

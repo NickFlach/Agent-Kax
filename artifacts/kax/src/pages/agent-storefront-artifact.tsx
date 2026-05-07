@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { useParams, Link } from "wouter";
+import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontArtifact,
@@ -28,10 +28,27 @@ export default function AgentStorefrontArtifact() {
   const title = landing?.settings.displayName || landing?.agent.displayName || "Storefront";
   const isAudio = artifact && (artifact.artifactType === "audio" || artifact.artifactType === "music");
 
-  useEffect(() => {
-    if (!artifact) return;
-    document.title = `${artifact.narrativeTitle || artifact.title} — ${title}`;
-  }, [artifact, title]);
+  useStorefrontSeo(
+    artifact
+      ? {
+          title: `${artifact.narrativeTitle || artifact.title} — ${title}`,
+          description:
+            artifact.narrative ||
+            `${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName} on ${title}`,
+          image: isAudio ? artifact.thumbnailUrl : artifact.publicUrl || artifact.thumbnailUrl,
+          accentColor: landing?.settings.accentColor ?? null,
+          initial: title.charAt(0),
+          jsonLd: {
+            "@context": "https://schema.org",
+            "@type": "CreativeWork",
+            name: artifact.narrativeTitle || artifact.title,
+            creator: { "@type": "Person", name: artifact.creatorName },
+            description: artifact.narrative || undefined,
+            ...(artifact.publicUrl ? { contentUrl: artifact.publicUrl } : {}),
+          },
+        }
+      : null,
+  );
 
   if (isLoading) {
     return (

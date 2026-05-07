@@ -45,9 +45,12 @@ app.use((req, res, next) => {
 });
 app.use(authMiddleware);
 
-app.get(/^\/storefront(?:\/(\d+))?\/?$/, (req, res) => {
-  const dropId = req.params[0];
-  const target = dropId ? `/s/kannaka/drops/${dropId}` : "/s/kannaka";
+app.get(/^\/storefront(\/.*)?$/, (req, res) => {
+  const rest = req.params[0] ?? "";
+  const numericMatch = rest.match(/^\/(\d+)(\/?.*)$/);
+  const target = numericMatch
+    ? `/s/kannaka/drops/${numericMatch[1]}${numericMatch[2] ?? ""}`
+    : `/s/kannaka${rest}`;
   res.redirect(301, target);
 });
 

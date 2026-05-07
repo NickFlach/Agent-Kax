@@ -1,4 +1,5 @@
 import { useParams, Link } from "wouter";
+import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontDrop,
@@ -25,6 +26,31 @@ export default function AgentStorefrontDrop() {
 
   const settings = landing?.settings ?? { themeVariant: "dark" as const };
   const title = landing?.settings.displayName || landing?.agent.displayName || "Storefront";
+
+  useStorefrontSeo(
+    landing && drop
+      ? {
+          title: `${drop.title} — ${title}`,
+          description: drop.description || `${drop.title} drop on ${title}`,
+          image:
+            drop.artifacts[0]?.thumbnailUrl ||
+            drop.artifacts[0]?.publicUrl ||
+            landing.settings.heroImageUrl,
+          accentColor: landing.settings.accentColor,
+          initial: title.charAt(0),
+          jsonLd: {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            name: drop.title,
+            description: drop.description || undefined,
+            brand: { "@type": "Brand", name: title },
+            ...(drop.price != null
+              ? { offers: { "@type": "Offer", price: drop.price, priceCurrency: "USD" } }
+              : {}),
+          },
+        }
+      : null,
+  );
   const isAudio = (t: string) => t === "audio" || t === "music";
   const getShareUrl = (artifactId: number) =>
     `${window.location.origin}/api/share/artifact/${artifactId}`;
