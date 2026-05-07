@@ -323,6 +323,11 @@ paths:
           in: query
           schema:
             type: integer
+        - name: all
+          in: query
+          description: Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+          schema:
+            type: boolean
       responses:
         "200":
           description: List of artifacts
@@ -409,6 +414,11 @@ paths:
           schema:
             type: integer
             default: 0
+        - name: all
+          in: query
+          description: Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+          schema:
+            type: boolean
       responses:
         "200":
           description: List of drops
@@ -651,6 +661,12 @@ paths:
       operationId: getDashboardSummary
       tags: [dashboard]
       summary: Get dashboard overview stats
+      parameters:
+        - name: all
+          in: query
+          description: Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Dashboard stats
@@ -670,6 +686,11 @@ paths:
           schema:
             type: integer
             default: 10
+        - name: all
+          in: query
+          description: Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Recent activity
@@ -696,6 +717,12 @@ paths:
       operationId: getScoreDistribution
       tags: [dashboard]
       summary: Get distribution of artifact scores
+      parameters:
+        - name: all
+          in: query
+          description: Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Score distribution

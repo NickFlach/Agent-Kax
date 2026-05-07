@@ -454,6 +454,10 @@ export type ListArtifactsParams = {
   artifactType?: ListArtifactsArtifactType;
   editionType?: ListArtifactsEditionType;
   agentId?: number;
+  /**
+   * Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
 };
 
 export type ListArtifactsStatus =
@@ -490,6 +494,10 @@ export type ListDropsParams = {
   status?: ListDropsStatus;
   limit?: number;
   offset?: number;
+  /**
+   * Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
 };
 
 export type ListDropsStatus =
@@ -506,6 +514,24 @@ export type GetStorefrontDropsParams = {
   offset?: number;
 };
 
+export type GetDashboardSummaryParams = {
+  /**
+   * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
+};
+
 export type GetRecentActivityParams = {
   limit?: number;
+  /**
+   * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
+};
+
+export type GetScoreDistributionParams = {
+  /**
+   * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
 };

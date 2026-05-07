@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { AudioCover } from "@/components/audio-cover";
+import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
 export default function DropsList() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [showAll, setShowAll] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newType, setNewType] = useState<"single" | "collection" | "bundle">("single");
@@ -21,6 +23,7 @@ export default function DropsList() {
 
   const params = {
     ...(statusFilter !== "all" ? { status: statusFilter as "draft" | "published" | "sold" } : {}),
+    ...(showAll ? { all: true } : {}),
     limit: 20,
     offset: 0,
   };
@@ -124,7 +127,7 @@ export default function DropsList() {
         </Dialog>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex items-center gap-3">
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-40" data-testid="select-filter-status">
             <SelectValue placeholder="Filter status" />
@@ -136,6 +139,7 @@ export default function DropsList() {
             <SelectItem value="sold">Sold</SelectItem>
           </SelectContent>
         </Select>
+        <AdminScopeToggle showAll={showAll} onChange={setShowAll} testId="toggle-drops-scope" />
       </div>
 
       {isLoading ? (

@@ -11,12 +11,14 @@ import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
+import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [editionFilter, setEditionFilter] = useState<string>("all");
   const [search, setSearch] = useState("kannaka");
+  const [showAll, setShowAll] = useState(false);
   const queryClient = useQueryClient();
 
   const params = {
@@ -24,6 +26,7 @@ export default function ArtifactsList() {
     ...(typeFilter !== "all" ? { artifactType: typeFilter as "image" | "audio" | "music" | "text" | "furniture" } : {}),
     ...(editionFilter !== "all" ? { editionType: editionFilter as "open" | "limited" | "1_of_1" } : {}),
     ...(search ? { search } : {}),
+    ...(showAll ? { all: true } : {}),
     limit: 50,
     offset: 0,
   };
@@ -63,7 +66,10 @@ export default function ArtifactsList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight" data-testid="text-page-title">Artifacts</h1>
-        <span className="text-muted-foreground text-sm">{data?.total ?? 0} total</span>
+        <div className="flex items-center gap-4">
+          <AdminScopeToggle showAll={showAll} onChange={setShowAll} testId="toggle-artifacts-scope" />
+          <span className="text-muted-foreground text-sm">{data?.total ?? 0} total</span>
+        </div>
       </div>
 
       <div className="flex gap-3">

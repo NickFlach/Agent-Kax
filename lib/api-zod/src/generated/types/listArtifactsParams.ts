@@ -18,4 +18,8 @@ export type ListArtifactsParams = {
   artifactType?: ListArtifactsArtifactType;
   editionType?: ListArtifactsEditionType;
   agentId?: number;
+  /**
+   * Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
 };

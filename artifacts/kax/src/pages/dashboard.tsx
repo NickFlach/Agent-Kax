@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -5,19 +6,24 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PartnerSyncWidget } from "@/components/partner-sync-widget";
+import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
 export default function Dashboard() {
-  const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary({
-    query: { queryKey: getGetDashboardSummaryQueryKey() },
+  const [showAll, setShowAll] = useState(false);
+  const scope = showAll ? { all: true } : {};
+  const activityParams = { limit: 8, ...scope };
+
+  const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary(scope, {
+    query: { queryKey: getGetDashboardSummaryQueryKey(scope) },
   });
 
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity(
-    { limit: 8 },
-    { query: { queryKey: getGetRecentActivityQueryKey({ limit: 8 }) } }
+    activityParams,
+    { query: { queryKey: getGetRecentActivityQueryKey(activityParams) } }
   );
 
-  const { data: distribution, isLoading: distLoading } = useGetScoreDistribution({
-    query: { queryKey: getGetScoreDistributionQueryKey() },
+  const { data: distribution, isLoading: distLoading } = useGetScoreDistribution(scope, {
+    query: { queryKey: getGetScoreDistributionQueryKey(scope) },
   });
 
   const activityColors: Record<string, string> = {
@@ -35,7 +41,8 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-page-title">KAX Command Center</h1>
           <p className="text-muted-foreground mt-1">Kannaka Artifact Exchange Pipeline</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-4">
+          <AdminScopeToggle showAll={showAll} onChange={setShowAll} testId="toggle-dashboard-scope" />
           <Link href="/harvester">
             <button className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors" data-testid="button-harvest">
               Run Harvester

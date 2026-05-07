@@ -6,8 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type GetRecentActivityParams = {
-  limit?: number;
+export type GetScoreDistributionParams = {
   /**
    * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
    */

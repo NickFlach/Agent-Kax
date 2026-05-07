@@ -11,4 +11,8 @@ export type ListDropsParams = {
   status?: ListDropsStatus;
   limit?: number;
   offset?: number;
+  /**
+   * Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.
+   */
+  all?: boolean;
 };

@@ -284,6 +284,12 @@ export const ListArtifactsQueryParams = zod.object({
     .optional(),
   editionType: zod.enum(["open", "limited", "1_of_1"]).optional(),
   agentId: zod.coerce.number().optional(),
+  all: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.",
+    ),
 });
 
 export const ListArtifactsResponse = zod.object({
@@ -478,6 +484,12 @@ export const ListDropsQueryParams = zod.object({
   status: zod.enum(["draft", "published", "sold"]).optional(),
   limit: zod.coerce.number().default(listDropsQueryLimitDefault),
   offset: zod.coerce.number().default(listDropsQueryOffsetDefault),
+  all: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Admin only. When `true`, returns data across all owners; otherwise scoped to the caller.",
+    ),
 });
 
 export const ListDropsResponse = zod.object({
@@ -1158,6 +1170,15 @@ export const GetStorefrontFeaturedResponse = zod.object({
 /**
  * @summary Get dashboard overview stats
  */
+export const GetDashboardSummaryQueryParams = zod.object({
+  all: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.",
+    ),
+});
+
 export const GetDashboardSummaryResponse = zod.object({
   totalArtifacts: zod.number(),
   scoredArtifacts: zod.number(),
@@ -1180,6 +1201,12 @@ export const getRecentActivityQueryLimitDefault = 10;
 
 export const GetRecentActivityQueryParams = zod.object({
   limit: zod.coerce.number().default(getRecentActivityQueryLimitDefault),
+  all: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.",
+    ),
 });
 
 export const GetRecentActivityResponse = zod.object({
@@ -1217,6 +1244,15 @@ export const GetPartnerSyncStatusResponse = zod.object({
 /**
  * @summary Get distribution of artifact scores
  */
+export const GetScoreDistributionQueryParams = zod.object({
+  all: zod.coerce
+    .boolean()
+    .optional()
+    .describe(
+      "Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.",
+    ),
+});
+
 export const GetScoreDistributionResponse = zod.object({
   buckets: zod.array(
     zod.object({
