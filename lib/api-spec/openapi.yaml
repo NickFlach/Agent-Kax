@@ -882,6 +882,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/PartnerSyncStatus"
 
+  /dashboard/hot:
+    get:
+      operationId: getHotArtifacts
+      tags: [dashboard]
+      summary: Live "Hot Right Now" — artifacts trending in the last hour
+      responses:
+        "200":
+          description: Hot artifacts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotArtifactsResponse"
+
   /dashboard/score-distribution:
     get:
       operationId: getScoreDistribution
@@ -1113,11 +1126,19 @@ components:
         editionSerial:
           type: integer
           nullable: true
+        heat:
+          type: integer
+        lastReactionAt:
+          type: string
+          format: date-time
+          nullable: true
         scoreBreakdown:
           type: object
           nullable: true
           properties:
             reactionSignal:
+              type: number
+            heatSignal:
               type: number
             novelty:
               type: number
@@ -1151,6 +1172,45 @@ components:
         - tags
         - ingestedAt
         - editionType
+
+    HotArtifact:
+      type: object
+      required: [id, title, creatorName, publicUrl, artifactType, heat, reactionsLastHour, heatSignal]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        creatorName:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        publicUrl:
+          type: string
+        artifactType:
+          type: string
+          enum: [image, music, text, audio, furniture]
+        heat:
+          type: integer
+        reactionsLastHour:
+          type: integer
+        lastReactionAt:
+          type: string
+          format: date-time
+          nullable: true
+        heatSignal:
+          type: number
+    HotArtifactsResponse:
+      type: object
+      required: [items, windowMinutes]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HotArtifact"
+        windowMinutes:
+          type: integer
 
     ArtifactListResponse:
       type: object

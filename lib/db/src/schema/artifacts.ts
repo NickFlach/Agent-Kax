@@ -17,6 +17,8 @@ export const artifactsTable = pgTable("artifacts", {
   publicUrl: text("public_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
   reactionCount: integer("reaction_count").notNull().default(0),
+  heat: integer("heat").notNull().default(0),
+  lastReactionAt: timestamp("last_reaction_at"),
   artifactType: artifactTypeEnum("artifact_type").notNull().default("image"),
   status: artifactStatusEnum("status").notNull().default("raw"),
   kannakaScore: real("kannaka_score"),

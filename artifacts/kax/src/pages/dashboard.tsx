@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey } from "@workspace/api-client-react";
+import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, useGetHotArtifacts, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey, getGetHotArtifactsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -24,6 +24,10 @@ export default function Dashboard() {
 
   const { data: distribution, isLoading: distLoading } = useGetScoreDistribution(scope, {
     query: { queryKey: getGetScoreDistributionQueryKey(scope) },
+  });
+
+  const { data: hot, isLoading: hotLoading } = useGetHotArtifacts({
+    query: { queryKey: getGetHotArtifactsQueryKey(), refetchInterval: 30_000 },
   });
 
   const activityColors: Record<string, string> = {
@@ -69,6 +73,44 @@ export default function Dashboard() {
       ) : null}
 
       <PartnerSyncWidget />
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+            Hot Right Now
+            <span className="ml-2 text-[10px] text-accent">● live</span>
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">last 60 min</span>
+        </CardHeader>
+        <CardContent>
+          {hotLoading ? (
+            <Skeleton className="h-16" />
+          ) : hot && hot.items.length > 0 ? (
+            <div className="space-y-2" data-testid="hot-list">
+              {hot.items.map((item, idx) => (
+                <Link key={item.id} href={`/artifacts/${item.id}`}>
+                  <div
+                    className="flex items-center gap-3 p-2 hover:bg-secondary cursor-pointer"
+                    data-testid={`hot-item-${item.id}`}
+                  >
+                    <span className="text-xs font-mono text-muted-foreground w-6">#{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">{item.creatorName}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-accent font-mono">+{item.reactionsLastHour}</p>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">heat {item.heat}</p>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-center py-4 text-sm">No reactions in the last hour. Quiet on the wire.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>

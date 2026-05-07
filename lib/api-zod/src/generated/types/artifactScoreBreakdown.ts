@@ -8,6 +8,7 @@
 
 export type ArtifactScoreBreakdown = {
   reactionSignal: number;
+  heatSignal?: number;
   novelty: number;
   exploration: number;
   baseScore: number;

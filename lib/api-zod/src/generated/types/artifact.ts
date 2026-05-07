@@ -36,5 +36,7 @@ export interface Artifact {
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;
+  heat?: number;
+  lastReactionAt?: Date | null;
   scoreBreakdown?: ArtifactScoreBreakdown;
 }

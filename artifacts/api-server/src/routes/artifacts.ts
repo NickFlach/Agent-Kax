@@ -99,6 +99,8 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
   const { kannakaScore, rarityScore, breakdown } = computeScore({
     reactionCount: a.reactionCount,
     editionType: a.editionType,
+    heat: a.heat,
+    lastReactionAt: a.lastReactionAt,
   });
 
   const updated = await db
@@ -201,6 +203,8 @@ function formatArtifact(a: typeof artifactsTable.$inferSelect) {
     obcArtifactUuid: a.obcArtifactUuid,
     agentId: a.agentId,
     scoreBreakdown: a.scoreBreakdown ?? null,
+    heat: a.heat,
+    lastReactionAt: a.lastReactionAt?.toISOString() ?? null,
   };
 }
 

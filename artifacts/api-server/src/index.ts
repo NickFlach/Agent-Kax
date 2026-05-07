@@ -3,6 +3,9 @@ import { logger } from "./lib/logger";
 import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
+import { registerAllEventHandlers } from "./lib/eventHandlers";
+
+registerAllEventHandlers();
 
 const rawPort = process.env["PORT"];
 

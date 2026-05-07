@@ -8,8 +8,12 @@ export const SCARCITY_MULTIPLIERS: Record<string, number> = {
   "1_of_1": 1.5,
 };
 
+// Heat half-life in minutes — heat from a reaction loses half its weight every hour.
+export const HEAT_HALF_LIFE_MIN = 60;
+
 export type ScoreBreakdown = {
   reactionSignal: number;
+  heatSignal: number;
   novelty: number;
   exploration: number;
   baseScore: number;
@@ -18,14 +22,42 @@ export type ScoreBreakdown = {
   finalScore: number;
 };
 
+/**
+ * Returns a 0..1 signal derived from time-decayed heat. Recent reactions count
+ * more than old ones; tanh keeps the curve bounded so a viral artifact does
+ * not blow out the rest of the score.
+ */
+export function decayedHeatSignal(input: {
+  heat: number;
+  lastReactionAt: Date | null;
+  now?: Date;
+}): number {
+  if (input.heat <= 0 || !input.lastReactionAt) return 0;
+  const now = input.now ?? new Date();
+  const ageMin = Math.max(0, (now.getTime() - input.lastReactionAt.getTime()) / 60_000);
+  const decay = Math.pow(0.5, ageMin / HEAT_HALF_LIFE_MIN);
+  const decayed = input.heat * decay;
+  // Saturating curve: ~0.46 at heat=5, ~0.76 at heat=10, asymptote 1.
+  return Math.tanh(decayed / 10);
+}
+
 export function computeScore(input: {
   reactionCount: number;
   editionType: string;
+  heat?: number;
+  lastReactionAt?: Date | null;
+  now?: Date;
 }): { kannakaScore: number; rarityScore: number; breakdown: ScoreBreakdown } {
   const reactionSignal = Math.min(input.reactionCount / 100, 1);
+  const heatSignal = decayedHeatSignal({
+    heat: input.heat ?? 0,
+    lastReactionAt: input.lastReactionAt ?? null,
+    now: input.now,
+  });
   const novelty = Math.random() * 0.3;
   const exploration = Math.random() * 0.1;
-  const baseScore = reactionSignal * 0.5 + novelty + exploration + 0.1;
+  // Reactions and heat together carry the social weight, then novelty/exploration on top.
+  const baseScore = reactionSignal * 0.35 + heatSignal * 0.25 + novelty + exploration + 0.1;
   const scarcityMultiplier = SCARCITY_MULTIPLIERS[input.editionType] ?? 1.0;
   const finalScore = Math.min(baseScore * scarcityMultiplier, 1);
   const rarityScore = Math.min(
@@ -37,6 +69,7 @@ export function computeScore(input: {
     rarityScore: Math.round(rarityScore * 100) / 100,
     breakdown: {
       reactionSignal: Math.round(reactionSignal * 1000) / 1000,
+      heatSignal: Math.round(heatSignal * 1000) / 1000,
       novelty: Math.round(novelty * 1000) / 1000,
       exploration: Math.round(exploration * 1000) / 1000,
       baseScore: Math.round(baseScore * 1000) / 1000,
@@ -53,6 +86,8 @@ export async function runTasteEngineFor(id: number): Promise<void> {
   const { kannakaScore, rarityScore, breakdown } = computeScore({
     reactionCount: a.reactionCount,
     editionType: a.editionType,
+    heat: a.heat,
+    lastReactionAt: a.lastReactionAt,
   });
 
   await db

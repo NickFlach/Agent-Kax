@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { artifactsTable, dropsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, desc, count, avg, sql, isNotNull, and } from "drizzle-orm";
+import { artifactsTable, dropsTable, activitiesTable, reactionsTable } from "@workspace/db/schema";
+import { eq, desc, count, avg, sql, isNotNull, and, gte } from "drizzle-orm";
+import { decayedHeatSignal } from "../lib/tasteEngine";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 import { getSyncState, DAILY_REQUEST_BUDGET, partnerApiAvailable } from "../lib/partnerClient";
 import { requireAuth, getOwnerScope } from "../middlewares/requireAuth";
@@ -137,6 +138,52 @@ router.get("/dashboard/score-distribution", requireAuth, async (req, res) => {
   );
 
   res.json({ buckets: results });
+});
+
+router.get("/dashboard/hot", requireAuth, async (req, res) => {
+  const ownerScope = await getOwnerScope(req);
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+  const recentCountSql = sql<number>`count(${reactionsTable.id}) filter (where ${reactionsTable.createdAt} >= ${hourAgo})`;
+  const conditions = [isNotNull(artifactsTable.lastReactionAt), gte(artifactsTable.lastReactionAt, hourAgo)];
+  if (ownerScope !== null) conditions.push(eq(artifactsTable.ownerId, ownerScope));
+
+  const rows = await db
+    .select({
+      id: artifactsTable.id,
+      title: artifactsTable.title,
+      creatorName: artifactsTable.creatorName,
+      thumbnailUrl: artifactsTable.thumbnailUrl,
+      publicUrl: artifactsTable.publicUrl,
+      artifactType: artifactsTable.artifactType,
+      heat: artifactsTable.heat,
+      lastReactionAt: artifactsTable.lastReactionAt,
+      reactionsLastHour: recentCountSql,
+    })
+    .from(artifactsTable)
+    .leftJoin(reactionsTable, eq(reactionsTable.artifactId, artifactsTable.id))
+    .where(and(...conditions))
+    .groupBy(artifactsTable.id)
+    .orderBy(desc(recentCountSql), desc(artifactsTable.lastReactionAt))
+    .limit(10);
+
+  const now = new Date();
+  const items = rows
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      creatorName: r.creatorName,
+      thumbnailUrl: r.thumbnailUrl,
+      publicUrl: r.publicUrl,
+      artifactType: r.artifactType,
+      heat: r.heat,
+      reactionsLastHour: Number(r.reactionsLastHour) || 0,
+      lastReactionAt: r.lastReactionAt?.toISOString() ?? null,
+      heatSignal: decayedHeatSignal({ heat: r.heat, lastReactionAt: r.lastReactionAt, now }),
+    }))
+    .sort((a, b) => b.heatSignal - a.heatSignal || b.reactionsLastHour - a.reactionsLastHour);
+
+  res.json({ items, windowMinutes: 60 });
 });
 
 export default router;

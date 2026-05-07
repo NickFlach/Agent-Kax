@@ -48,6 +48,7 @@ import type {
   HarvesterResult,
   HarvesterRunBody,
   HealthStatus,
+  HotArtifactsResponse,
   ListAdminUsersResponse,
   ListArtifactsParams,
   ListDropsParams,
@@ -3549,6 +3550,81 @@ export function useGetPartnerSyncStatus<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetPartnerSyncStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Live "Hot Right Now" — artifacts trending in the last hour
+ */
+export const getGetHotArtifactsUrl = () => {
+  return `/api/dashboard/hot`;
+};
+
+export const getHotArtifacts = async (
+  options?: RequestInit,
+): Promise<HotArtifactsResponse> => {
+  return customFetch<HotArtifactsResponse>(getGetHotArtifactsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetHotArtifactsQueryKey = () => {
+  return [`/api/dashboard/hot`] as const;
+};
+
+export const getGetHotArtifactsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHotArtifacts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHotArtifacts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetHotArtifactsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHotArtifacts>>> = ({
+    signal,
+  }) => getHotArtifacts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHotArtifacts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetHotArtifactsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHotArtifacts>>
+>;
+export type GetHotArtifactsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Live "Hot Right Now" — artifacts trending in the last hour
+ */
+
+export function useGetHotArtifacts<
+  TData = Awaited<ReturnType<typeof getHotArtifacts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHotArtifacts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetHotArtifactsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

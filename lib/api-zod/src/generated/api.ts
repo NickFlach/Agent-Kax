@@ -229,9 +229,12 @@ export const GetAgentResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -320,9 +323,12 @@ export const ListArtifactsResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -369,9 +375,12 @@ export const GetArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  heat: zod.number().optional(),
+  lastReactionAt: zod.coerce.date().nullish(),
   scoreBreakdown: zod
     .object({
       reactionSignal: zod.number(),
+      heatSignal: zod.number().optional(),
       novelty: zod.number(),
       exploration: zod.number(),
       baseScore: zod.number(),
@@ -415,9 +424,12 @@ export const ScoreArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  heat: zod.number().optional(),
+  lastReactionAt: zod.coerce.date().nullish(),
   scoreBreakdown: zod
     .object({
       reactionSignal: zod.number(),
+      heatSignal: zod.number().optional(),
       novelty: zod.number(),
       exploration: zod.number(),
       baseScore: zod.number(),
@@ -461,9 +473,12 @@ export const NarrateArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  heat: zod.number().optional(),
+  lastReactionAt: zod.coerce.date().nullish(),
   scoreBreakdown: zod
     .object({
       reactionSignal: zod.number(),
+      heatSignal: zod.number().optional(),
       novelty: zod.number(),
       exploration: zod.number(),
       baseScore: zod.number(),
@@ -536,9 +551,12 @@ export const ListDropsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -611,9 +629,12 @@ export const GetDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -679,9 +700,12 @@ export const UpdateDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -746,9 +770,12 @@ export const PublishDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -806,9 +833,12 @@ export const GetDropSuggestionsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -871,9 +901,12 @@ export const AddArtifactToDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -981,9 +1014,12 @@ export const GetStorefrontDropsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -1044,9 +1080,12 @@ export const GetStorefrontDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -1092,9 +1131,12 @@ export const GetStorefrontFeaturedResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -1148,9 +1190,12 @@ export const GetStorefrontFeaturedResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -1288,9 +1333,12 @@ export const GetAgentStorefrontResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -1344,9 +1392,12 @@ export const GetAgentStorefrontResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -1424,9 +1475,12 @@ export const GetAgentStorefrontDropsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          heat: zod.number().optional(),
+          lastReactionAt: zod.coerce.date().nullish(),
           scoreBreakdown: zod
             .object({
               reactionSignal: zod.number(),
+              heatSignal: zod.number().optional(),
               novelty: zod.number(),
               exploration: zod.number(),
               baseScore: zod.number(),
@@ -1521,9 +1575,12 @@ export const GetAgentStorefrontArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  heat: zod.number().optional(),
+  lastReactionAt: zod.coerce.date().nullish(),
   scoreBreakdown: zod
     .object({
       reactionSignal: zod.number(),
+      heatSignal: zod.number().optional(),
       novelty: zod.number(),
       exploration: zod.number(),
       baseScore: zod.number(),
@@ -1578,9 +1635,12 @@ export const GetAgentStorefrontDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
       scoreBreakdown: zod
         .object({
           reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
           novelty: zod.number(),
           exploration: zod.number(),
           baseScore: zod.number(),
@@ -1667,6 +1727,27 @@ export const GetPartnerSyncStatusResponse = zod.object({
   lastArtifactCursor: zod.string().nullish(),
   requestsToday: zod.number(),
   dailyBudget: zod.number(),
+});
+
+/**
+ * @summary Live "Hot Right Now" — artifacts trending in the last hour
+ */
+export const GetHotArtifactsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      publicUrl: zod.string(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      heat: zod.number(),
+      reactionsLastHour: zod.number(),
+      lastReactionAt: zod.coerce.date().nullish(),
+      heatSignal: zod.number(),
+    }),
+  ),
+  windowMinutes: zod.number(),
 });
 
 /**

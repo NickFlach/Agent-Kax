@@ -137,6 +137,7 @@ export const ArtifactEditionType = {
 
 export type ArtifactScoreBreakdown = {
   reactionSignal: number;
+  heatSignal?: number;
   novelty: number;
   exploration: number;
   baseScore: number;
@@ -171,7 +172,38 @@ export interface Artifact {
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;
+  heat?: number;
+  lastReactionAt?: string | null;
   scoreBreakdown?: ArtifactScoreBreakdown;
+}
+
+export type HotArtifactArtifactType =
+  (typeof HotArtifactArtifactType)[keyof typeof HotArtifactArtifactType];
+
+export const HotArtifactArtifactType = {
+  image: "image",
+  music: "music",
+  text: "text",
+  audio: "audio",
+  furniture: "furniture",
+} as const;
+
+export interface HotArtifact {
+  id: number;
+  title: string;
+  creatorName: string;
+  thumbnailUrl?: string | null;
+  publicUrl: string;
+  artifactType: HotArtifactArtifactType;
+  heat: number;
+  reactionsLastHour: number;
+  lastReactionAt?: string | null;
+  heatSignal: number;
+}
+
+export interface HotArtifactsResponse {
+  items: HotArtifact[];
+  windowMinutes: number;
 }
 
 export interface ArtifactListResponse {

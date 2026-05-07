@@ -2,7 +2,6 @@ import { db } from "@workspace/db";
 import {
   artifactsTable,
   activitiesTable,
-  processedEventsTable,
   agentsTable,
   type Agent,
 } from "@workspace/db/schema";
@@ -16,9 +15,8 @@ import {
   partnerApiAvailable,
   type PartnerArtifact,
 } from "./partnerClient";
-import { KANNAKA_SYSTEM_USER_ID } from "./backfill";
-import { runTasteEngineFor } from "./tasteEngine";
 import { logger } from "./logger";
+import { dispatchPartnerEvent } from "./eventDispatcher";
 
 export interface HarvestRunResult {
   harvested: number;
@@ -142,61 +140,19 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
       totalSeen += page.events.length;
 
       for (const ev of page.events) {
-        const already = await db
-          .select({ eventUuid: processedEventsTable.eventUuid })
-          .from(processedEventsTable)
-          .where(eq(processedEventsTable.eventUuid, ev.event_uuid))
-          .limit(1);
-
-        if (already.length > 0) {
+        try {
+          const result = await dispatchPartnerEvent({
+            eventType: ev.event_type,
+            eventUuid: ev.event_uuid,
+            data: ev.data,
+            log: logger,
+            source: "replay",
+          });
           cursor = ev.event_uuid;
           await recordEventCursor(cursor);
-          continue;
-        }
-
-        let success = true;
-        if (ev.event_type === "artifact.created") {
-          try {
-            const pa = ev.data as PartnerArtifact;
-            // Route to agent if the creator slug matches a registered agent.
-            const creatorSlug = pa.creator?.id ?? null;
-            let ownerId = KANNAKA_SYSTEM_USER_ID;
-            let agentId: number | null = null;
-            if (creatorSlug) {
-              const [agent] = await db
-                .select()
-                .from(agentsTable)
-                .where(eq(agentsTable.slug, creatorSlug))
-                .limit(1);
-              if (agent) {
-                ownerId = agent.ownerId;
-                agentId = agent.id;
-              }
-            }
-            const result = await upsertPartnerArtifact(pa, ownerId, agentId);
-            if (result === "new") {
-              const [row] = await db
-                .select({ id: artifactsTable.id })
-                .from(artifactsTable)
-                .where(eq(artifactsTable.obcArtifactUuid, pa.uuid))
-                .limit(1);
-              if (row) await runTasteEngineFor(row.id);
-            }
-          } catch (err) {
-            success = false;
-            logger.error({ err, eventUuid: ev.event_uuid }, "Replay handler failed; will retry on next startup");
-          }
-        }
-
-        if (success) {
-          await db
-            .insert(processedEventsTable)
-            .values({ eventUuid: ev.event_uuid, eventType: ev.event_type })
-            .onConflictDoNothing();
-          cursor = ev.event_uuid;
-          await recordEventCursor(cursor);
-          processed++;
-        } else {
+          if (result.status === "handled" || result.status === "unhandled") processed++;
+        } catch (err) {
+          logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed; will retry on next startup");
           return;
         }
       }
