@@ -15,12 +15,14 @@ import { EditionBadge } from "@/components/edition-badge";
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [editionFilter, setEditionFilter] = useState<string>("all");
   const [search, setSearch] = useState("kannaka");
   const queryClient = useQueryClient();
 
   const params = {
     ...(status !== "all" ? { status: status as "raw" | "scored" | "narrated" | "dropped" } : {}),
     ...(typeFilter !== "all" ? { artifactType: typeFilter as "image" | "audio" | "music" | "text" | "furniture" } : {}),
+    ...(editionFilter !== "all" ? { editionType: editionFilter as "open" | "limited" | "1_of_1" } : {}),
     ...(search ? { search } : {}),
     limit: 50,
     offset: 0,
@@ -81,6 +83,17 @@ export default function ArtifactsList() {
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="image">Art</SelectItem>
             <SelectItem value="audio">Music</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={editionFilter} onValueChange={setEditionFilter}>
+          <SelectTrigger className="w-40" data-testid="select-edition">
+            <SelectValue placeholder="Edition" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Editions</SelectItem>
+            <SelectItem value="1_of_1">1 of 1</SelectItem>
+            <SelectItem value="limited">Limited</SelectItem>
+            <SelectItem value="open">Open</SelectItem>
           </SelectContent>
         </Select>
         <Select value={status} onValueChange={setStatus}>

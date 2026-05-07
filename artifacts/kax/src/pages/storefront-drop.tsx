@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
+import { EditionBadge } from "@/components/edition-badge";
 
 export default function StorefrontDrop() {
   const routeParams = useParams<{ id: string }>();
@@ -62,7 +63,7 @@ export default function StorefrontDrop() {
           {drop.description && (
             <p className="text-muted-foreground mt-2 max-w-2xl">{drop.description}</p>
           )}
-          <div className="flex items-center gap-4 mt-4">
+          <div className="flex items-center gap-4 mt-4 flex-wrap">
             {drop.price != null && (
               <span className="text-2xl font-bold font-mono">${drop.price}</span>
             )}
@@ -74,7 +75,29 @@ export default function StorefrontDrop() {
                 Dropped {new Date(drop.publishedAt).toLocaleDateString()}
               </span>
             )}
+            {drop.isScarce && (
+              <span className="text-[10px] uppercase tracking-widest text-primary font-bold border border-primary/40 px-2 py-1" data-testid="badge-scarce-storefront">
+                Scarce Drop
+              </span>
+            )}
           </div>
+          {(() => {
+            const counts = drop.artifacts.reduce<Record<string, number>>((acc, a) => {
+              const k = a.editionType || "open";
+              acc[k] = (acc[k] || 0) + 1;
+              return acc;
+            }, {});
+            const parts: string[] = [];
+            if (counts["1_of_1"]) parts.push(`${counts["1_of_1"]}× 1-of-1`);
+            if (counts.limited) parts.push(`${counts.limited}× limited`);
+            if (counts.open) parts.push(`${counts.open}× open`);
+            if (parts.length === 0) return null;
+            return (
+              <p className="text-xs text-muted-foreground mt-3 font-mono tracking-wider" data-testid="text-edition-summary">
+                Provenance: {parts.join(" · ")}
+              </p>
+            );
+          })()}
           <div className="mt-6">
             <ShareButtons
               title={`${drop.title} — KAX / Kannaka Artifact Exchange`}
@@ -113,9 +136,16 @@ export default function StorefrontDrop() {
                   )}
                 </div>
                 <div className={`${idx % 2 === 1 ? "lg:order-1" : ""} py-8`}>
-                  {artifact.transmissionId && (
-                    <p className="text-xs font-mono text-primary mb-2">{artifact.transmissionId}</p>
-                  )}
+                  <div className="flex items-center gap-2 mb-2">
+                    {artifact.transmissionId && (
+                      <p className="text-xs font-mono text-primary">{artifact.transmissionId}</p>
+                    )}
+                    <EditionBadge
+                      editionType={artifact.editionType}
+                      editionTotal={artifact.editionTotal}
+                      editionSerial={artifact.editionSerial}
+                    />
+                  </div>
                   <h3 className="text-xl font-bold">
                     {artifact.narrativeTitle || artifact.title}
                   </h3>

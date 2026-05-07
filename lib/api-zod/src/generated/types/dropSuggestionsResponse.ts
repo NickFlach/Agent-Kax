@@ -5,8 +5,8 @@
  * KAX - Kannaka Artifact Exchange API
  * OpenAPI spec version: 0.1.0
  */
+import type { DropSuggestion } from "./dropSuggestion";
 
-export interface AddArtifactToDropBody {
-  artifactId: number;
-  force?: boolean;
+export interface DropSuggestionsResponse {
+  suggestions: DropSuggestion[];
 }

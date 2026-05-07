@@ -11,5 +11,6 @@ export interface UpdateDropBody {
   title?: string;
   description?: string;
   price?: number;
+  isScarce?: boolean;
   status?: UpdateDropBodyStatus;
 }

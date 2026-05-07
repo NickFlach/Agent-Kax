@@ -7,6 +7,7 @@
  */
 import type { ArtifactArtifactType } from "./artifactArtifactType";
 import type { ArtifactEditionType } from "./artifactEditionType";
+import type { ArtifactScoreBreakdown } from "./artifactScoreBreakdown";
 import type { ArtifactStatus } from "./artifactStatus";
 
 export interface Artifact {
@@ -34,4 +35,5 @@ export interface Artifact {
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;
+  scoreBreakdown?: ArtifactScoreBreakdown;
 }

@@ -28,6 +28,7 @@ import type {
   DashboardSummary,
   Drop,
   DropListResponse,
+  DropSuggestionsResponse,
   ErrorEnvelope,
   FeaturedResponse,
   GetRecentActivityParams,
@@ -1681,6 +1682,81 @@ export const usePublishDrop = <
 };
 
 /**
+ * @summary Suggest drop bundles based on scarcity (limited-edition artifacts grouped by creator)
+ */
+export const getGetDropSuggestionsUrl = () => {
+  return `/api/drops/suggestions`;
+};
+
+export const getDropSuggestions = async (
+  options?: RequestInit,
+): Promise<DropSuggestionsResponse> => {
+  return customFetch<DropSuggestionsResponse>(getGetDropSuggestionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDropSuggestionsQueryKey = () => {
+  return [`/api/drops/suggestions`] as const;
+};
+
+export const getGetDropSuggestionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDropSuggestions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDropSuggestions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDropSuggestionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDropSuggestions>>
+  > = ({ signal }) => getDropSuggestions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDropSuggestions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDropSuggestionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDropSuggestions>>
+>;
+export type GetDropSuggestionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Suggest drop bundles based on scarcity (limited-edition artifacts grouped by creator)
+ */
+
+export function useGetDropSuggestions<
+  TData = Awaited<ReturnType<typeof getDropSuggestions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDropSuggestions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDropSuggestionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Add an artifact to a drop
  */
 export const getAddArtifactToDropUrl = (dropId: number) => {
@@ -1701,7 +1777,7 @@ export const addArtifactToDrop = async (
 };
 
 export const getAddArtifactToDropMutationOptions = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorEnvelope>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -1742,13 +1818,13 @@ export type AddArtifactToDropMutationResult = NonNullable<
   Awaited<ReturnType<typeof addArtifactToDrop>>
 >;
 export type AddArtifactToDropMutationBody = BodyType<AddArtifactToDropBody>;
-export type AddArtifactToDropMutationError = ErrorType<unknown>;
+export type AddArtifactToDropMutationError = ErrorType<ErrorEnvelope>;
 
 /**
  * @summary Add an artifact to a drop
  */
 export const useAddArtifactToDrop = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorEnvelope>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<

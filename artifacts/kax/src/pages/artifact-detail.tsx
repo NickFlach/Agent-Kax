@@ -149,6 +149,24 @@ export default function ArtifactDetail() {
                     </div>
                   )}
                 </div>
+                {artifact.scoreBreakdown && (
+                  <div className="border-t border-border pt-3 space-y-1.5 text-xs font-mono" data-testid="score-breakdown">
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Breakdown</p>
+                    <BreakdownRow label="Reactions" value={`${(artifact.scoreBreakdown.reactionSignal * 50).toFixed(1)}%`} />
+                    <BreakdownRow label="Novelty" value={`+${(artifact.scoreBreakdown.novelty * 100).toFixed(1)}%`} />
+                    <BreakdownRow label="Exploration" value={`+${(artifact.scoreBreakdown.exploration * 100).toFixed(1)}%`} />
+                    <BreakdownRow label="Base" value={`${(artifact.scoreBreakdown.baseScore * 100).toFixed(1)}%`} />
+                    <BreakdownRow
+                      label={`Scarcity (${artifact.scoreBreakdown.editionType})`}
+                      value={`×${artifact.scoreBreakdown.scarcityMultiplier.toFixed(2)}`}
+                      highlight={artifact.scoreBreakdown.scarcityMultiplier > 1}
+                    />
+                    <div className="flex justify-between border-t border-border pt-1.5 mt-1.5">
+                      <span className="text-foreground">Final</span>
+                      <span className="text-primary font-bold">{(artifact.scoreBreakdown.finalScore * 100).toFixed(1)}%</span>
+                    </div>
+                  </div>
+                )}
                 {artifact.scoredAt && (
                   <p className="text-xs text-muted-foreground">Scored {new Date(artifact.scoredAt).toLocaleString()}</p>
                 )}
@@ -213,6 +231,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-mono">{value}</span>
+    </div>
+  );
+}
+
+function BreakdownRow({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={highlight ? "text-accent font-bold" : ""}>{value}</span>
     </div>
   );
 }

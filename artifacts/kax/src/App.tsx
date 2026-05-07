@@ -13,6 +13,7 @@ import ArtifactDetail from "@/pages/artifact-detail";
 import DropsList from "@/pages/drops-list";
 import DropDetail from "@/pages/drop-detail";
 import HarvesterPage from "@/pages/harvester";
+import Vault from "@/pages/vault";
 import Storefront from "@/pages/storefront";
 import StorefrontDrop from "@/pages/storefront-drop";
 import AdminUsers from "@/pages/admin-users";
@@ -84,6 +85,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
+            <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
             <div className="w-px h-4 bg-border mx-2" />
             <NavLink href="/storefront">Storefront</NavLink>
@@ -145,6 +147,9 @@ function Router() {
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/vault">
+        <AdminLayout><RequireAuth><Vault /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/admin/users">
         <AdminLayout><RequireAuth adminOnly><AdminUsers /></RequireAuth></AdminLayout>

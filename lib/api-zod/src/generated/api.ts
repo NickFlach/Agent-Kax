@@ -156,6 +156,7 @@ export const ListArtifactsQueryParams = zod.object({
   artifactType: zod
     .enum(["image", "audio", "music", "text", "furniture"])
     .optional(),
+  editionType: zod.enum(["open", "limited", "1_of_1"]).optional(),
 });
 
 export const ListArtifactsResponse = zod.object({
@@ -185,6 +186,17 @@ export const ListArtifactsResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   total: zod.number(),
@@ -222,6 +234,17 @@ export const GetArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  scoreBreakdown: zod
+    .object({
+      reactionSignal: zod.number(),
+      novelty: zod.number(),
+      exploration: zod.number(),
+      baseScore: zod.number(),
+      scarcityMultiplier: zod.number(),
+      editionType: zod.string(),
+      finalScore: zod.number(),
+    })
+    .nullish(),
 });
 
 /**
@@ -256,6 +279,17 @@ export const ScoreArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  scoreBreakdown: zod
+    .object({
+      reactionSignal: zod.number(),
+      novelty: zod.number(),
+      exploration: zod.number(),
+      baseScore: zod.number(),
+      scarcityMultiplier: zod.number(),
+      editionType: zod.string(),
+      finalScore: zod.number(),
+    })
+    .nullish(),
 });
 
 /**
@@ -290,6 +324,17 @@ export const NarrateArtifactResponse = zod.object({
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
+  scoreBreakdown: zod
+    .object({
+      reactionSignal: zod.number(),
+      novelty: zod.number(),
+      exploration: zod.number(),
+      baseScore: zod.number(),
+      scarcityMultiplier: zod.number(),
+      editionType: zod.string(),
+      finalScore: zod.number(),
+    })
+    .nullish(),
 });
 
 /**
@@ -313,6 +358,7 @@ export const ListDropsResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      isScarce: zod.boolean().optional(),
       ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
@@ -346,6 +392,17 @@ export const ListDropsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -363,6 +420,7 @@ export const CreateDropBody = zod.object({
   description: zod.string().optional(),
   dropType: zod.enum(["single", "collection", "bundle"]),
   price: zod.number().optional(),
+  isScarce: zod.boolean().optional(),
   artifactIds: zod.array(zod.number()).optional(),
 });
 
@@ -380,6 +438,7 @@ export const GetDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
   ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
@@ -407,6 +466,17 @@ export const GetDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -424,6 +494,7 @@ export const UpdateDropBody = zod.object({
   title: zod.string().optional(),
   description: zod.string().optional(),
   price: zod.number().optional(),
+  isScarce: zod.boolean().optional(),
   status: zod.enum(["draft", "published", "sold"]).optional(),
 });
 
@@ -434,6 +505,7 @@ export const UpdateDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
   ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
@@ -461,6 +533,17 @@ export const UpdateDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -488,6 +571,7 @@ export const PublishDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
   ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
@@ -515,10 +599,80 @@ export const PublishDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
   publishedAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * @summary Suggest drop bundles based on scarcity (limited-edition artifacts grouped by creator)
+ */
+export const GetDropSuggestionsResponse = zod.object({
+  suggestions: zod.array(
+    zod.object({
+      creatorName: zod.string(),
+      artifactCount: zod.number(),
+      totalReactions: zod.number(),
+      averageScore: zod.number().nullish(),
+      artifacts: zod.array(
+        zod.object({
+          id: zod.number(),
+          externalId: zod.string(),
+          title: zod.string(),
+          creatorName: zod.string(),
+          publicUrl: zod.string(),
+          thumbnailUrl: zod.string().nullish(),
+          reactionCount: zod.number(),
+          artifactType: zod.enum([
+            "image",
+            "music",
+            "text",
+            "audio",
+            "furniture",
+          ]),
+          status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+          kannakaScore: zod.number().nullish(),
+          rarityScore: zod.number().nullish(),
+          narrative: zod.string().nullish(),
+          narrativeTitle: zod.string().nullish(),
+          transmissionId: zod.string().nullish(),
+          tags: zod.array(zod.string()),
+          ingestedAt: zod.coerce.date(),
+          scoredAt: zod.coerce.date().nullish(),
+          narratedAt: zod.coerce.date().nullish(),
+          dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
+        }),
+      ),
+    }),
+  ),
 });
 
 /**
@@ -530,6 +684,7 @@ export const AddArtifactToDropParams = zod.object({
 
 export const AddArtifactToDropBody = zod.object({
   artifactId: zod.number(),
+  force: zod.boolean().optional(),
 });
 
 export const AddArtifactToDropResponse = zod.object({
@@ -539,6 +694,7 @@ export const AddArtifactToDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
   ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
@@ -566,6 +722,17 @@ export const AddArtifactToDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -624,6 +791,7 @@ export const GetStorefrontDropsResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      isScarce: zod.boolean().optional(),
       ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
@@ -657,6 +825,17 @@ export const GetStorefrontDropsResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -680,6 +859,7 @@ export const GetStorefrontDropResponse = zod.object({
   dropType: zod.enum(["single", "collection", "bundle"]),
   status: zod.enum(["draft", "published", "sold"]),
   price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
   ownerId: zod.string().nullish(),
   artifacts: zod.array(
     zod.object({
@@ -707,6 +887,17 @@ export const GetStorefrontDropResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -743,6 +934,17 @@ export const GetStorefrontFeaturedResponse = zod.object({
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
     }),
   ),
   latestDrop: zod
@@ -753,6 +955,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
       dropType: zod.enum(["single", "collection", "bundle"]),
       status: zod.enum(["draft", "published", "sold"]),
       price: zod.number().nullish(),
+      isScarce: zod.boolean().optional(),
       ownerId: zod.string().nullish(),
       artifacts: zod.array(
         zod.object({
@@ -786,6 +989,17 @@ export const GetStorefrontFeaturedResponse = zod.object({
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),

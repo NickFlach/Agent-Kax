@@ -20,6 +20,15 @@ export const artifactsTable = pgTable("artifacts", {
   status: artifactStatusEnum("status").notNull().default("raw"),
   kannakaScore: real("kannaka_score"),
   rarityScore: real("rarity_score"),
+  scoreBreakdown: jsonb("score_breakdown").$type<{
+    reactionSignal: number;
+    novelty: number;
+    exploration: number;
+    baseScore: number;
+    scarcityMultiplier: number;
+    editionType: string;
+    finalScore: number;
+  } | null>(),
   narrative: text("narrative"),
   narrativeTitle: text("narrative_title"),
   transmissionId: text("transmission_id"),

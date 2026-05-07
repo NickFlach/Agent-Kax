@@ -9,6 +9,7 @@ import {
   NarrateArtifactParams,
 } from "@workspace/api-zod";
 import { canMutate, requireAuth } from "../middlewares/requireAuth";
+import { computeScore } from "../lib/tasteEngine";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,9 @@ router.get("/artifacts", async (req, res) => {
     } else {
       conditions.push(eq(artifactsTable.artifactType, query.artifactType));
     }
+  }
+  if (query.editionType) {
+    conditions.push(eq(artifactsTable.editionType, query.editionType));
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -84,17 +88,17 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Not authorized to modify this artifact" });
     return;
   }
-  const reactionSignal = Math.min(a.reactionCount / 100, 1);
-  const noveltyFactor = Math.random() * 0.3;
-  const explorationBonus = Math.random() * 0.1;
-  const kannakaScore = Math.min(reactionSignal * 0.5 + noveltyFactor + explorationBonus + 0.1, 1);
-  const rarityScore = Math.random() * 0.4 + 0.3;
+  const { kannakaScore, rarityScore, breakdown } = computeScore({
+    reactionCount: a.reactionCount,
+    editionType: a.editionType,
+  });
 
   const updated = await db
     .update(artifactsTable)
     .set({
-      kannakaScore: Math.round(kannakaScore * 100) / 100,
-      rarityScore: Math.round(rarityScore * 100) / 100,
+      kannakaScore,
+      rarityScore,
+      scoreBreakdown: breakdown,
       status: a.status === "raw" ? "scored" : a.status,
       scoredAt: new Date(),
     })
@@ -103,7 +107,7 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
 
   await db.insert(activitiesTable).values({
     type: "scored",
-    message: `Scored "${a.title}" — ${(kannakaScore * 100).toFixed(0)}%`,
+    message: `Scored "${a.title}" — ${(kannakaScore * 100).toFixed(0)}% (${a.editionType}, ×${breakdown.scarcityMultiplier})`,
     artifactTitle: a.title,
   });
 
@@ -183,6 +187,7 @@ function formatArtifact(a: typeof artifactsTable.$inferSelect) {
     editionTotal: a.editionTotal,
     editionSerial: a.editionSerial,
     obcArtifactUuid: a.obcArtifactUuid,
+    scoreBreakdown: a.scoreBreakdown ?? null,
   };
 }
 

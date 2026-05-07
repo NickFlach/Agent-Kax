@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { dropsTable, artifactsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, desc, and, count } from "drizzle-orm";
+import { eq, desc, and, count, inArray, sql } from "drizzle-orm";
 import { formatArtifact } from "./artifacts";
 import {
   ListDropsQueryParams,
@@ -50,6 +50,49 @@ async function getDropWithArtifacts(dropId: number) {
   };
 }
 
+router.get("/drops/suggestions", requireAuth, async (req, res) => {
+  const conditions = [
+    inArray(artifactsTable.editionType, ["limited", "1_of_1"]),
+    sql`${artifactsTable.dropId} IS NULL`,
+    inArray(artifactsTable.status, ["scored", "narrated"]),
+  ];
+  if (req.user!.role !== "admin") {
+    conditions.push(eq(artifactsTable.ownerId, req.user!.id));
+  }
+  const limited = await db
+    .select()
+    .from(artifactsTable)
+    .where(and(...conditions))
+    .orderBy(desc(artifactsTable.kannakaScore));
+
+  const byCreator = new Map<string, typeof limited>();
+  for (const a of limited) {
+    const list = byCreator.get(a.creatorName) ?? [];
+    list.push(a);
+    byCreator.set(a.creatorName, list);
+  }
+
+  const suggestions = Array.from(byCreator.entries())
+    .filter(([, items]) => items.length >= 2)
+    .map(([creatorName, items]) => {
+      const totalReactions = items.reduce((sum, a) => sum + a.reactionCount, 0);
+      const scored = items.filter((a) => a.kannakaScore !== null);
+      const averageScore = scored.length
+        ? scored.reduce((s, a) => s + (a.kannakaScore ?? 0), 0) / scored.length
+        : null;
+      return {
+        creatorName,
+        artifactCount: items.length,
+        totalReactions,
+        averageScore: averageScore !== null ? Math.round(averageScore * 1000) / 1000 : null,
+        artifacts: items.slice(0, 12).map(formatArtifact),
+      };
+    })
+    .sort((a, b) => b.artifactCount - a.artifactCount);
+
+  res.json({ suggestions });
+});
+
 router.get("/drops", async (req, res) => {
   const query = ListDropsQueryParams.parse(req.query);
   const conditions = [];
@@ -91,6 +134,7 @@ router.get("/drops", async (req, res) => {
 
 router.post("/drops", requireAuth, async (req, res) => {
   const body = CreateDropBody.parse(req.body);
+  const isScarce = body.isScarce ?? (body.dropType === "single" || body.dropType === "collection");
   const [drop] = await db
     .insert(dropsTable)
     .values({
@@ -98,6 +142,7 @@ router.post("/drops", requireAuth, async (req, res) => {
       description: body.description,
       dropType: body.dropType,
       price: body.price,
+      isScarce,
       ownerId: req.user!.id,
     })
     .returning();
@@ -105,6 +150,9 @@ router.post("/drops", requireAuth, async (req, res) => {
   if (body.artifactIds && body.artifactIds.length > 0) {
     for (const artifactId of body.artifactIds) {
       const [a] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, artifactId)).limit(1);
+      if (a && isScarce && a.editionType === "open") {
+        continue;
+      }
       if (a && (await canMutate(req, a.ownerId))) {
         await db
           .update(artifactsTable)
@@ -138,6 +186,7 @@ router.patch("/drops/:id", requireAuth, async (req, res) => {
   if (body.description !== undefined) updates.description = body.description;
   if (body.price !== undefined) updates.price = body.price;
   if (body.status !== undefined) updates.status = body.status;
+  if (body.isScarce !== undefined) updates.isScarce = body.isScarce;
 
   await db.update(dropsTable).set(updates).where(eq(dropsTable.id, id));
 
@@ -185,11 +234,19 @@ router.post("/drops/:id/publish", requireAuth, async (req, res) => {
 router.post("/drops/:dropId/artifacts", requireAuth, async (req, res) => {
   const { dropId } = AddArtifactToDropParams.parse(req.params);
   if (!(await checkDropOwnership(req, res, dropId))) return;
-  const { artifactId } = AddArtifactToDropBody.parse(req.body);
+  const { artifactId, force } = AddArtifactToDropBody.parse(req.body);
 
   const [a] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, artifactId)).limit(1);
   if (!a || !(await canMutate(req, a.ownerId))) {
     res.status(403).json({ error: "Not authorized to use this artifact" });
+    return;
+  }
+
+  const [drop] = await db.select().from(dropsTable).where(eq(dropsTable.id, dropId)).limit(1);
+  if (drop?.isScarce && a.editionType === "open" && !force) {
+    res.status(409).json({
+      error: `This drop is marketed as scarce; "${a.title}" is an open edition. Pass force=true to override.`,
+    });
     return;
   }
 

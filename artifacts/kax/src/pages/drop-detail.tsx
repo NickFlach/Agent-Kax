@@ -1,4 +1,5 @@
-import { useGetDrop, getGetDropQueryKey, useUpdateDrop, usePublishDrop, useAddArtifactToDrop, useRemoveArtifactFromDrop, useListArtifacts, getListArtifactsQueryKey } from "@workspace/api-client-react";
+import { useGetDrop, getGetDropQueryKey, useUpdateDrop, usePublishDrop, useAddArtifactToDrop, useRemoveArtifactFromDrop, useListArtifacts, getListArtifactsQueryKey, useGetDropSuggestions, getGetDropSuggestionsQueryKey } from "@workspace/api-client-react";
+import { EditionBadge } from "@/components/edition-badge";
 import { useParams, Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,19 +44,34 @@ export default function DropDetail() {
     },
   });
 
+  const [addError, setAddError] = useState<{ artifactId: number; message: string } | null>(null);
+
   const addArtifactMutation = useAddArtifactToDrop({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetDropQueryKey(id) });
+        queryClient.invalidateQueries({ queryKey: getGetDropSuggestionsQueryKey() });
         setShowAddArtifact(false);
+        setAddError(null);
+      },
+      onError: (err: unknown, variables) => {
+        const message =
+          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+          "Failed to add artifact";
+        setAddError({ artifactId: variables.data.artifactId, message });
       },
     },
+  });
+
+  const { data: suggestions } = useGetDropSuggestions({
+    query: { queryKey: getGetDropSuggestionsQueryKey(), enabled: !!drop && drop.status === "draft" },
   });
 
   const removeArtifactMutation = useRemoveArtifactFromDrop({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetDropQueryKey(id) });
+        queryClient.invalidateQueries({ queryKey: getGetDropSuggestionsQueryKey() });
       },
     },
   });
@@ -94,6 +110,11 @@ export default function DropDetail() {
         <Badge variant="outline" className={statusColors[drop.status] || ""}>
           {drop.status}
         </Badge>
+        {drop.isScarce && (
+          <Badge variant="outline" className="bg-primary/20 text-primary border-primary/40" data-testid="badge-drop-scarce">
+            SCARCE
+          </Badge>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -116,35 +137,54 @@ export default function DropDetail() {
                     </DialogHeader>
                     <div className="space-y-2 max-h-96 overflow-y-auto mt-4">
                       {availableArtifacts?.artifacts && availableArtifacts.artifacts.length > 0 ? (
-                        availableArtifacts.artifacts.map((a) => (
-                          <button
-                            key={a.id}
-                            onClick={() => addArtifactMutation.mutate({ dropId: id, data: { artifactId: a.id } })}
-                            disabled={addArtifactMutation.isPending}
-                            className="w-full flex items-center gap-3 p-3 hover:bg-secondary transition-colors text-left"
-                            data-testid={`button-add-${a.id}`}
-                          >
-                            <div className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
-                              <img
-                                src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? a.thumbnailUrl : a.publicUrl}
-                                alt={a.title}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
-                                }}
-                              />
+                        availableArtifacts.artifacts.map((a) => {
+                          const isErr = addError?.artifactId === a.id;
+                          return (
+                            <div key={a.id} className="space-y-1">
+                              <button
+                                onClick={() => addArtifactMutation.mutate({ dropId: id, data: { artifactId: a.id } })}
+                                disabled={addArtifactMutation.isPending}
+                                className="w-full flex items-center gap-3 p-3 hover:bg-secondary transition-colors text-left"
+                                data-testid={`button-add-${a.id}`}
+                              >
+                                <div className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? a.thumbnailUrl : a.publicUrl}
+                                    alt={a.title}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{a.title}</p>
+                                  <p className="text-xs text-muted-foreground">{a.creatorName}</p>
+                                </div>
+                                <EditionBadge editionType={a.editionType} editionTotal={a.editionTotal} editionSerial={a.editionSerial} />
+                                {a.kannakaScore !== null && a.kannakaScore !== undefined && (
+                                  <span className="text-xs font-mono text-primary">
+                                    {(a.kannakaScore * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                              </button>
+                              {isErr && (
+                                <div className="px-3 py-2 border border-destructive/40 bg-destructive/10 text-xs text-destructive flex items-center justify-between gap-3" data-testid={`error-add-${a.id}`}>
+                                  <span className="flex-1">{addError?.message}</span>
+                                  <button
+                                    className="px-2 py-1 bg-destructive text-destructive-foreground hover:bg-destructive/80 transition-colors text-[10px] uppercase tracking-wider"
+                                    onClick={() =>
+                                      addArtifactMutation.mutate({ dropId: id, data: { artifactId: a.id, force: true } })
+                                    }
+                                    data-testid={`button-force-${a.id}`}
+                                  >
+                                    Force Add
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{a.title}</p>
-                              <p className="text-xs text-muted-foreground">{a.creatorName}</p>
-                            </div>
-                            {a.kannakaScore !== null && a.kannakaScore !== undefined && (
-                              <span className="text-xs font-mono text-primary">
-                                {(a.kannakaScore * 100).toFixed(0)}%
-                              </span>
-                            )}
-                          </button>
-                        ))
+                          );
+                        })
                       ) : (
                         <p className="text-center text-muted-foreground py-4">No narrated artifacts available. Score and narrate artifacts first.</p>
                       )}
@@ -158,6 +198,9 @@ export default function DropDetail() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   {drop.artifacts.map((artifact) => (
                     <div key={artifact.id} className="group relative" data-testid={`drop-artifact-${artifact.id}`}>
+                      <div className="absolute top-1 left-1 z-10">
+                        <EditionBadge editionType={artifact.editionType} editionTotal={artifact.editionTotal} editionSerial={artifact.editionSerial} />
+                      </div>
                       <Link href={`/artifacts/${artifact.id}`}>
                         <div className="aspect-square bg-secondary overflow-hidden">
                           {(artifact.artifactType === "audio" || artifact.artifactType === "music") && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
@@ -256,6 +299,57 @@ export default function DropDetail() {
                 >
                   Set Price
                 </button>
+              </CardContent>
+            </Card>
+          )}
+
+          {drop.status === "draft" && suggestions && suggestions.suggestions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+                  Bundle Suggestions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  Limited / 1-of-1 artifacts grouped by creator
+                </p>
+                {suggestions.suggestions.slice(0, 5).map((s) => (
+                  <div key={s.creatorName} className="border border-border p-2 text-xs space-y-2" data-testid={`suggestion-${s.creatorName}`}>
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium truncate">{s.creatorName}</span>
+                      <span className="font-mono text-primary">{s.artifactCount}×</span>
+                    </div>
+                    <div className="flex gap-1">
+                      {s.artifacts.slice(0, 4).map((a) => (
+                        <button
+                          key={a.id}
+                          onClick={() =>
+                            addArtifactMutation.mutate({ dropId: id, data: { artifactId: a.id } })
+                          }
+                          disabled={addArtifactMutation.isPending}
+                          className="w-10 h-10 bg-secondary overflow-hidden flex-shrink-0 hover:ring-2 hover:ring-primary transition-all"
+                          title={`Add ${a.title}`}
+                          data-testid={`suggestion-add-${a.id}`}
+                        >
+                          <img
+                            src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes("suno.ai") ? a.thumbnailUrl : a.publicUrl}
+                            alt={a.title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
+                            }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    {s.averageScore != null && (
+                      <p className="text-[10px] text-muted-foreground font-mono">
+                        avg {(s.averageScore * 100).toFixed(0)}%
+                      </p>
+                    )}
+                  </div>
+                ))}
               </CardContent>
             </Card>
           )}

@@ -16,6 +16,7 @@ export default function DropsList() {
   const [newTitle, setNewTitle] = useState("");
   const [newType, setNewType] = useState<"single" | "collection" | "bundle">("single");
   const [newDesc, setNewDesc] = useState("");
+  const [newIsScarce, setNewIsScarce] = useState(true);
   const queryClient = useQueryClient();
 
   const params = {
@@ -80,6 +81,16 @@ export default function DropsList() {
                 onChange={(e) => setNewDesc(e.target.value)}
                 data-testid="input-drop-desc"
               />
+              <label className="flex items-center gap-2 text-sm cursor-pointer" data-testid="label-scarce">
+                <input
+                  type="checkbox"
+                  checked={newIsScarce}
+                  onChange={(e) => setNewIsScarce(e.target.checked)}
+                  className="accent-primary"
+                  data-testid="checkbox-scarce"
+                />
+                <span>Mark as scarce drop (blocks open editions)</span>
+              </label>
               <Select value={newType} onValueChange={(v) => setNewType(v as "single" | "collection" | "bundle")}>
                 <SelectTrigger data-testid="select-drop-type">
                   <SelectValue />
@@ -98,6 +109,7 @@ export default function DropsList() {
                       title: newTitle,
                       dropType: newType,
                       description: newDesc || undefined,
+                      isScarce: newIsScarce,
                     },
                   });
                 }}
@@ -143,9 +155,16 @@ export default function DropsList() {
                       {drop.title}
                     </CardTitle>
                   </Link>
-                  <Badge variant="outline" className={statusColors[drop.status] || ""}>
-                    {drop.status}
-                  </Badge>
+                  <div className="flex items-center gap-1">
+                    {drop.isScarce && (
+                      <Badge variant="outline" className="bg-primary/20 text-primary border-primary/40 text-[10px]" data-testid={`badge-scarce-${drop.id}`}>
+                        SCARCE
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className={statusColors[drop.status] || ""}>
+                      {drop.status}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>

@@ -227,6 +227,11 @@ paths:
           schema:
             type: string
             enum: [image, audio, music, text, furniture]
+        - name: editionType
+          in: query
+          schema:
+            type: string
+            enum: [open, limited, "1_of_1"]
       responses:
         "200":
           description: List of artifacts
@@ -412,6 +417,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Drop"
 
+  /drops/suggestions:
+    get:
+      operationId: getDropSuggestions
+      tags: [drops]
+      summary: Suggest drop bundles based on scarcity (limited-edition artifacts grouped by creator)
+      responses:
+        "200":
+          description: Suggested drop bundles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DropSuggestionsResponse"
+
   /drops/{dropId}/artifacts:
     post:
       operationId: addArtifactToDrop
@@ -436,6 +454,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Drop"
+        "409":
+          description: Open-edition artifact rejected by scarce drop (pass force=true to override)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 
   /drops/{dropId}/artifacts/{artifactId}:
     delete:
@@ -798,6 +822,32 @@ components:
         editionSerial:
           type: integer
           nullable: true
+        scoreBreakdown:
+          type: object
+          nullable: true
+          properties:
+            reactionSignal:
+              type: number
+            novelty:
+              type: number
+            exploration:
+              type: number
+            baseScore:
+              type: number
+            scarcityMultiplier:
+              type: number
+            editionType:
+              type: string
+            finalScore:
+              type: number
+          required:
+            - reactionSignal
+            - novelty
+            - exploration
+            - baseScore
+            - scarcityMultiplier
+            - editionType
+            - finalScore
       required:
         - id
         - externalId
@@ -843,6 +893,8 @@ components:
         price:
           type: number
           nullable: true
+        isScarce:
+          type: boolean
         ownerId:
           type: string
           nullable: true
@@ -890,6 +942,8 @@ components:
           enum: [single, collection, bundle]
         price:
           type: number
+        isScarce:
+          type: boolean
         artifactIds:
           type: array
           items:
@@ -907,6 +961,8 @@ components:
           type: string
         price:
           type: number
+        isScarce:
+          type: boolean
         status:
           type: string
           enum: [draft, published, sold]
@@ -916,8 +972,37 @@ components:
       properties:
         artifactId:
           type: integer
+        force:
+          type: boolean
       required:
         - artifactId
+
+    DropSuggestion:
+      type: object
+      required: [creatorName, artifactCount, totalReactions, artifacts]
+      properties:
+        creatorName:
+          type: string
+        artifactCount:
+          type: integer
+        totalReactions:
+          type: integer
+        averageScore:
+          type: number
+          nullable: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+
+    DropSuggestionsResponse:
+      type: object
+      required: [suggestions]
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DropSuggestion"
 
     HarvesterRunBody:
       type: object

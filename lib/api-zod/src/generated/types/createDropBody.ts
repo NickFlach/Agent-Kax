@@ -12,5 +12,6 @@ export interface CreateDropBody {
   description?: string;
   dropType: CreateDropBodyDropType;
   price?: number;
+  isScarce?: boolean;
   artifactIds?: number[];
 }

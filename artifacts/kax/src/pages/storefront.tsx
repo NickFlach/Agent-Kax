@@ -153,6 +153,24 @@ export default function Storefront() {
                     <span>{drop.dropType} / {drop.artifacts.length} artifacts</span>
                     {drop.price != null && <span className="font-mono text-foreground">${drop.price}</span>}
                   </div>
+                  {(() => {
+                    const counts = drop.artifacts.reduce<Record<string, number>>((acc, a) => {
+                      const k = a.editionType || "open";
+                      acc[k] = (acc[k] || 0) + 1;
+                      return acc;
+                    }, {});
+                    const parts: string[] = [];
+                    if (counts["1_of_1"]) parts.push(`${counts["1_of_1"]}× 1-of-1`);
+                    if (counts.limited) parts.push(`${counts.limited}× limited`);
+                    if (counts.open) parts.push(`${counts.open}× open`);
+                    if (parts.length === 0) return null;
+                    return (
+                      <div className="flex items-center gap-2 mt-2 text-[10px] uppercase tracking-wider">
+                        {drop.isScarce && <span className="text-primary font-bold">SCARCE</span>}
+                        <span className="text-muted-foreground">{parts.join(" · ")}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </Link>
             ))}

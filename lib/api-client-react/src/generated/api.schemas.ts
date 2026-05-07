@@ -135,6 +135,16 @@ export const ArtifactEditionType = {
   "1_of_1": "1_of_1",
 } as const;
 
+export type ArtifactScoreBreakdown = {
+  reactionSignal: number;
+  novelty: number;
+  exploration: number;
+  baseScore: number;
+  scarcityMultiplier: number;
+  editionType: string;
+  finalScore: number;
+} | null;
+
 export interface Artifact {
   id: number;
   externalId: string;
@@ -160,6 +170,7 @@ export interface Artifact {
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;
+  scoreBreakdown?: ArtifactScoreBreakdown;
 }
 
 export interface ArtifactListResponse {
@@ -190,6 +201,7 @@ export interface Drop {
   dropType: DropDropType;
   status: DropStatus;
   price?: number | null;
+  isScarce?: boolean;
   ownerId?: string | null;
   artifacts: Artifact[];
   createdAt: string;
@@ -215,6 +227,7 @@ export interface CreateDropBody {
   description?: string;
   dropType: CreateDropBodyDropType;
   price?: number;
+  isScarce?: boolean;
   artifactIds?: number[];
 }
 
@@ -231,11 +244,25 @@ export interface UpdateDropBody {
   title?: string;
   description?: string;
   price?: number;
+  isScarce?: boolean;
   status?: UpdateDropBodyStatus;
 }
 
 export interface AddArtifactToDropBody {
   artifactId: number;
+  force?: boolean;
+}
+
+export interface DropSuggestion {
+  creatorName: string;
+  artifactCount: number;
+  totalReactions: number;
+  averageScore?: number | null;
+  artifacts: Artifact[];
+}
+
+export interface DropSuggestionsResponse {
+  suggestions: DropSuggestion[];
 }
 
 export type HarvesterRunBodyType =
@@ -354,6 +381,7 @@ export type ListArtifactsParams = {
   offset?: number;
   search?: string;
   artifactType?: ListArtifactsArtifactType;
+  editionType?: ListArtifactsEditionType;
 };
 
 export type ListArtifactsStatus =
@@ -375,6 +403,15 @@ export const ListArtifactsArtifactType = {
   music: "music",
   text: "text",
   furniture: "furniture",
+} as const;
+
+export type ListArtifactsEditionType =
+  (typeof ListArtifactsEditionType)[keyof typeof ListArtifactsEditionType];
+
+export const ListArtifactsEditionType = {
+  open: "open",
+  limited: "limited",
+  "1_of_1": "1_of_1",
 } as const;
 
 export type ListDropsParams = {

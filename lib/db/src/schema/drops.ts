@@ -1,4 +1,4 @@
-import { pgTable, serial, text, real, timestamp, pgEnum, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, real, timestamp, pgEnum, varchar, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
@@ -13,6 +13,7 @@ export const dropsTable = pgTable("drops", {
   dropType: dropTypeEnum("drop_type").notNull().default("single"),
   status: dropStatusEnum("status").notNull().default("draft"),
   price: real("price"),
+  isScarce: boolean("is_scarce").notNull().default(false),
   ownerId: varchar("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   publishedAt: timestamp("published_at"),
