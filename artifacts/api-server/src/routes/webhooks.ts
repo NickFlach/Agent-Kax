@@ -28,10 +28,15 @@ function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): 
 }
 
 interface WebhookEnvelope {
-  event_uuid: string;
-  event_type: string;
+  event_uuid?: string;
+  id?: string;
+  event_type?: string;
+  event?: string;
+  type?: string;
   occurred_at?: string;
-  data: unknown;
+  data?: unknown;
+  payload?: unknown;
+  artifact?: unknown;
 }
 
 async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promise<void> {
@@ -100,37 +105,47 @@ router.post(
       return;
     }
 
-    if (!envelope.event_uuid || !envelope.event_type) {
-      res.status(400).json({ error: "Missing event_uuid or event_type" });
+    const eventUuid = envelope.event_uuid || envelope.id;
+    const eventType =
+      envelope.event_type ||
+      envelope.event ||
+      envelope.type ||
+      req.header("x-openclawcity-event") ||
+      undefined;
+    const eventData =
+      (envelope.data as unknown) ?? (envelope.payload as unknown) ?? (envelope.artifact as unknown);
+
+    if (!eventUuid || !eventType) {
+      res.status(400).json({ error: "Missing event id or event type" });
       return;
     }
 
     const already = await db
       .select({ eventUuid: processedEventsTable.eventUuid })
       .from(processedEventsTable)
-      .where(eq(processedEventsTable.eventUuid, envelope.event_uuid))
+      .where(eq(processedEventsTable.eventUuid, eventUuid))
       .limit(1);
 
     if (already.length > 0) {
-      await recordWebhookReceived(envelope.event_uuid);
+      await recordWebhookReceived(eventUuid);
       res.json({ received: true, deduped: true });
       return;
     }
 
     try {
-      if (envelope.event_type === "artifact.created") {
-        await handleArtifactCreated(req, envelope.data as PartnerArtifact);
+      if (eventType === "artifact.created") {
+        await handleArtifactCreated(req, eventData as PartnerArtifact);
       } else {
-        req.log.info({ type: envelope.event_type }, "Webhook event type not handled in v1");
+        req.log.info({ type: eventType }, "Webhook event type not handled in v1");
       }
       await db
         .insert(processedEventsTable)
-        .values({ eventUuid: envelope.event_uuid, eventType: envelope.event_type })
+        .values({ eventUuid, eventType })
         .onConflictDoNothing();
-      await recordWebhookReceived(envelope.event_uuid);
+      await recordWebhookReceived(eventUuid);
       res.json({ received: true, deduped: false });
     } catch (err) {
-      req.log.error({ err, event_uuid: envelope.event_uuid }, "Webhook handler error");
+      req.log.error({ err, event_uuid: eventUuid }, "Webhook handler error");
       res.status(500).json({ error: "Webhook handler error" });
     }
   },
