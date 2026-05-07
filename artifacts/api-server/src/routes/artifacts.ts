@@ -39,6 +39,9 @@ router.get("/artifacts", async (req, res) => {
   if (query.editionType) {
     conditions.push(eq(artifactsTable.editionType, query.editionType));
   }
+  if (query.agentId !== undefined) {
+    conditions.push(eq(artifactsTable.agentId, query.agentId));
+  }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -187,6 +190,7 @@ function formatArtifact(a: typeof artifactsTable.$inferSelect) {
     editionTotal: a.editionTotal,
     editionSerial: a.editionSerial,
     obcArtifactUuid: a.obcArtifactUuid,
+    agentId: a.agentId,
     scoreBreakdown: a.scoreBreakdown ?? null,
   };
 }

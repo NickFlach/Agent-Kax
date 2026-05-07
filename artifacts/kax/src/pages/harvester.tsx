@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { useRunHarvester } from "@workspace/api-client-react";
+import {
+  useRunHarvester,
+  useListAgents,
+  getListAgentsQueryKey,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Link } from "wouter";
 
 export default function Harvester() {
   const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture" | "all">("image");
@@ -10,12 +15,22 @@ export default function Harvester() {
   const [minReactions, setMinReactions] = useState("0");
   const [creator, setCreator] = useState("");
   const [keyword, setKeyword] = useState("");
+  const [agentId, setAgentId] = useState<string>("");
   const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number; paired?: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: agentsData } = useListAgents({ query: { queryKey: getListAgentsQueryKey() } });
+  const agents = agentsData?.agents ?? [];
 
   const mutation = useRunHarvester({
     mutation: {
       onSuccess: (data) => {
         setLastResult(data);
+        setError(null);
+      },
+      onError: (err: unknown) => {
+        const e = err as { response?: { data?: { error?: string } }; message?: string };
+        setError(e?.response?.data?.error ?? e?.message ?? "Harvest failed");
       },
     },
   });
@@ -23,7 +38,10 @@ export default function Harvester() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight" data-testid="text-page-title">Artifact Harvester</h1>
-      <p className="text-muted-foreground">Ingest artifacts from the OpenBotCity public gallery into the KAX pipeline.</p>
+      <p className="text-muted-foreground">
+        Ingest artifacts from OpenBotCity into the KAX pipeline. Select one of your agents to harvest its catalog via the partner API.{" "}
+        <Link href="/agents" className="text-primary underline">Manage agents</Link>.
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -31,6 +49,22 @@ export default function Harvester() {
             <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Harvest Configuration</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div>
+              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Agent</label>
+              <Select value={agentId} onValueChange={setAgentId}>
+                <SelectTrigger data-testid="select-agent">
+                  <SelectValue placeholder={agents.length === 0 ? "No agents — add one first" : "Select an agent"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {agents.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      {a.displayName} (@{a.slug})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div>
               <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Artifact Type</label>
               <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture" | "all")}>
@@ -60,41 +94,27 @@ export default function Harvester() {
               />
             </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Min Reactions</label>
-              <Input
-                type="number"
-                value={minReactions}
-                onChange={(e) => setMinReactions(e.target.value)}
-                min={0}
-                data-testid="input-min-reactions"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Creator Filter</label>
-              <Input
-                type="text"
-                value={creator}
-                onChange={(e) => setCreator(e.target.value)}
-                placeholder="e.g. Kannaka (leave empty for all)"
-                data-testid="input-creator"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Keyword Search</label>
-              <Input
-                type="text"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="e.g. journey, still here (leave empty for all)"
-                data-testid="input-keyword"
-              />
-            </div>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground uppercase tracking-wider">Legacy options (no partner key)</summary>
+              <div className="space-y-3 mt-3">
+                <div>
+                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Min Reactions</label>
+                  <Input type="number" value={minReactions} onChange={(e) => setMinReactions(e.target.value)} min={0} data-testid="input-min-reactions" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Creator Filter</label>
+                  <Input type="text" value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="e.g. Kannaka" data-testid="input-creator" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Keyword Search</label>
+                  <Input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. journey" data-testid="input-keyword" />
+                </div>
+              </div>
+            </details>
 
             <button
               onClick={() => {
+                setError(null);
                 mutation.mutate({
                   data: {
                     type,
@@ -102,6 +122,7 @@ export default function Harvester() {
                     minReactions: parseInt(minReactions) || 0,
                     ...(creator.trim() ? { creator: creator.trim() } : {}),
                     ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
+                    ...(agentId ? { agentId: parseInt(agentId) } : {}),
                   },
                 });
               }}
@@ -111,6 +132,7 @@ export default function Harvester() {
             >
               {mutation.isPending ? "Harvesting..." : "Run Harvester"}
             </button>
+            {error && <p className="text-sm text-red-400" data-testid="text-harvest-error">{error}</p>}
           </CardContent>
         </Card>
 
@@ -156,7 +178,7 @@ export default function Harvester() {
               </div>
             )}
 
-            {!lastResult && !mutation.isPending && (
+            {!lastResult && !mutation.isPending && !error && (
               <div className="text-center py-12 text-muted-foreground">
                 <p className="text-sm">No harvesting runs yet. Configure and click "Run Harvester" to begin.</p>
               </div>
@@ -164,38 +186,6 @@ export default function Harvester() {
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">Pipeline Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 overflow-x-auto text-xs">
-            <Step label="Harvest" desc="Ingest from OpenBotCity" active />
-            <Arrow />
-            <Step label="Score" desc="Taste Engine evaluation" />
-            <Arrow />
-            <Step label="Narrate" desc="Story transformation" />
-            <Arrow />
-            <Step label="Drop" desc="Bundle for sale" />
-            <Arrow />
-            <Step label="Publish" desc="Launch to storefront" />
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
-}
-
-function Step({ label, desc, active }: { label: string; desc: string; active?: boolean }) {
-  return (
-    <div className={`flex-shrink-0 px-4 py-3 border ${active ? "border-primary bg-primary/10" : "border-border"}`}>
-      <p className={`font-medium ${active ? "text-primary" : ""}`}>{label}</p>
-      <p className="text-muted-foreground mt-0.5">{desc}</p>
-    </div>
-  );
-}
-
-function Arrow() {
-  return <span className="text-muted-foreground flex-shrink-0">→</span>;
 }

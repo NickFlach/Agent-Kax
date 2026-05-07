@@ -20,10 +20,14 @@ import type {
   ActivityFeed,
   AddArtifactToDropBody,
   AdminUser,
+  Agent,
+  AgentDashboard,
+  AgentListResponse,
   Artifact,
   ArtifactListResponse,
   AuthUserEnvelope,
   BeginBrowserLoginParams,
+  CreateAgentBody,
   CreateDropBody,
   DashboardSummary,
   Drop,
@@ -34,6 +38,7 @@ import type {
   GetRecentActivityParams,
   GetStorefrontDropsParams,
   HandleBrowserLoginCallbackParams,
+  HarvestAgentBody,
   HarvesterResult,
   HarvesterRunBody,
   HealthStatus,
@@ -818,6 +823,339 @@ export const useUpdateAdminUser = <
   TContext
 > => {
   return useMutation(getUpdateAdminUserMutationOptions(options));
+};
+
+/**
+ * @summary List agents owned by the current user (or all for admins)
+ */
+export const getListAgentsUrl = () => {
+  return `/api/agents`;
+};
+
+export const listAgents = async (
+  options?: RequestInit,
+): Promise<AgentListResponse> => {
+  return customFetch<AgentListResponse>(getListAgentsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAgentsQueryKey = () => {
+  return [`/api/agents`] as const;
+};
+
+export const getListAgentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAgents>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAgents>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAgentsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAgents>>> = ({
+    signal,
+  }) => listAgents({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAgents>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAgentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAgents>>
+>;
+export type ListAgentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List agents owned by the current user (or all for admins)
+ */
+
+export function useListAgents<
+  TData = Awaited<ReturnType<typeof listAgents>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAgents>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAgentsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Register an OpenBotCity agent by slug
+ */
+export const getCreateAgentUrl = () => {
+  return `/api/agents`;
+};
+
+export const createAgent = async (
+  createAgentBody: CreateAgentBody,
+  options?: RequestInit,
+): Promise<Agent> => {
+  return customFetch<Agent>(getCreateAgentUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createAgentBody),
+  });
+};
+
+export const getCreateAgentMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgent>>,
+    TError,
+    { data: BodyType<CreateAgentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAgent>>,
+  TError,
+  { data: BodyType<CreateAgentBody> },
+  TContext
+> => {
+  const mutationKey = ["createAgent"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAgent>>,
+    { data: BodyType<CreateAgentBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAgent(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAgentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAgent>>
+>;
+export type CreateAgentMutationBody = BodyType<CreateAgentBody>;
+export type CreateAgentMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Register an OpenBotCity agent by slug
+ */
+export const useCreateAgent = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgent>>,
+    TError,
+    { data: BodyType<CreateAgentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAgent>>,
+  TError,
+  { data: BodyType<CreateAgentBody> },
+  TContext
+> => {
+  return useMutation(getCreateAgentMutationOptions(options));
+};
+
+/**
+ * @summary Get an agent dashboard
+ */
+export const getGetAgentUrl = (slug: string) => {
+  return `/api/agents/${slug}`;
+};
+
+export const getAgent = async (
+  slug: string,
+  options?: RequestInit,
+): Promise<AgentDashboard> => {
+  return customFetch<AgentDashboard>(getGetAgentUrl(slug), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAgentQueryKey = (slug: string) => {
+  return [`/api/agents/${slug}`] as const;
+};
+
+export const getGetAgentQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgent>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgent>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAgentQueryKey(slug);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgent>>> = ({
+    signal,
+  }) => getAgent(slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getAgent>>, TError, TData> & {
+    queryKey: QueryKey;
+  };
+};
+
+export type GetAgentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgent>>
+>;
+export type GetAgentQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get an agent dashboard
+ */
+
+export function useGetAgent<
+  TData = Awaited<ReturnType<typeof getAgent>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgent>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Run a partner harvest for a single agent
+ */
+export const getHarvestAgentUrl = (slug: string) => {
+  return `/api/agents/${slug}/harvest`;
+};
+
+export const harvestAgent = async (
+  slug: string,
+  harvestAgentBody: HarvestAgentBody,
+  options?: RequestInit,
+): Promise<HarvesterResult> => {
+  return customFetch<HarvesterResult>(getHarvestAgentUrl(slug), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(harvestAgentBody),
+  });
+};
+
+export const getHarvestAgentMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof harvestAgent>>,
+    TError,
+    { slug: string; data: BodyType<HarvestAgentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof harvestAgent>>,
+  TError,
+  { slug: string; data: BodyType<HarvestAgentBody> },
+  TContext
+> => {
+  const mutationKey = ["harvestAgent"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof harvestAgent>>,
+    { slug: string; data: BodyType<HarvestAgentBody> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return harvestAgent(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HarvestAgentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof harvestAgent>>
+>;
+export type HarvestAgentMutationBody = BodyType<HarvestAgentBody>;
+export type HarvestAgentMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run a partner harvest for a single agent
+ */
+export const useHarvestAgent = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof harvestAgent>>,
+    TError,
+    { slug: string; data: BodyType<HarvestAgentBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof harvestAgent>>,
+  TError,
+  { slug: string; data: BodyType<HarvestAgentBody> },
+  TContext
+> => {
+  return useMutation(getHarvestAgentMutationOptions(options));
 };
 
 /**

@@ -3,8 +3,10 @@ import {
   artifactsTable,
   activitiesTable,
   processedEventsTable,
+  agentsTable,
+  type Agent,
 } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   listPartnerArtifacts,
   listPartnerEventsSince,
@@ -27,6 +29,7 @@ export interface HarvestRunResult {
 async function upsertPartnerArtifact(
   pa: PartnerArtifact,
   ownerId: string,
+  agentId: number | null,
 ): Promise<"new" | "duplicate"> {
   const existing = await db
     .select({ id: artifactsTable.id })
@@ -48,6 +51,7 @@ async function upsertPartnerArtifact(
       artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture",
       tags: [],
       ownerId,
+      agentId,
       editionType: pa.edition?.type ?? "open",
       editionTotal: pa.edition?.total ?? null,
       editionSerial: pa.edition?.serial ?? null,
@@ -58,8 +62,11 @@ async function upsertPartnerArtifact(
   return inserted.length > 0 ? "new" : "duplicate";
 }
 
-export async function runPartnerHarvest(opts: {
-  ownerId: string;
+/**
+ * Harvest artifacts for a single agent using its own paginated cursor.
+ */
+export async function runPartnerHarvestForAgent(opts: {
+  agent: Agent;
   limit?: number;
   type?: string;
 }): Promise<HarvestRunResult> {
@@ -67,8 +74,7 @@ export async function runPartnerHarvest(opts: {
     throw new Error("OBC_PARTNER_API_KEY not configured");
   }
   const targetLimit = opts.limit ?? 50;
-  const state = await getSyncState();
-  let cursor: string | null = state?.lastArtifactCursor ?? null;
+  let cursor: string | null = opts.agent.lastArtifactCursor ?? null;
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
@@ -78,29 +84,38 @@ export async function runPartnerHarvest(opts: {
       since: cursor,
       limit: Math.min(50, targetLimit - harvested),
       type: opts.type,
+      creator: opts.agent.slug,
     });
-    if (page.artifacts.length === 0) {
-      await recordPollSuccess(cursor);
-      break;
-    }
+    if (page.artifacts.length === 0) break;
 
     for (const pa of page.artifacts) {
       harvested++;
-      const result = await upsertPartnerArtifact(pa, opts.ownerId);
+      const result = await upsertPartnerArtifact(pa, opts.agent.ownerId, opts.agent.id);
       if (result === "new") newArtifacts++;
       else duplicates++;
       cursor = pa.uuid;
     }
 
-    await recordPollSuccess(cursor);
     if (!page.next_cursor) break;
     cursor = page.next_cursor;
   }
 
+  await db
+    .update(agentsTable)
+    .set({
+      lastArtifactCursor: cursor,
+      lastSyncAt: new Date(),
+      artifactsHarvested: sql`${agentsTable.artifactsHarvested} + ${newArtifacts}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(agentsTable.id, opts.agent.id));
+
+  await recordPollSuccess(cursor);
+
   if (newArtifacts > 0) {
     await db.insert(activitiesTable).values({
       type: "harvested",
-      message: `Partner API harvest: ${newArtifacts} new (${duplicates} duplicates)`,
+      message: `Partner harvest [${opts.agent.slug}]: ${newArtifacts} new (${duplicates} duplicates)`,
     });
   }
 
@@ -141,7 +156,22 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
         if (ev.event_type === "artifact.created") {
           try {
             const pa = ev.data as PartnerArtifact;
-            const result = await upsertPartnerArtifact(pa, KANNAKA_SYSTEM_USER_ID);
+            // Route to agent if the creator slug matches a registered agent.
+            const creatorSlug = pa.creator?.id ?? null;
+            let ownerId = KANNAKA_SYSTEM_USER_ID;
+            let agentId: number | null = null;
+            if (creatorSlug) {
+              const [agent] = await db
+                .select()
+                .from(agentsTable)
+                .where(eq(agentsTable.slug, creatorSlug))
+                .limit(1);
+              if (agent) {
+                ownerId = agent.ownerId;
+                agentId = agent.id;
+              }
+            }
+            const result = await upsertPartnerArtifact(pa, ownerId, agentId);
             if (result === "new") {
               const [row] = await db
                 .select({ id: artifactsTable.id })

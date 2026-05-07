@@ -13,4 +13,6 @@ export interface HarvesterRunBody {
   minReactions?: number;
   creator?: string;
   keyword?: string;
+  /** Required when the partner API is configured; chooses which agent to harvest. */
+  agentId?: number;
 }

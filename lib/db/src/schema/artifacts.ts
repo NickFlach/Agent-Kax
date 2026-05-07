@@ -2,6 +2,7 @@ import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
+import { agentsTable } from "./agents";
 
 export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture"]);
 export const artifactStatusEnum = pgEnum("artifact_status", ["raw", "scored", "narrated", "dropped"]);
@@ -35,6 +36,7 @@ export const artifactsTable = pgTable("artifacts", {
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   dropId: integer("drop_id"),
   ownerId: varchar("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
+  agentId: integer("agent_id").references(() => agentsTable.id, { onDelete: "set null" }),
   editionType: editionTypeEnum("edition_type").notNull().default("open"),
   editionTotal: integer("edition_total"),
   editionSerial: integer("edition_serial"),

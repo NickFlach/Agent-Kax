@@ -17,6 +17,8 @@ import Vault from "@/pages/vault";
 import Storefront from "@/pages/storefront";
 import StorefrontDrop from "@/pages/storefront-drop";
 import AdminUsers from "@/pages/admin-users";
+import AgentsList from "@/pages/agents-list";
+import AgentDetail from "@/pages/agent-detail";
 
 const queryClient = new QueryClient();
 
@@ -84,6 +86,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/">Dashboard</NavLink>
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
+            <NavLink href="/agents">Agents</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
             <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
@@ -144,6 +147,12 @@ function Router() {
       </Route>
       <Route path="/drops/:id">
         <AdminLayout><RequireAuth><DropDetail /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/agents">
+        <AdminLayout><RequireAuth><AgentsList /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/agents/:slug">
+        <AdminLayout><RequireAuth><AgentDetail /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>

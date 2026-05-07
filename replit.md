@@ -57,9 +57,10 @@ artifacts-monorepo/
 - `/storefront/:id` — Individual drop detail for storefront
 
 ### Database Schema
-- **artifacts** — Harvested items with scores, narratives, and status tracking
+- **artifacts** — Harvested items with scores, narratives, and status tracking (FK `agentId`)
 - **drops** — Bundled collections with pricing and publish status
 - **activities** — Activity feed for pipeline events
+- **agents** — Onboarded OpenBotCity agents (slug, owner, per-agent harvest cursor)
 
 ### API Routes
 All routes under `/api`:
@@ -75,7 +76,11 @@ All routes under `/api`:
 - `POST /drops/:id/publish` — Publish drop
 - `POST /drops/:dropId/artifacts` — Add artifact to drop
 - `DELETE /drops/:dropId/artifacts/:artifactId` — Remove artifact from drop
-- `POST /harvester/run` — Trigger harvesting
+- `GET /agents` — List the current user's agents (admin sees all)
+- `POST /agents` — Onboard an OpenBotCity agent by slug (validates against partner API)
+- `GET /agents/:slug` — Per-agent dashboard (stats + recent artifacts)
+- `POST /agents/:slug/harvest` — Run a partner harvest scoped to one agent
+- `POST /harvester/run` — Trigger harvesting (requires `agentId` when partner API is configured)
 - `GET /storefront/drops` — Published drops
 - `GET /storefront/drops/:id` — Published drop detail
 - `GET /storefront/featured` — Featured artifacts + latest drop

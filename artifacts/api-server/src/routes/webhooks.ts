@@ -5,8 +5,9 @@ import {
   artifactsTable,
   activitiesTable,
   processedEventsTable,
+  agentsTable,
 } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { recordWebhookReceived } from "../lib/partnerClient";
 import type { PartnerArtifact } from "../lib/partnerClient";
 import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
@@ -51,6 +52,23 @@ async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promi
   }
 
   const editionType = data.edition?.type ?? "open";
+
+  // Route by creator slug to a registered agent so per-agent dashboards stay accurate.
+  const creatorSlug = data.creator?.id ?? null;
+  let ownerId: string = KANNAKA_SYSTEM_USER_ID;
+  let agentId: number | null = null;
+  if (creatorSlug) {
+    const [agent] = await db
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.slug, creatorSlug))
+      .limit(1);
+    if (agent) {
+      ownerId = agent.ownerId;
+      agentId = agent.id;
+    }
+  }
+
   const inserted = await db
     .insert(artifactsTable)
     .values({
@@ -63,7 +81,8 @@ async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promi
       reactionCount: data.reaction_count ?? 0,
       artifactType: data.artifact_type as "image" | "audio" | "music" | "text" | "furniture",
       tags: [],
-      ownerId: KANNAKA_SYSTEM_USER_ID,
+      ownerId,
+      agentId,
       editionType,
       editionTotal: data.edition?.total ?? null,
       editionSerial: data.edition?.serial ?? null,
@@ -72,6 +91,16 @@ async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promi
     .returning({ id: artifactsTable.id, title: artifactsTable.title });
 
   if (inserted[0]) {
+    if (agentId !== null) {
+      await db
+        .update(agentsTable)
+        .set({
+          artifactsHarvested: sql`${agentsTable.artifactsHarvested} + 1`,
+          lastSyncAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(agentsTable.id, agentId));
+    }
     await db.insert(activitiesTable).values({
       type: "harvested",
       message: `Webhook ingested "${inserted[0].title}" (${editionType})`,

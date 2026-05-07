@@ -142,6 +142,124 @@ export const UpdateAdminUserResponse = zod.object({
 });
 
 /**
+ * @summary List agents owned by the current user (or all for admins)
+ */
+export const ListAgentsResponse = zod.object({
+  agents: zod.array(
+    zod.object({
+      id: zod.number(),
+      slug: zod.string(),
+      displayName: zod.string(),
+      avatarUrl: zod.string().nullish(),
+      ownerId: zod.string(),
+      artifactsHarvested: zod.number(),
+      lastSyncAt: zod.coerce.date().nullish(),
+      lastArtifactCursor: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Register an OpenBotCity agent by slug
+ */
+
+export const CreateAgentBody = zod.object({
+  slug: zod.string().min(1),
+  displayName: zod.string().optional(),
+});
+
+/**
+ * @summary Get an agent dashboard
+ */
+export const GetAgentParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentResponse = zod.object({
+  agent: zod.object({
+    id: zod.number(),
+    slug: zod.string(),
+    displayName: zod.string(),
+    avatarUrl: zod.string().nullish(),
+    ownerId: zod.string(),
+    artifactsHarvested: zod.number(),
+    lastSyncAt: zod.coerce.date().nullish(),
+    lastArtifactCursor: zod.string().nullish(),
+    createdAt: zod.coerce.date(),
+  }),
+  stats: zod.object({
+    totalArtifacts: zod.number(),
+    scoredArtifacts: zod.number(),
+    narratedArtifacts: zod.number(),
+    droppedArtifacts: zod.number(),
+  }),
+  recentArtifacts: zod.array(
+    zod.object({
+      id: zod.number(),
+      externalId: zod.string(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      reactionCount: zod.number(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+      kannakaScore: zod.number().nullish(),
+      rarityScore: zod.number().nullish(),
+      narrative: zod.string().nullish(),
+      narrativeTitle: zod.string().nullish(),
+      transmissionId: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      ingestedAt: zod.coerce.date(),
+      scoredAt: zod.coerce.date().nullish(),
+      narratedAt: zod.coerce.date().nullish(),
+      dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Run a partner harvest for a single agent
+ */
+export const HarvestAgentParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const harvestAgentBodyLimitDefault = 25;
+
+export const HarvestAgentBody = zod.object({
+  type: zod
+    .enum(["image", "audio", "text", "music", "furniture", "all"])
+    .optional(),
+  limit: zod.number().default(harvestAgentBodyLimitDefault),
+});
+
+export const HarvestAgentResponse = zod.object({
+  harvested: zod.number(),
+  newArtifacts: zod.number(),
+  duplicates: zod.number(),
+  paired: zod.number().optional(),
+});
+
+/**
  * @summary List all artifacts
  */
 export const listArtifactsQueryLimitDefault = 50;
@@ -157,6 +275,7 @@ export const ListArtifactsQueryParams = zod.object({
     .enum(["image", "audio", "music", "text", "furniture"])
     .optional(),
   editionType: zod.enum(["open", "limited", "1_of_1"]).optional(),
+  agentId: zod.coerce.number().optional(),
 });
 
 export const ListArtifactsResponse = zod.object({
@@ -183,6 +302,7 @@ export const ListArtifactsResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -231,6 +351,7 @@ export const GetArtifactResponse = zod.object({
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
   obcArtifactUuid: zod.string().nullish(),
+  agentId: zod.number().nullish(),
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
@@ -276,6 +397,7 @@ export const ScoreArtifactResponse = zod.object({
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
   obcArtifactUuid: zod.string().nullish(),
+  agentId: zod.number().nullish(),
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
@@ -321,6 +443,7 @@ export const NarrateArtifactResponse = zod.object({
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
   obcArtifactUuid: zod.string().nullish(),
+  agentId: zod.number().nullish(),
   editionType: zod.enum(["open", "limited", "1_of_1"]),
   editionTotal: zod.number().nullish(),
   editionSerial: zod.number().nullish(),
@@ -389,6 +512,7 @@ export const ListDropsResponse = zod.object({
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
           obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
@@ -463,6 +587,7 @@ export const GetDropResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -530,6 +655,7 @@ export const UpdateDropResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -596,6 +722,7 @@ export const PublishDropResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -655,6 +782,7 @@ export const GetDropSuggestionsResponse = zod.object({
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
           obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
@@ -719,6 +847,7 @@ export const AddArtifactToDropResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -762,6 +891,12 @@ export const RunHarvesterBody = zod.object({
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
   creator: zod.string().optional(),
   keyword: zod.string().optional(),
+  agentId: zod
+    .number()
+    .optional()
+    .describe(
+      "Required when the partner API is configured; chooses which agent to harvest.",
+    ),
 });
 
 export const RunHarvesterResponse = zod.object({
@@ -822,6 +957,7 @@ export const GetStorefrontDropsResponse = zod.object({
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
           obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),
@@ -884,6 +1020,7 @@ export const GetStorefrontDropResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -931,6 +1068,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
       obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
       editionType: zod.enum(["open", "limited", "1_of_1"]),
       editionTotal: zod.number().nullish(),
       editionSerial: zod.number().nullish(),
@@ -986,6 +1124,7 @@ export const GetStorefrontFeaturedResponse = zod.object({
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
           obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
           editionType: zod.enum(["open", "limited", "1_of_1"]),
           editionTotal: zod.number().nullish(),
           editionSerial: zod.number().nullish(),

@@ -4,8 +4,10 @@ import { artifactsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
-import { runPartnerHarvest } from "../lib/harvesterJob";
+import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
 import { partnerApiAvailable } from "../lib/partnerClient";
+import { agentsTable } from "@workspace/db/schema";
+import { canMutate } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -120,9 +122,28 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
 
   try {
     if (partnerApiAvailable()) {
+      if (!body.agentId) {
+        res.status(400).json({
+          error: "Partner harvest requires an agentId. Add an agent first or pick one to harvest.",
+        });
+        return;
+      }
+      const [agent] = await db
+        .select()
+        .from(agentsTable)
+        .where(eq(agentsTable.id, body.agentId))
+        .limit(1);
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+      if (!(await canMutate(req, agent.ownerId))) {
+        res.status(403).json({ error: "Not authorized to harvest this agent" });
+        return;
+      }
       const partnerType = type === "all" ? undefined : type;
-      const result = await runPartnerHarvest({
-        ownerId,
+      const result = await runPartnerHarvestForAgent({
+        agent,
         limit: requestedLimit,
         ...(partnerType ? { type: partnerType } : {}),
       });

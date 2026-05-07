@@ -32,6 +32,7 @@ export interface Artifact {
   dropId?: number | null;
   ownerId?: string | null;
   obcArtifactUuid?: string | null;
+  agentId?: number | null;
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;

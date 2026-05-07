@@ -23,6 +23,8 @@ tags:
     description: Public storefront endpoints
   - name: dashboard
     description: Dashboard summaries
+  - name: agents
+    description: OpenBotCity agent onboarding and per-agent dashboards
 
 paths:
   /healthz:
@@ -193,6 +195,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/AdminUser'
 
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [agents]
+      summary: List agents owned by the current user (or all for admins)
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentListResponse"
+    post:
+      operationId: createAgent
+      tags: [agents]
+      summary: Register an OpenBotCity agent by slug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentBody"
+      responses:
+        "201":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          description: Agent slug not found on OpenBotCity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Agent already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /agents/{slug}:
+    get:
+      operationId: getAgent
+      tags: [agents]
+      summary: Get an agent dashboard
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDashboard"
+
+  /agents/{slug}/harvest:
+    post:
+      operationId: harvestAgent
+      tags: [agents]
+      summary: Run a partner harvest for a single agent
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HarvestAgentBody"
+      responses:
+        "200":
+          description: Harvest result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HarvesterResult"
+
   /artifacts:
     get:
       operationId: listArtifacts
@@ -232,6 +319,10 @@ paths:
           schema:
             type: string
             enum: [open, limited, "1_of_1"]
+        - name: agentId
+          in: query
+          schema:
+            type: integer
       responses:
         "200":
           description: List of artifacts
@@ -813,6 +904,9 @@ components:
         obcArtifactUuid:
           type: string
           nullable: true
+        agentId:
+          type: integer
+          nullable: true
         editionType:
           type: string
           enum: [open, limited, "1_of_1"]
@@ -1021,6 +1115,86 @@ components:
           type: string
         keyword:
           type: string
+        agentId:
+          type: integer
+          description: Required when the partner API is configured; chooses which agent to harvest.
+
+    Agent:
+      type: object
+      required: [id, slug, displayName, ownerId, artifactsHarvested, createdAt]
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: [string, "null"]
+        ownerId:
+          type: string
+        artifactsHarvested:
+          type: integer
+        lastSyncAt:
+          type: [string, "null"]
+          format: date-time
+        lastArtifactCursor:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    AgentListResponse:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+
+    CreateAgentBody:
+      type: object
+      required: [slug]
+      properties:
+        slug:
+          type: string
+          minLength: 1
+        displayName:
+          type: string
+
+    AgentDashboard:
+      type: object
+      required: [agent, stats, recentArtifacts]
+      properties:
+        agent:
+          $ref: "#/components/schemas/Agent"
+        stats:
+          type: object
+          required: [totalArtifacts, scoredArtifacts, narratedArtifacts, droppedArtifacts]
+          properties:
+            totalArtifacts:
+              type: integer
+            scoredArtifacts:
+              type: integer
+            narratedArtifacts:
+              type: integer
+            droppedArtifacts:
+              type: integer
+        recentArtifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+
+    HarvestAgentBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [image, audio, text, music, furniture, all]
+        limit:
+          type: integer
+          default: 25
 
     HarvesterResult:
       type: object

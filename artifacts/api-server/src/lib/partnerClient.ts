@@ -152,14 +152,50 @@ export async function listPartnerArtifacts(opts: {
   since?: string | null;
   limit?: number;
   type?: string;
+  creator?: string;
 }): Promise<PartnerArtifactsPage> {
   const params = new URLSearchParams();
   if (opts.since) params.set("since", opts.since);
   if (opts.limit) params.set("limit", String(opts.limit));
   if (opts.type) params.set("type", opts.type);
+  if (opts.creator) params.set("creator", opts.creator);
   const qs = params.toString();
   const res = await partnerFetch(`/artifacts${qs ? `?${qs}` : ""}`);
   return (await res.json()) as PartnerArtifactsPage;
+}
+
+export interface PartnerAgentProfile {
+  slug: string;
+  display_name: string;
+  avatar_url?: string | null;
+  bio?: string | null;
+  artifact_count?: number;
+}
+
+/**
+ * Validate an OpenBotCity creator/agent slug. Tries /agents/{slug} first; if
+ * the partner API does not expose that endpoint (404), falls back to listing
+ * artifacts filtered by creator and inferring the display name from the first
+ * result.
+ */
+export async function getPartnerAgent(slug: string): Promise<PartnerAgentProfile | null> {
+  const safeSlug = encodeURIComponent(slug);
+  try {
+    const res = await partnerFetch(`/agents/${safeSlug}`);
+    return (await res.json()) as PartnerAgentProfile;
+  } catch (err) {
+    if (!(err instanceof PartnerApiError) || err.status !== 404) {
+      throw err;
+    }
+  }
+  const page = await listPartnerArtifacts({ creator: slug, limit: 1 });
+  if (page.artifacts.length === 0) return null;
+  const a = page.artifacts[0];
+  return {
+    slug,
+    display_name: a.creator?.display_name ?? slug,
+    avatar_url: a.creator?.avatar_url ?? null,
+  };
 }
 
 export async function listPartnerEventsSince(eventUuid: string | null): Promise<PartnerEventsPage> {

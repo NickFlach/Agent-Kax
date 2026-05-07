@@ -167,6 +167,7 @@ export interface Artifact {
   dropId?: number | null;
   ownerId?: string | null;
   obcArtifactUuid?: string | null;
+  agentId?: number | null;
   editionType: ArtifactEditionType;
   editionTotal?: number | null;
   editionSerial?: number | null;
@@ -283,6 +284,63 @@ export interface HarvesterRunBody {
   minReactions?: number;
   creator?: string;
   keyword?: string;
+  /** Required when the partner API is configured; chooses which agent to harvest. */
+  agentId?: number;
+}
+
+export interface Agent {
+  id: number;
+  slug: string;
+  displayName: string;
+  /** @nullable */
+  avatarUrl?: string | null;
+  ownerId: string;
+  artifactsHarvested: number;
+  /** @nullable */
+  lastSyncAt?: string | null;
+  /** @nullable */
+  lastArtifactCursor?: string | null;
+  createdAt: string;
+}
+
+export interface AgentListResponse {
+  agents: Agent[];
+}
+
+export interface CreateAgentBody {
+  /** @minLength 1 */
+  slug: string;
+  displayName?: string;
+}
+
+export type AgentDashboardStats = {
+  totalArtifacts: number;
+  scoredArtifacts: number;
+  narratedArtifacts: number;
+  droppedArtifacts: number;
+};
+
+export interface AgentDashboard {
+  agent: Agent;
+  stats: AgentDashboardStats;
+  recentArtifacts: Artifact[];
+}
+
+export type HarvestAgentBodyType =
+  (typeof HarvestAgentBodyType)[keyof typeof HarvestAgentBodyType];
+
+export const HarvestAgentBodyType = {
+  image: "image",
+  audio: "audio",
+  text: "text",
+  music: "music",
+  furniture: "furniture",
+  all: "all",
+} as const;
+
+export interface HarvestAgentBody {
+  type?: HarvestAgentBodyType;
+  limit?: number;
 }
 
 export interface HarvesterResult {
@@ -382,6 +440,7 @@ export type ListArtifactsParams = {
   search?: string;
   artifactType?: ListArtifactsArtifactType;
   editionType?: ListArtifactsEditionType;
+  agentId?: number;
 };
 
 export type ListArtifactsStatus =

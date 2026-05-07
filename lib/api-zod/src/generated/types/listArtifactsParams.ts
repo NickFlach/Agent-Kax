@@ -17,4 +17,5 @@ export type ListArtifactsParams = {
   search?: string;
   artifactType?: ListArtifactsArtifactType;
   editionType?: ListArtifactsEditionType;
+  agentId?: number;
 };
