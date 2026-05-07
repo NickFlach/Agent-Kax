@@ -117,6 +117,8 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
     type: "scored",
     message: `Scored "${a.title}" — ${(kannakaScore * 100).toFixed(0)}% (${a.editionType}, ×${breakdown.scarcityMultiplier})`,
     artifactTitle: a.title,
+    ownerId: a.ownerId,
+    agentId: a.agentId,
   });
 
   res.json(formatArtifact(updated[0]));
@@ -179,6 +181,8 @@ router.post("/artifacts/:id/narrate", requireAuth, async (req, res) => {
     type: "narrated",
     message: `Narrated "${a.title}" as ${transmissionId}`,
     artifactTitle: a.title,
+    ownerId: a.ownerId,
+    agentId: a.agentId,
   });
 
   res.json(formatArtifact(updated[0]));

@@ -105,6 +105,8 @@ async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promi
       type: "harvested",
       message: `Webhook ingested "${inserted[0].title}" (${editionType})`,
       artifactTitle: inserted[0].title,
+      ownerId,
+      agentId,
     });
     try {
       await runTasteEngineFor(inserted[0].id);

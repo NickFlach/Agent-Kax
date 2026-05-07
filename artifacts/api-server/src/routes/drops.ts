@@ -226,6 +226,7 @@ router.post("/drops/:id/publish", requireAuth, async (req, res) => {
   await db.insert(activitiesTable).values({
     type: "published",
     message: `Drop published`,
+    ownerId: req.user!.id,
   });
 
   const result = await getDropWithArtifacts(id);
@@ -263,6 +264,8 @@ router.post("/drops/:dropId/artifacts", requireAuth, async (req, res) => {
   await db.insert(activitiesTable).values({
     type: "dropped",
     message: `Artifact added to drop`,
+    ownerId: req.user!.id,
+    agentId: a.agentId,
   });
 
   const result = await getDropWithArtifacts(dropId);

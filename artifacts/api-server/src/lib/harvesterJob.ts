@@ -116,6 +116,8 @@ export async function runPartnerHarvestForAgent(opts: {
     await db.insert(activitiesTable).values({
       type: "harvested",
       message: `Partner harvest [${opts.agent.slug}]: ${newArtifacts} new (${duplicates} duplicates)`,
+      ownerId: opts.agent.ownerId,
+      agentId: opts.agent.id,
     });
   }
 

@@ -70,5 +70,7 @@ export async function runTasteEngineFor(id: number): Promise<void> {
     type: "scored",
     message: `Auto-scored "${a.title}" — ${(kannakaScore * 100).toFixed(0)}% (${a.editionType})`,
     artifactTitle: a.title,
+    ownerId: a.ownerId,
+    agentId: a.agentId,
   });
 }

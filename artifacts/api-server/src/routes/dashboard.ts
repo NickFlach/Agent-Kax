@@ -97,10 +97,12 @@ router.get("/dashboard/summary", requireAuth, async (req, res) => {
 router.get("/dashboard/recent-activity", requireAuth, async (req, res) => {
   const query = GetRecentActivityQueryParams.parse(req.query);
   const limit = query.limit ?? 10;
+  const ownerScope = await getOwnerScope(req);
 
   const activities = await db
     .select()
     .from(activitiesTable)
+    .where(ownerScope !== null ? eq(activitiesTable.ownerId, ownerScope) : undefined)
     .orderBy(desc(activitiesTable.timestamp))
     .limit(limit);
 

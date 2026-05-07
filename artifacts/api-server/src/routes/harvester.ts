@@ -171,6 +171,7 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
         await db.insert(activitiesTable).values({
           type: "harvested",
           message: `Legacy harvest: ${newArtifacts} new ${type} (${duplicates} duplicates)`,
+          ownerId,
         });
       }
     }
