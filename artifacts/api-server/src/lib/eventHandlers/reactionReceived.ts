@@ -31,12 +31,21 @@ export const handleReactionReceived: EventHandler = async (data, { log }) => {
     return;
   }
 
+  const now = new Date();
+  let occurredAt = now;
+  if (p.occurred_at) {
+    const parsed = new Date(p.occurred_at);
+    if (!Number.isNaN(parsed.getTime())) occurredAt = parsed;
+    else log.warn({ occurredAt: p.occurred_at, sourceUuid }, "reaction.received occurred_at unparseable; falling back to now");
+  }
+
   const inserted = await db
     .insert(reactionsTable)
     .values({
       artifactId: artifact.id,
       kind: p.kind ?? "like",
       sourceUuid,
+      createdAt: occurredAt,
     })
     .onConflictDoNothing({ target: reactionsTable.sourceUuid })
     .returning({ id: reactionsTable.id });
@@ -46,12 +55,15 @@ export const handleReactionReceived: EventHandler = async (data, { log }) => {
     return;
   }
 
+  // Bump heat + reactionCount; advance lastReactionAt only if this event is
+  // newer than what we already have, so a replayed old reaction can't make a
+  // long-cold artifact look hot right now.
   await db
     .update(artifactsTable)
     .set({
       heat: sql`${artifactsTable.heat} + 1`,
       reactionCount: sql`${artifactsTable.reactionCount} + 1`,
-      lastReactionAt: new Date(),
+      lastReactionAt: sql`GREATEST(COALESCE(${artifactsTable.lastReactionAt}, 'epoch'::timestamp), ${occurredAt})`,
     })
     .where(eq(artifactsTable.id, artifact.id));
 
