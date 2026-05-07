@@ -182,6 +182,14 @@ export async function recordPollSuccess(cursor: string | null): Promise<void> {
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
 }
 
+export async function recordEventCursor(eventUuid: string): Promise<void> {
+  await ensureSyncRow();
+  await db
+    .update(partnerSyncStateTable)
+    .set({ lastEventUuid: eventUuid, updatedAt: new Date() })
+    .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
+}
+
 export async function recordWebhookReceived(eventUuid: string): Promise<void> {
   await ensureSyncRow();
   await db

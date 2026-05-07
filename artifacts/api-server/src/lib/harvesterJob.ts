@@ -9,6 +9,7 @@ import {
   listPartnerArtifacts,
   listPartnerEventsSince,
   recordPollSuccess,
+  recordEventCursor,
   getSyncState,
   partnerApiAvailable,
   type PartnerArtifact,
@@ -78,7 +79,10 @@ export async function runPartnerHarvest(opts: {
       limit: Math.min(50, targetLimit - harvested),
       type: opts.type,
     });
-    if (page.artifacts.length === 0) break;
+    if (page.artifacts.length === 0) {
+      await recordPollSuccess(cursor);
+      break;
+    }
 
     for (const pa of page.artifacts) {
       harvested++;
@@ -110,41 +114,51 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
   }
   try {
     const state = await getSyncState();
-    const since = state?.lastEventUuid ?? null;
-    const page = await listPartnerEventsSince(since);
-    if (page.events.length === 0) {
-      logger.info({ since }, "No partner events to replay");
-      return;
-    }
-
+    let cursor: string | null = state?.lastEventUuid ?? null;
     let processed = 0;
-    for (const ev of page.events) {
-      const inserted = await db
-        .insert(processedEventsTable)
-        .values({ eventUuid: ev.event_uuid, eventType: ev.event_type })
-        .onConflictDoNothing()
-        .returning({ eventUuid: processedEventsTable.eventUuid });
-      if (inserted.length === 0) continue;
+    let totalSeen = 0;
+    const maxPages = 100;
 
-      if (ev.event_type === "artifact.created") {
-        try {
-          const pa = ev.data as PartnerArtifact;
-          const result = await upsertPartnerArtifact(pa, KANNAKA_SYSTEM_USER_ID);
-          if (result === "new") {
-            const [row] = await db
-              .select({ id: artifactsTable.id })
-              .from(artifactsTable)
-              .where(eq(artifactsTable.obcArtifactUuid, pa.uuid))
-              .limit(1);
-            if (row) await runTasteEngineFor(row.id);
+    for (let pageIdx = 0; pageIdx < maxPages; pageIdx++) {
+      const page = await listPartnerEventsSince(cursor);
+      if (page.events.length === 0) break;
+      totalSeen += page.events.length;
+
+      for (const ev of page.events) {
+        const inserted = await db
+          .insert(processedEventsTable)
+          .values({ eventUuid: ev.event_uuid, eventType: ev.event_type })
+          .onConflictDoNothing()
+          .returning({ eventUuid: processedEventsTable.eventUuid });
+
+        if (inserted.length > 0 && ev.event_type === "artifact.created") {
+          try {
+            const pa = ev.data as PartnerArtifact;
+            const result = await upsertPartnerArtifact(pa, KANNAKA_SYSTEM_USER_ID);
+            if (result === "new") {
+              const [row] = await db
+                .select({ id: artifactsTable.id })
+                .from(artifactsTable)
+                .where(eq(artifactsTable.obcArtifactUuid, pa.uuid))
+                .limit(1);
+              if (row) await runTasteEngineFor(row.id);
+            }
+          } catch (err) {
+            logger.error({ err, eventUuid: ev.event_uuid }, "Replay handler failed");
           }
-        } catch (err) {
-          logger.error({ err, eventUuid: ev.event_uuid }, "Replay handler failed");
         }
+
+        cursor = ev.event_uuid;
+        await recordEventCursor(cursor);
+        if (inserted.length > 0) processed++;
       }
-      processed++;
+
+      if (!page.next_cursor) break;
+      cursor = page.next_cursor;
+      await recordEventCursor(cursor);
     }
-    logger.info({ processed, total: page.events.length }, "Replayed missed partner events");
+
+    logger.info({ processed, totalSeen, finalCursor: cursor }, "Replayed missed partner events");
   } catch (err) {
     logger.error({ err }, "Startup event replay failed");
   }
