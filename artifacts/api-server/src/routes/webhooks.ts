@@ -68,6 +68,7 @@ async function handleArtifactCreated(req: Request, data: PartnerArtifact): Promi
       editionTotal: data.edition?.total ?? null,
       editionSerial: data.edition?.serial ?? null,
     })
+    .onConflictDoNothing({ target: artifactsTable.obcArtifactUuid })
     .returning({ id: artifactsTable.id, title: artifactsTable.title });
 
   if (inserted[0]) {
