@@ -271,12 +271,25 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
 
   const [settingsRow, featuredRows, latestDropRow] = await Promise.all([
     loadSettingsForAgent(agent.id),
-    db
-      .select()
-      .from(artifactsTable)
-      .where(and(eq(artifactsTable.agentId, agent.id), isNotNull(artifactsTable.kannakaScore)))
-      .orderBy(desc(artifactsTable.kannakaScore))
-      .limit(6),
+    agentDropIds.length > 0
+      ? db
+          .select({ artifact: artifactsTable })
+          .from(artifactsTable)
+          .innerJoin(
+            dropsTable,
+            and(eq(dropsTable.id, artifactsTable.dropId), eq(dropsTable.status, "published")),
+          )
+          .where(
+            and(
+              eq(artifactsTable.agentId, agent.id),
+              isNotNull(artifactsTable.kannakaScore),
+              inArray(artifactsTable.dropId, agentDropIds),
+            ),
+          )
+          .orderBy(desc(artifactsTable.kannakaScore))
+          .limit(6)
+          .then((rows) => rows.map((r) => r.artifact))
+      : Promise.resolve([] as Array<typeof artifactsTable.$inferSelect>),
     agentDropIds.length > 0
       ? db
           .select()
