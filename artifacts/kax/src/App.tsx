@@ -129,19 +129,19 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
-        <AdminLayout><Dashboard /></AdminLayout>
+        <AdminLayout><RequireAuth><Dashboard /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/artifacts">
-        <AdminLayout><ArtifactsList /></AdminLayout>
+        <AdminLayout><RequireAuth><ArtifactsList /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/artifacts/:id">
-        <AdminLayout><ArtifactDetail /></AdminLayout>
+        <AdminLayout><RequireAuth><ArtifactDetail /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/drops">
-        <AdminLayout><DropsList /></AdminLayout>
+        <AdminLayout><RequireAuth><DropsList /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/drops/:id">
-        <AdminLayout><DropDetail /></AdminLayout>
+        <AdminLayout><RequireAuth><DropDetail /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>

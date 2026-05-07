@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
 
 const rawPort = process.env["PORT"];
 
@@ -14,6 +15,10 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+ensureKannakaOwnerAndBackfill().catch((err) => {
+  logger.error({ err }, "Failed to seed/backfill Kannaka owner");
+});
 
 app.listen(port, (err) => {
   if (err) {

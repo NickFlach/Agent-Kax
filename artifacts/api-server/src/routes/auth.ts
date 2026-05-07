@@ -103,7 +103,7 @@ async function upsertUser(claims: Record<string, unknown>) {
   return user;
 }
 
-router.get("/auth/user", async (req: Request, res: Response) => {
+const getCurrentUser = async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) {
     res.json(GetCurrentAuthUserResponse.parse({ user: null }));
     return;
@@ -130,7 +130,10 @@ router.get("/auth/user", async (req: Request, res: Response) => {
       },
     }),
   );
-});
+};
+
+router.get("/auth/user", getCurrentUser);
+router.get("/me", getCurrentUser);
 
 router.get("/login", async (req: Request, res: Response) => {
   const config = await getOidcConfig();

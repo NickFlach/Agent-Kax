@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { dropsTable, artifactsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, desc, and, count } from "drizzle-orm";
@@ -19,7 +19,7 @@ import { canMutate, requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
-async function checkDropOwnership(req: any, res: any, dropId: number): Promise<boolean> {
+async function checkDropOwnership(req: Request, res: Response, dropId: number): Promise<boolean> {
   const [drop] = await db.select().from(dropsTable).where(eq(dropsTable.id, dropId)).limit(1);
   if (!drop) {
     res.status(404).json({ error: "Drop not found" });

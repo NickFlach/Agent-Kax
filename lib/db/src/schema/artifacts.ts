@@ -1,6 +1,7 @@
 import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { usersTable } from "./auth";
 
 export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture"]);
 export const artifactStatusEnum = pgEnum("artifact_status", ["raw", "scored", "narrated", "dropped"]);
@@ -22,7 +23,7 @@ export const artifactsTable = pgTable("artifacts", {
   transmissionId: text("transmission_id"),
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   dropId: integer("drop_id"),
-  ownerId: varchar("owner_id"),
+  ownerId: varchar("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
   ingestedAt: timestamp("ingested_at").notNull().defaultNow(),
   scoredAt: timestamp("scored_at"),
   narratedAt: timestamp("narrated_at"),
