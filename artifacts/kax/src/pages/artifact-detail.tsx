@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
+import { EditionBadge } from "@/components/edition-badge";
 
 export default function ArtifactDetail() {
   const params = useParams<{ id: string }>();
@@ -77,6 +78,11 @@ export default function ArtifactDetail() {
         <Badge variant="outline" className={statusColors[artifact.status] || ""}>
           {artifact.status}
         </Badge>
+        <EditionBadge
+          editionType={artifact.editionType}
+          editionTotal={artifact.editionTotal}
+          editionSerial={artifact.editionSerial}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

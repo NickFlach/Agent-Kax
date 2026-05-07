@@ -179,6 +179,10 @@ function formatArtifact(a: typeof artifactsTable.$inferSelect) {
     ingestedAt: a.ingestedAt.toISOString(),
     scoredAt: a.scoredAt?.toISOString() ?? null,
     narratedAt: a.narratedAt?.toISOString() ?? null,
+    editionType: a.editionType,
+    editionTotal: a.editionTotal,
+    editionSerial: a.editionSerial,
+    obcArtifactUuid: a.obcArtifactUuid,
   };
 }
 

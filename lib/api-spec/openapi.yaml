@@ -563,6 +563,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/ActivityFeed"
 
+  /dashboard/partner-sync:
+    get:
+      operationId: getPartnerSyncStatus
+      tags: [dashboard]
+      summary: Partner API sync status widget
+      responses:
+        "200":
+          description: Partner sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartnerSyncStatus"
+
   /dashboard/score-distribution:
     get:
       operationId: getScoreDistribution
@@ -773,6 +786,18 @@ components:
         ownerId:
           type: string
           nullable: true
+        obcArtifactUuid:
+          type: string
+          nullable: true
+        editionType:
+          type: string
+          enum: [open, limited, "1_of_1"]
+        editionTotal:
+          type: integer
+          nullable: true
+        editionSerial:
+          type: integer
+          nullable: true
       required:
         - id
         - externalId
@@ -784,6 +809,7 @@ components:
         - status
         - tags
         - ingestedAt
+        - editionType
 
     ArtifactListResponse:
       type: object
@@ -1003,6 +1029,35 @@ components:
               - timestamp
       required:
         - activities
+
+    PartnerSyncStatus:
+      type: object
+      required:
+        - apiKeyConfigured
+        - webhookSubscribed
+        - lastPollAt
+        - lastWebhookAt
+        - requestsToday
+        - dailyBudget
+      properties:
+        apiKeyConfigured:
+          type: boolean
+        webhookSubscribed:
+          type: string
+        lastPollAt:
+          type: [string, 'null']
+          format: date-time
+        lastWebhookAt:
+          type: [string, 'null']
+          format: date-time
+        lastEventUuid:
+          type: [string, 'null']
+        lastArtifactCursor:
+          type: [string, 'null']
+        requestsToday:
+          type: integer
+        dailyBudget:
+          type: integer
 
     ScoreDistribution:
       type: object

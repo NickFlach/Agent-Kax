@@ -126,6 +126,15 @@ export const ArtifactStatus = {
   dropped: "dropped",
 } as const;
 
+export type ArtifactEditionType =
+  (typeof ArtifactEditionType)[keyof typeof ArtifactEditionType];
+
+export const ArtifactEditionType = {
+  open: "open",
+  limited: "limited",
+  "1_of_1": "1_of_1",
+} as const;
+
 export interface Artifact {
   id: number;
   externalId: string;
@@ -147,6 +156,10 @@ export interface Artifact {
   narratedAt?: string | null;
   dropId?: number | null;
   ownerId?: string | null;
+  obcArtifactUuid?: string | null;
+  editionType: ArtifactEditionType;
+  editionTotal?: number | null;
+  editionSerial?: number | null;
 }
 
 export interface ArtifactListResponse {
@@ -293,6 +306,21 @@ export type ActivityFeedActivitiesItem = {
 
 export interface ActivityFeed {
   activities: ActivityFeedActivitiesItem[];
+}
+
+export interface PartnerSyncStatus {
+  apiKeyConfigured: boolean;
+  webhookSubscribed: string;
+  /** @nullable */
+  lastPollAt: string | null;
+  /** @nullable */
+  lastWebhookAt: string | null;
+  /** @nullable */
+  lastEventUuid?: string | null;
+  /** @nullable */
+  lastArtifactCursor?: string | null;
+  requestsToday: number;
+  dailyBudget: number;
 }
 
 export type ScoreDistributionBucketsItem = {

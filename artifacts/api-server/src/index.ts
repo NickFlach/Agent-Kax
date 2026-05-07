@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
+import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 
 const rawPort = process.env["PORT"];
 
@@ -16,9 +17,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-ensureKannakaOwnerAndBackfill().catch((err) => {
-  logger.error({ err }, "Failed to seed/backfill Kannaka owner");
-});
+ensureKannakaOwnerAndBackfill()
+  .then(() => replayMissedEventsOnStartup())
+  .catch((err) => {
+    logger.error({ err }, "Failed to seed/backfill or replay events on startup");
+  });
 
 app.listen(port, (err) => {
   if (err) {

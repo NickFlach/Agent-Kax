@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AudioCover } from "@/components/audio-cover";
 import { ShareButtons } from "@/components/share-buttons";
+import { EditionBadge } from "@/components/edition-badge";
 
 export default function Storefront() {
   const { data: featured, isLoading: featuredLoading } = useGetStorefrontFeatured({
@@ -16,7 +17,7 @@ export default function Storefront() {
 
   const isAudio = (type: string) => type === "audio" || type === "music";
 
-  function ArtifactImage({ artifact, className = "" }: { artifact: { id: number; title: string; publicUrl: string; artifactType: string; thumbnailUrl?: string | null }; className?: string }) {
+  function ArtifactImage({ artifact, className = "" }: { artifact: { id: number; title: string; publicUrl: string; artifactType: string; thumbnailUrl?: string | null; editionType?: string; editionTotal?: number | null; editionSerial?: number | null }; className?: string }) {
     if (isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai')) {
       return <img src={artifact.thumbnailUrl} alt={artifact.title} className={`w-full h-full object-cover ${className}`} />;
     }
@@ -65,6 +66,13 @@ export default function Storefront() {
               >
                 <div className="aspect-square bg-secondary">
                   <ArtifactImage artifact={artifact} className="transition-transform duration-500 group-hover:scale-105" />
+                </div>
+                <div className="absolute top-2 left-2 z-10">
+                  <EditionBadge
+                    editionType={artifact.editionType}
+                    editionTotal={artifact.editionTotal}
+                    editionSerial={artifact.editionSerial}
+                  />
                 </div>
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <div className="absolute bottom-0 left-0 right-0 p-4">

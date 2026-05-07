@@ -42,6 +42,7 @@ import type {
   LogoutSuccess,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
+  PartnerSyncStatus,
   ScoreDistribution,
   UpdateAdminUserBody,
   UpdateDropBody,
@@ -2366,6 +2367,81 @@ export function useGetRecentActivity<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetRecentActivityQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Partner API sync status widget
+ */
+export const getGetPartnerSyncStatusUrl = () => {
+  return `/api/dashboard/partner-sync`;
+};
+
+export const getPartnerSyncStatus = async (
+  options?: RequestInit,
+): Promise<PartnerSyncStatus> => {
+  return customFetch<PartnerSyncStatus>(getGetPartnerSyncStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPartnerSyncStatusQueryKey = () => {
+  return [`/api/dashboard/partner-sync`] as const;
+};
+
+export const getGetPartnerSyncStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPartnerSyncStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPartnerSyncStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPartnerSyncStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPartnerSyncStatus>>
+  > = ({ signal }) => getPartnerSyncStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPartnerSyncStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPartnerSyncStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPartnerSyncStatus>>
+>;
+export type GetPartnerSyncStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Partner API sync status widget
+ */
+
+export function useGetPartnerSyncStatus<
+  TData = Awaited<ReturnType<typeof getPartnerSyncStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPartnerSyncStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPartnerSyncStatusQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

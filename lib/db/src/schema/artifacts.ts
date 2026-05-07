@@ -5,10 +5,12 @@ import { usersTable } from "./auth";
 
 export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture"]);
 export const artifactStatusEnum = pgEnum("artifact_status", ["raw", "scored", "narrated", "dropped"]);
+export const editionTypeEnum = pgEnum("edition_type", ["open", "limited", "1_of_1"]);
 
 export const artifactsTable = pgTable("artifacts", {
   id: serial("id").primaryKey(),
   externalId: text("external_id").notNull().unique(),
+  obcArtifactUuid: text("obc_artifact_uuid").unique(),
   title: text("title").notNull(),
   creatorName: text("creator_name").notNull(),
   publicUrl: text("public_url").notNull(),
@@ -24,6 +26,9 @@ export const artifactsTable = pgTable("artifacts", {
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   dropId: integer("drop_id"),
   ownerId: varchar("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
+  editionType: editionTypeEnum("edition_type").notNull().default("open"),
+  editionTotal: integer("edition_total"),
+  editionSerial: integer("edition_serial"),
   ingestedAt: timestamp("ingested_at").notNull().defaultNow(),
   scoredAt: timestamp("scored_at"),
   narratedAt: timestamp("narrated_at"),

@@ -1,9 +1,11 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, and, inArray, isNull, sql, or, ilike } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
+import { runPartnerHarvest } from "../lib/harvesterJob";
+import { partnerApiAvailable } from "../lib/partnerClient";
 
 const router: IRouter = Router();
 
@@ -30,14 +32,14 @@ interface OpenBotCityResponse {
   };
 }
 
-async function harvestType(
+async function legacyHarvestType(
   typeToHarvest: string,
   requestedLimit: number,
   minReactions: number,
   creatorFilter: string | undefined,
   keywordFilter: string | undefined,
   ownerId: string,
-  logger: any
+  logger: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void },
 ): Promise<{ harvested: number; newArtifacts: number; duplicates: number }> {
   let harvested = 0;
   let newArtifacts = 0;
@@ -49,39 +51,29 @@ async function harvestType(
   while (collected < requestedLimit && offset < totalAvailable) {
     const batchSize = 50;
     const url = `https://api.openbotcity.com/gallery/public?type=${typeToHarvest}&limit=${batchSize}&offset=${offset}`;
-
-    logger.info({ url, offset, collected, requestedLimit, creatorFilter, keywordFilter }, "Fetching from OpenBotCity");
+    logger.info({ url, offset, collected, requestedLimit, creatorFilter, keywordFilter }, "Fetching public gallery");
 
     const response = await fetch(url);
-
     if (!response.ok) {
-      logger.warn({ status: response.status }, "OpenBotCity API returned non-OK status");
+      logger.warn({ status: response.status }, "Public gallery returned non-OK");
       break;
     }
-
     const json = (await response.json()) as OpenBotCityResponse;
-
-    if (!json.success || !json.data?.artifacts?.length) {
-      logger.info("No more artifacts available from OpenBotCity");
-      break;
-    }
+    if (!json.success || !json.data?.artifacts?.length) break;
 
     totalAvailable = json.data.total;
     const items = json.data.artifacts;
 
     for (const item of items) {
       if (collected >= requestedLimit) break;
-
       if (creatorFilter) {
         const creatorName = (item.creator?.display_name || "").toLowerCase();
         if (creatorName !== creatorFilter) continue;
       }
-
       if (keywordFilter) {
         const title = (item.title || "").toLowerCase();
         if (!title.includes(keywordFilter)) continue;
       }
-
       if (item.reaction_count < minReactions) continue;
       harvested++;
 
@@ -90,7 +82,6 @@ async function harvestType(
         .from(artifactsTable)
         .where(eq(artifactsTable.externalId, item.id))
         .limit(1);
-
       if (existing.length > 0) {
         duplicates++;
         continue;
@@ -111,14 +102,9 @@ async function harvestType(
       newArtifacts++;
       collected++;
     }
-
     offset += items.length;
-
-    if (items.length === 0) {
-      break;
-    }
+    if (items.length === 0) break;
   }
-
   return { harvested, newArtifacts, duplicates };
 }
 
@@ -127,44 +113,51 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
   const ownerId = req.user!.id;
   const type = body.type ?? "image";
   const requestedLimit = body.limit ?? 20;
-  const minReactions = body.minReactions ?? 0;
-  const creatorFilter = body.creator?.toLowerCase();
-  const keywordFilter = body.keyword?.toLowerCase();
 
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
 
   try {
-    const typesToHarvest = type === "all"
-      ? ["image", "audio", "text", "music", "furniture"]
-      : [type];
-
-    let remaining = requestedLimit;
-    for (const t of typesToHarvest) {
-      if (remaining <= 0) break;
-      const perTypeLimit = type === "all" ? Math.ceil(remaining / typesToHarvest.length) : remaining;
-      const result = await harvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, ownerId, req.log);
-      harvested += result.harvested;
-      newArtifacts += result.newArtifacts;
-      duplicates += result.duplicates;
-      remaining -= result.newArtifacts;
+    if (partnerApiAvailable()) {
+      const partnerType = type === "all" ? undefined : type;
+      const result = await runPartnerHarvest({
+        ownerId,
+        limit: requestedLimit,
+        ...(partnerType ? { type: partnerType } : {}),
+      });
+      harvested = result.harvested;
+      newArtifacts = result.newArtifacts;
+      duplicates = result.duplicates;
+    } else {
+      const minReactions = body.minReactions ?? 0;
+      const creatorFilter = body.creator?.toLowerCase();
+      const keywordFilter = body.keyword?.toLowerCase();
+      const typesToHarvest = type === "all"
+        ? ["image", "audio", "text", "music", "furniture"]
+        : [type];
+      let remaining = requestedLimit;
+      for (const t of typesToHarvest) {
+        if (remaining <= 0) break;
+        const perTypeLimit = type === "all" ? Math.ceil(remaining / typesToHarvest.length) : remaining;
+        const result = await legacyHarvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, ownerId, req.log);
+        harvested += result.harvested;
+        newArtifacts += result.newArtifacts;
+        duplicates += result.duplicates;
+        remaining -= result.newArtifacts;
+      }
+      if (newArtifacts > 0) {
+        await db.insert(activitiesTable).values({
+          type: "harvested",
+          message: `Legacy harvest: ${newArtifacts} new ${type} (${duplicates} duplicates)`,
+        });
+      }
     }
   } catch (err) {
-    req.log.error({ err }, "Error harvesting from OpenBotCity");
-  }
-
-  if (newArtifacts > 0) {
-    const creatorMsg = creatorFilter ? ` by "${creatorFilter}"` : "";
-    const keywordMsg = keywordFilter ? ` matching "${keywordFilter}"` : "";
-    await db.insert(activitiesTable).values({
-      type: "harvested",
-      message: `Harvested ${newArtifacts} new ${type} artifacts${creatorMsg}${keywordMsg} from OpenBotCity (${duplicates} duplicates skipped)`,
-    });
+    req.log.error({ err }, "Error running harvester");
   }
 
   const paired = await pairAudioToArt(req.log);
-
   res.json({ harvested, newArtifacts, duplicates, paired });
 });
 
@@ -190,7 +183,7 @@ function titleMatchScore(songTitle: string, imgTitle: string): number {
   return s;
 }
 
-async function pairAudioToArt(logger: any): Promise<number> {
+async function pairAudioToArt(logger: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void }): Promise<number> {
   try {
     const audioTracks = await db
       .select({ id: artifactsTable.id, title: artifactsTable.title, creatorName: artifactsTable.creatorName })
@@ -210,7 +203,6 @@ async function pairAudioToArt(logger: any): Promise<number> {
         img.creatorName.toLowerCase() === song.creatorName.toLowerCase()
       );
       const candidates = sameCreatorImages.length > 0 ? sameCreatorImages : images;
-
       let bestScore = -1;
       let bestImg: typeof images[0] | null = null;
       for (const img of candidates) {
@@ -229,29 +221,6 @@ async function pairAudioToArt(logger: any): Promise<number> {
       }
     }
 
-    const remainingSongs = audioTracks.filter(s => !pairings.find(p => p.songId === s.id));
-    for (const song of remainingSongs) {
-      const sameCreatorImages = images.filter(img =>
-        img.creatorName.toLowerCase() === song.creatorName.toLowerCase() && !usedImageIds.has(img.id)
-      );
-
-      let bestScore = -1;
-      let bestImg: typeof images[0] | null = null;
-      for (const img of sameCreatorImages) {
-        const s = titleMatchScore(song.title, img.title);
-        if (s > bestScore) { bestScore = s; bestImg = img; }
-      }
-      if (!bestImg && sameCreatorImages.length > 0) bestImg = sameCreatorImages[0];
-      if (!bestImg) {
-        const fallback = images.find(img => !usedImageIds.has(img.id));
-        if (fallback) bestImg = fallback;
-      }
-      if (bestImg) {
-        pairings.push({ songId: song.id, imgId: bestImg.id, imgUrl: bestImg.publicUrl, score: bestScore });
-        usedImageIds.add(bestImg.id);
-      }
-    }
-
     let updated = 0;
     for (const p of pairings) {
       await db.update(artifactsTable)
@@ -259,7 +228,6 @@ async function pairAudioToArt(logger: any): Promise<number> {
         .where(eq(artifactsTable.id, p.songId));
       updated++;
     }
-
     logger.info({ paired: updated }, "Auto-paired audio tracks to artwork");
     return updated;
   } catch (err) {

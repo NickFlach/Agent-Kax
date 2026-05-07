@@ -29,8 +29,20 @@ app.use(
 );
 app.use(cors({ credentials: true, origin: true }));
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/webhooks/")) {
+    next();
+    return;
+  }
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/webhooks/")) {
+    next();
+    return;
+  }
+  express.urlencoded({ extended: true })(req, res, next);
+});
 app.use(authMiddleware);
 
 app.use("/api", router);

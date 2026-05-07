@@ -181,6 +181,10 @@ export const ListArtifactsResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   total: zod.number(),
@@ -214,6 +218,10 @@ export const GetArtifactResponse = zod.object({
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
+  obcArtifactUuid: zod.string().nullish(),
+  editionType: zod.enum(["open", "limited", "1_of_1"]),
+  editionTotal: zod.number().nullish(),
+  editionSerial: zod.number().nullish(),
 });
 
 /**
@@ -244,6 +252,10 @@ export const ScoreArtifactResponse = zod.object({
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
+  obcArtifactUuid: zod.string().nullish(),
+  editionType: zod.enum(["open", "limited", "1_of_1"]),
+  editionTotal: zod.number().nullish(),
+  editionSerial: zod.number().nullish(),
 });
 
 /**
@@ -274,6 +286,10 @@ export const NarrateArtifactResponse = zod.object({
   narratedAt: zod.coerce.date().nullish(),
   dropId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
+  obcArtifactUuid: zod.string().nullish(),
+  editionType: zod.enum(["open", "limited", "1_of_1"]),
+  editionTotal: zod.number().nullish(),
+  editionSerial: zod.number().nullish(),
 });
 
 /**
@@ -326,6 +342,10 @@ export const ListDropsResponse = zod.object({
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -383,6 +403,10 @@ export const GetDropResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -433,6 +457,10 @@ export const UpdateDropResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -483,6 +511,10 @@ export const PublishDropResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -530,6 +562,10 @@ export const AddArtifactToDropResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -617,6 +653,10 @@ export const GetStorefrontDropsResponse = zod.object({
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -663,6 +703,10 @@ export const GetStorefrontDropResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   createdAt: zod.coerce.date(),
@@ -695,6 +739,10 @@ export const GetStorefrontFeaturedResponse = zod.object({
       narratedAt: zod.coerce.date().nullish(),
       dropId: zod.number().nullish(),
       ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
     }),
   ),
   latestDrop: zod
@@ -734,6 +782,10 @@ export const GetStorefrontFeaturedResponse = zod.object({
           narratedAt: zod.coerce.date().nullish(),
           dropId: zod.number().nullish(),
           ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
         }),
       ),
       createdAt: zod.coerce.date(),
@@ -785,6 +837,20 @@ export const GetRecentActivityResponse = zod.object({
       timestamp: zod.coerce.date(),
     }),
   ),
+});
+
+/**
+ * @summary Partner API sync status widget
+ */
+export const GetPartnerSyncStatusResponse = zod.object({
+  apiKeyConfigured: zod.boolean(),
+  webhookSubscribed: zod.string(),
+  lastPollAt: zod.coerce.date().nullable(),
+  lastWebhookAt: zod.coerce.date().nullable(),
+  lastEventUuid: zod.string().nullish(),
+  lastArtifactCursor: zod.string().nullish(),
+  requestsToday: zod.number(),
+  dailyBudget: zod.number(),
 });
 
 /**

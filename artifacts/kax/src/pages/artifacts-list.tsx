@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
+import { EditionBadge } from "@/components/edition-badge";
 
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
@@ -126,10 +127,15 @@ export default function ArtifactsList() {
                       }}
                     />
                   )}
-                  <div className="absolute top-2 right-2">
+                  <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                     <Badge variant="outline" className={statusColors[artifact.status] || ""}>
                       {artifact.status}
                     </Badge>
+                    <EditionBadge
+                      editionType={artifact.editionType}
+                      editionTotal={artifact.editionTotal}
+                      editionSerial={artifact.editionSerial}
+                    />
                   </div>
                   {artifact.kannakaScore !== null && artifact.kannakaScore !== undefined && (
                     <div className="absolute bottom-2 left-2 bg-background/80 backdrop-blur-sm px-2 py-1 text-xs font-mono">

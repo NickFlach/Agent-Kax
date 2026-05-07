@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ArtifactArtifactType } from "./artifactArtifactType";
+import type { ArtifactEditionType } from "./artifactEditionType";
 import type { ArtifactStatus } from "./artifactStatus";
 
 export interface Artifact {
@@ -29,4 +30,8 @@ export interface Artifact {
   narratedAt?: Date | null;
   dropId?: number | null;
   ownerId?: string | null;
+  obcArtifactUuid?: string | null;
+  editionType: ArtifactEditionType;
+  editionTotal?: number | null;
+  editionSerial?: number | null;
 }

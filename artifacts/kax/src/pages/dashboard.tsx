@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 
 export default function Dashboard() {
   const { data: summary, isLoading: summaryLoading } = useGetDashboardSummary({
@@ -59,6 +60,8 @@ export default function Dashboard() {
           <StatCard label="Avg Score" value={`${(summary.averageScore * 100).toFixed(0)}%`} />
         </div>
       ) : null}
+
+      <PartnerSyncWidget />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>

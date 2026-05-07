@@ -8,6 +8,7 @@ import harvesterRouter from "./harvester";
 import storefrontRouter from "./storefront";
 import dashboardRouter from "./dashboard";
 import shareRouter from "./share";
+import webhooksRouter from "./webhooks";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(harvesterRouter);
 router.use(storefrontRouter);
 router.use(dashboardRouter);
 router.use(shareRouter);
+router.use(webhooksRouter);
 
 export default router;

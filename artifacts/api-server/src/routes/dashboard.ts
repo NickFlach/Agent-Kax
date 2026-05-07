@@ -3,8 +3,25 @@ import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, desc, count, avg, sql, isNotNull } from "drizzle-orm";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
+import { getSyncState, DAILY_REQUEST_BUDGET, partnerApiAvailable } from "../lib/partnerClient";
 
 const router: IRouter = Router();
+
+router.get("/dashboard/partner-sync", async (_req, res) => {
+  const state = await getSyncState();
+  const today = new Date().toISOString().slice(0, 10);
+  const requestsToday = state && state.requestsDayKey === today ? state.requestsToday : 0;
+  res.json({
+    apiKeyConfigured: partnerApiAvailable(),
+    webhookSubscribed: state?.webhookSubscribed ?? "unknown",
+    lastPollAt: state?.lastPollAt?.toISOString() ?? null,
+    lastWebhookAt: state?.lastWebhookAt?.toISOString() ?? null,
+    lastEventUuid: state?.lastEventUuid ?? null,
+    lastArtifactCursor: state?.lastArtifactCursor ?? null,
+    requestsToday,
+    dailyBudget: DAILY_REQUEST_BUDGET,
+  });
+});
 
 router.get("/dashboard/summary", async (req, res) => {
   const [
