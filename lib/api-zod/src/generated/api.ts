@@ -1168,6 +1168,344 @@ export const GetStorefrontFeaturedResponse = zod.object({
 });
 
 /**
+ * @summary Get the storefront customization for an agent (owner or admin)
+ */
+export const GetAgentStorefrontSettingsParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentStorefrontSettingsResponse = zod.object({
+  agentId: zod.number(),
+  displayName: zod.string().nullish(),
+  tagline: zod.string().nullish(),
+  heroImageUrl: zod.string().nullish(),
+  accentColor: zod.string().nullish().describe("Hex color like `#7C3AED`"),
+  themeVariant: zod.enum(["dark", "light"]),
+  socialLinks: zod.record(zod.string(), zod.string()).nullish(),
+  customDomainHint: zod.string().nullish(),
+  customCssVars: zod
+    .record(zod.string(), zod.string())
+    .nullish()
+    .describe(
+      "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
+    ),
+});
+
+/**
+ * @summary Update the storefront customization for an agent (owner or admin)
+ */
+export const UpdateAgentStorefrontSettingsParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const UpdateAgentStorefrontSettingsBody = zod.object({
+  displayName: zod.string().nullish(),
+  tagline: zod.string().nullish(),
+  heroImageUrl: zod.string().nullish(),
+  accentColor: zod.string().nullish(),
+  themeVariant: zod.enum(["dark", "light"]).optional(),
+  socialLinks: zod.record(zod.string(), zod.string()).nullish(),
+  customDomainHint: zod.string().nullish(),
+  customCssVars: zod.record(zod.string(), zod.string()).nullish(),
+});
+
+export const UpdateAgentStorefrontSettingsResponse = zod.object({
+  agentId: zod.number(),
+  displayName: zod.string().nullish(),
+  tagline: zod.string().nullish(),
+  heroImageUrl: zod.string().nullish(),
+  accentColor: zod.string().nullish().describe("Hex color like `#7C3AED`"),
+  themeVariant: zod.enum(["dark", "light"]),
+  socialLinks: zod.record(zod.string(), zod.string()).nullish(),
+  customDomainHint: zod.string().nullish(),
+  customCssVars: zod
+    .record(zod.string(), zod.string())
+    .nullish()
+    .describe(
+      "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
+    ),
+});
+
+/**
+ * @summary Public per-agent storefront landing data
+ */
+export const GetAgentStorefrontParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentStorefrontResponse = zod.object({
+  agent: zod.object({
+    id: zod.number(),
+    slug: zod.string(),
+    displayName: zod.string(),
+    avatarUrl: zod.string().nullish(),
+    ownerId: zod.string(),
+    artifactsHarvested: zod.number(),
+    lastSyncAt: zod.coerce.date().nullish(),
+    lastArtifactCursor: zod.string().nullish(),
+    createdAt: zod.coerce.date(),
+  }),
+  settings: zod.object({
+    agentId: zod.number(),
+    displayName: zod.string().nullish(),
+    tagline: zod.string().nullish(),
+    heroImageUrl: zod.string().nullish(),
+    accentColor: zod.string().nullish().describe("Hex color like `#7C3AED`"),
+    themeVariant: zod.enum(["dark", "light"]),
+    socialLinks: zod.record(zod.string(), zod.string()).nullish(),
+    customDomainHint: zod.string().nullish(),
+    customCssVars: zod
+      .record(zod.string(), zod.string())
+      .nullish()
+      .describe(
+        "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
+      ),
+  }),
+  featured: zod.array(
+    zod.object({
+      id: zod.number(),
+      externalId: zod.string(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      reactionCount: zod.number(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+      kannakaScore: zod.number().nullish(),
+      rarityScore: zod.number().nullish(),
+      narrative: zod.string().nullish(),
+      narrativeTitle: zod.string().nullish(),
+      transmissionId: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      ingestedAt: zod.coerce.date(),
+      scoredAt: zod.coerce.date().nullish(),
+      narratedAt: zod.coerce.date().nullish(),
+      dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
+    }),
+  ),
+  latestDrop: zod
+    .object({
+      id: zod.number(),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      dropType: zod.enum(["single", "collection", "bundle"]),
+      status: zod.enum(["draft", "published", "sold"]),
+      price: zod.number().nullish(),
+      isScarce: zod.boolean().optional(),
+      ownerId: zod.string().nullish(),
+      artifacts: zod.array(
+        zod.object({
+          id: zod.number(),
+          externalId: zod.string(),
+          title: zod.string(),
+          creatorName: zod.string(),
+          publicUrl: zod.string(),
+          thumbnailUrl: zod.string().nullish(),
+          reactionCount: zod.number(),
+          artifactType: zod.enum([
+            "image",
+            "music",
+            "text",
+            "audio",
+            "furniture",
+          ]),
+          status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+          kannakaScore: zod.number().nullish(),
+          rarityScore: zod.number().nullish(),
+          narrative: zod.string().nullish(),
+          narrativeTitle: zod.string().nullish(),
+          transmissionId: zod.string().nullish(),
+          tags: zod.array(zod.string()),
+          ingestedAt: zod.coerce.date(),
+          scoredAt: zod.coerce.date().nullish(),
+          narratedAt: zod.coerce.date().nullish(),
+          dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
+        }),
+      ),
+      createdAt: zod.coerce.date(),
+      publishedAt: zod.coerce.date().nullish(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Published drops for an agent
+ */
+export const GetAgentStorefrontDropsParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const getAgentStorefrontDropsQueryLimitDefault = 20;
+export const getAgentStorefrontDropsQueryOffsetDefault = 0;
+
+export const GetAgentStorefrontDropsQueryParams = zod.object({
+  limit: zod.coerce.number().default(getAgentStorefrontDropsQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .default(getAgentStorefrontDropsQueryOffsetDefault),
+});
+
+export const GetAgentStorefrontDropsResponse = zod.object({
+  drops: zod.array(
+    zod.object({
+      id: zod.number(),
+      title: zod.string(),
+      description: zod.string().nullish(),
+      dropType: zod.enum(["single", "collection", "bundle"]),
+      status: zod.enum(["draft", "published", "sold"]),
+      price: zod.number().nullish(),
+      isScarce: zod.boolean().optional(),
+      ownerId: zod.string().nullish(),
+      artifacts: zod.array(
+        zod.object({
+          id: zod.number(),
+          externalId: zod.string(),
+          title: zod.string(),
+          creatorName: zod.string(),
+          publicUrl: zod.string(),
+          thumbnailUrl: zod.string().nullish(),
+          reactionCount: zod.number(),
+          artifactType: zod.enum([
+            "image",
+            "music",
+            "text",
+            "audio",
+            "furniture",
+          ]),
+          status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+          kannakaScore: zod.number().nullish(),
+          rarityScore: zod.number().nullish(),
+          narrative: zod.string().nullish(),
+          narrativeTitle: zod.string().nullish(),
+          transmissionId: zod.string().nullish(),
+          tags: zod.array(zod.string()),
+          ingestedAt: zod.coerce.date(),
+          scoredAt: zod.coerce.date().nullish(),
+          narratedAt: zod.coerce.date().nullish(),
+          dropId: zod.number().nullish(),
+          ownerId: zod.string().nullish(),
+          obcArtifactUuid: zod.string().nullish(),
+          agentId: zod.number().nullish(),
+          editionType: zod.enum(["open", "limited", "1_of_1"]),
+          editionTotal: zod.number().nullish(),
+          editionSerial: zod.number().nullish(),
+          scoreBreakdown: zod
+            .object({
+              reactionSignal: zod.number(),
+              novelty: zod.number(),
+              exploration: zod.number(),
+              baseScore: zod.number(),
+              scarcityMultiplier: zod.number(),
+              editionType: zod.string(),
+              finalScore: zod.number(),
+            })
+            .nullish(),
+        }),
+      ),
+      createdAt: zod.coerce.date(),
+      publishedAt: zod.coerce.date().nullish(),
+    }),
+  ),
+  total: zod.number(),
+});
+
+/**
+ * @summary A published drop for an agent
+ */
+export const GetAgentStorefrontDropParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.number(),
+});
+
+export const GetAgentStorefrontDropResponse = zod.object({
+  id: zod.number(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  dropType: zod.enum(["single", "collection", "bundle"]),
+  status: zod.enum(["draft", "published", "sold"]),
+  price: zod.number().nullish(),
+  isScarce: zod.boolean().optional(),
+  ownerId: zod.string().nullish(),
+  artifacts: zod.array(
+    zod.object({
+      id: zod.number(),
+      externalId: zod.string(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      reactionCount: zod.number(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+      kannakaScore: zod.number().nullish(),
+      rarityScore: zod.number().nullish(),
+      narrative: zod.string().nullish(),
+      narrativeTitle: zod.string().nullish(),
+      transmissionId: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      ingestedAt: zod.coerce.date(),
+      scoredAt: zod.coerce.date().nullish(),
+      narratedAt: zod.coerce.date().nullish(),
+      dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
+    }),
+  ),
+  createdAt: zod.coerce.date(),
+  publishedAt: zod.coerce.date().nullish(),
+});
+
+/**
  * @summary Get dashboard overview stats
  */
 export const GetDashboardSummaryQueryParams = zod.object({

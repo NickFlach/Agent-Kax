@@ -656,6 +656,120 @@ paths:
               schema:
                 $ref: "#/components/schemas/FeaturedResponse"
 
+  /agents/{slug}/storefront/settings:
+    get:
+      operationId: getAgentStorefrontSettings
+      tags: [agents]
+      summary: Get the storefront customization for an agent (owner or admin)
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Storefront settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStorefrontSettings"
+    put:
+      operationId: updateAgentStorefrontSettings
+      tags: [agents]
+      summary: Update the storefront customization for an agent (owner or admin)
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAgentStorefrontSettingsBody"
+      responses:
+        "200":
+          description: Updated storefront settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStorefrontSettings"
+
+  /storefront/by-agent/{slug}:
+    get:
+      operationId: getAgentStorefront
+      tags: [storefront]
+      summary: Public per-agent storefront landing data
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Storefront landing data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStorefrontLanding"
+
+  /storefront/by-agent/{slug}/drops:
+    get:
+      operationId: getAgentStorefrontDrops
+      tags: [storefront]
+      summary: Published drops for an agent
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Drops
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DropListResponse"
+
+  /storefront/by-agent/{slug}/drops/{id}:
+    get:
+      operationId: getAgentStorefrontDrop
+      tags: [storefront]
+      summary: A published drop for an agent
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Drop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+
   /dashboard/summary:
     get:
       operationId: getDashboardSummary
@@ -1228,6 +1342,76 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Artifact"
+
+    AgentStorefrontSettings:
+      type: object
+      required: [agentId, themeVariant]
+      properties:
+        agentId:
+          type: integer
+        displayName:
+          type: [string, "null"]
+        tagline:
+          type: [string, "null"]
+        heroImageUrl:
+          type: [string, "null"]
+        accentColor:
+          type: [string, "null"]
+          description: Hex color like `#7C3AED`
+        themeVariant:
+          type: string
+          enum: [dark, light]
+        socialLinks:
+          type: [object, "null"]
+          additionalProperties:
+            type: string
+        customDomainHint:
+          type: [string, "null"]
+        customCssVars:
+          type: [object, "null"]
+          description: Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).
+          additionalProperties:
+            type: string
+
+    UpdateAgentStorefrontSettingsBody:
+      type: object
+      properties:
+        displayName:
+          type: [string, "null"]
+        tagline:
+          type: [string, "null"]
+        heroImageUrl:
+          type: [string, "null"]
+        accentColor:
+          type: [string, "null"]
+        themeVariant:
+          type: string
+          enum: [dark, light]
+        socialLinks:
+          type: [object, "null"]
+          additionalProperties:
+            type: string
+        customDomainHint:
+          type: [string, "null"]
+        customCssVars:
+          type: [object, "null"]
+          additionalProperties:
+            type: string
+
+    AgentStorefrontLanding:
+      type: object
+      required: [agent, settings, featured]
+      properties:
+        agent:
+          $ref: "#/components/schemas/Agent"
+        settings:
+          $ref: "#/components/schemas/AgentStorefrontSettings"
+        featured:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        latestDrop:
+          $ref: "#/components/schemas/Drop"
 
     HarvestAgentBody:
       type: object

@@ -62,13 +62,25 @@ export default function AgentDetail() {
           </h1>
           <p className="text-muted-foreground mt-1 font-mono text-xs">@{agent.slug}</p>
         </div>
-        <Button
-          onClick={() => harvestMutation.mutate({ slug, data: { limit: 25 } })}
-          disabled={harvestMutation.isPending}
-          data-testid="button-harvest-agent"
-        >
-          {harvestMutation.isPending ? "Harvesting..." : "Harvest 25"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link href={`/s/${slug}`}>
+            <Button variant="outline" data-testid="button-view-storefront">
+              View Storefront
+            </Button>
+          </Link>
+          <Link href={`/agents/${slug}/storefront`}>
+            <Button variant="outline" data-testid="button-customize-storefront">
+              Customize
+            </Button>
+          </Link>
+          <Button
+            onClick={() => harvestMutation.mutate({ slug, data: { limit: 25 } })}
+            disabled={harvestMutation.isPending}
+            data-testid="button-harvest-agent"
+          >
+            {harvestMutation.isPending ? "Harvesting..." : "Harvest 25"}
+          </Button>
+        </div>
       </div>
 
       {harvestMutation.data && (

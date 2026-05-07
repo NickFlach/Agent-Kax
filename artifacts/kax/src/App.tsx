@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, Link, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter, Link, Redirect, useLocation, useParams } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuth } from "@workspace/replit-auth-web";
 import { Toaster } from "@/components/ui/toaster";
@@ -14,11 +14,12 @@ import DropsList from "@/pages/drops-list";
 import DropDetail from "@/pages/drop-detail";
 import HarvesterPage from "@/pages/harvester";
 import Vault from "@/pages/vault";
-import Storefront from "@/pages/storefront";
-import StorefrontDrop from "@/pages/storefront-drop";
 import AdminUsers from "@/pages/admin-users";
 import AgentsList from "@/pages/agents-list";
 import AgentDetail from "@/pages/agent-detail";
+import StorefrontSettings from "@/pages/storefront-settings";
+import AgentStorefront from "@/pages/agent-storefront";
+import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 
 const queryClient = new QueryClient();
 
@@ -91,7 +92,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
             <div className="w-px h-4 bg-border mx-2" />
-            <NavLink href="/storefront">Storefront</NavLink>
+            <NavLink href="/s/kannaka">Storefront</NavLink>
             <AuthControls />
           </div>
         </div>
@@ -151,8 +152,17 @@ function Router() {
       <Route path="/agents">
         <AdminLayout><RequireAuth><AgentsList /></RequireAuth></AdminLayout>
       </Route>
+      <Route path="/agents/:slug/storefront">
+        <AdminLayout><RequireAuth><StorefrontSettings /></RequireAuth></AdminLayout>
+      </Route>
       <Route path="/agents/:slug">
         <AdminLayout><RequireAuth><AgentDetail /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/s/:slug">
+        <AgentStorefront />
+      </Route>
+      <Route path="/s/:slug/drops/:id">
+        <AgentStorefrontDrop />
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>
@@ -164,14 +174,19 @@ function Router() {
         <AdminLayout><RequireAuth adminOnly><AdminUsers /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/storefront">
-        <Storefront />
+        <Redirect to="/s/kannaka" />
       </Route>
       <Route path="/storefront/:id">
-        <StorefrontDrop />
+        <LegacyStorefrontDropRedirect />
       </Route>
       <Route component={NotFound} />
     </Switch>
   );
+}
+
+function LegacyStorefrontDropRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Redirect to={`/s/kannaka/drops/${id}`} />;
 }
 
 function App() {

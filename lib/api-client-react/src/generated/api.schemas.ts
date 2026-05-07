@@ -339,6 +339,101 @@ export interface AgentDashboard {
   recentArtifacts: Artifact[];
 }
 
+export type AgentStorefrontSettingsThemeVariant =
+  (typeof AgentStorefrontSettingsThemeVariant)[keyof typeof AgentStorefrontSettingsThemeVariant];
+
+export const AgentStorefrontSettingsThemeVariant = {
+  dark: "dark",
+  light: "light",
+} as const;
+
+/**
+ * @nullable
+ */
+export type AgentStorefrontSettingsSocialLinks = {
+  [key: string]: string;
+} | null;
+
+/**
+ * Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).
+ * @nullable
+ */
+export type AgentStorefrontSettingsCustomCssVars = {
+  [key: string]: string;
+} | null;
+
+export interface AgentStorefrontSettings {
+  agentId: number;
+  /** @nullable */
+  displayName?: string | null;
+  /** @nullable */
+  tagline?: string | null;
+  /** @nullable */
+  heroImageUrl?: string | null;
+  /**
+   * Hex color like `#7C3AED`
+   * @nullable
+   */
+  accentColor?: string | null;
+  themeVariant: AgentStorefrontSettingsThemeVariant;
+  /** @nullable */
+  socialLinks?: AgentStorefrontSettingsSocialLinks;
+  /** @nullable */
+  customDomainHint?: string | null;
+  /**
+   * Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).
+   * @nullable
+   */
+  customCssVars?: AgentStorefrontSettingsCustomCssVars;
+}
+
+export type UpdateAgentStorefrontSettingsBodyThemeVariant =
+  (typeof UpdateAgentStorefrontSettingsBodyThemeVariant)[keyof typeof UpdateAgentStorefrontSettingsBodyThemeVariant];
+
+export const UpdateAgentStorefrontSettingsBodyThemeVariant = {
+  dark: "dark",
+  light: "light",
+} as const;
+
+/**
+ * @nullable
+ */
+export type UpdateAgentStorefrontSettingsBodySocialLinks = {
+  [key: string]: string;
+} | null;
+
+/**
+ * @nullable
+ */
+export type UpdateAgentStorefrontSettingsBodyCustomCssVars = {
+  [key: string]: string;
+} | null;
+
+export interface UpdateAgentStorefrontSettingsBody {
+  /** @nullable */
+  displayName?: string | null;
+  /** @nullable */
+  tagline?: string | null;
+  /** @nullable */
+  heroImageUrl?: string | null;
+  /** @nullable */
+  accentColor?: string | null;
+  themeVariant?: UpdateAgentStorefrontSettingsBodyThemeVariant;
+  /** @nullable */
+  socialLinks?: UpdateAgentStorefrontSettingsBodySocialLinks;
+  /** @nullable */
+  customDomainHint?: string | null;
+  /** @nullable */
+  customCssVars?: UpdateAgentStorefrontSettingsBodyCustomCssVars;
+}
+
+export interface AgentStorefrontLanding {
+  agent: Agent;
+  settings: AgentStorefrontSettings;
+  featured: Artifact[];
+  latestDrop?: Drop;
+}
+
 export type HarvestAgentBodyType =
   (typeof HarvestAgentBodyType)[keyof typeof HarvestAgentBodyType];
 
@@ -510,6 +605,11 @@ export const ListDropsStatus = {
 } as const;
 
 export type GetStorefrontDropsParams = {
+  limit?: number;
+  offset?: number;
+};
+
+export type GetAgentStorefrontDropsParams = {
   limit?: number;
   offset?: number;
 };
