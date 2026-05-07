@@ -74,4 +74,6 @@ export function startAgentHarvestScheduler(): void {
     { intervalMs: HARVEST_INTERVAL_MS, perAgentLimit: PER_AGENT_LIMIT },
     "Agent harvest scheduler started",
   );
+  // Run an immediate first tick so ingestion does not wait a full interval.
+  void tick();
 }
