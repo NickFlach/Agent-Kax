@@ -194,7 +194,12 @@ export async function recordWebhookReceived(eventUuid: string): Promise<void> {
   await ensureSyncRow();
   await db
     .update(partnerSyncStateTable)
-    .set({ lastWebhookAt: new Date(), lastEventUuid: eventUuid, updatedAt: new Date() })
+    .set({
+      lastWebhookAt: new Date(),
+      lastEventUuid: eventUuid,
+      webhookSubscribed: "active",
+      updatedAt: new Date(),
+    })
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
 }
 

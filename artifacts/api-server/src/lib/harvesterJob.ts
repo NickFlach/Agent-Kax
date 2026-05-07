@@ -125,13 +125,20 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
       totalSeen += page.events.length;
 
       for (const ev of page.events) {
-        const inserted = await db
-          .insert(processedEventsTable)
-          .values({ eventUuid: ev.event_uuid, eventType: ev.event_type })
-          .onConflictDoNothing()
-          .returning({ eventUuid: processedEventsTable.eventUuid });
+        const already = await db
+          .select({ eventUuid: processedEventsTable.eventUuid })
+          .from(processedEventsTable)
+          .where(eq(processedEventsTable.eventUuid, ev.event_uuid))
+          .limit(1);
 
-        if (inserted.length > 0 && ev.event_type === "artifact.created") {
+        if (already.length > 0) {
+          cursor = ev.event_uuid;
+          await recordEventCursor(cursor);
+          continue;
+        }
+
+        let success = true;
+        if (ev.event_type === "artifact.created") {
           try {
             const pa = ev.data as PartnerArtifact;
             const result = await upsertPartnerArtifact(pa, KANNAKA_SYSTEM_USER_ID);
@@ -144,13 +151,22 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
               if (row) await runTasteEngineFor(row.id);
             }
           } catch (err) {
-            logger.error({ err, eventUuid: ev.event_uuid }, "Replay handler failed");
+            success = false;
+            logger.error({ err, eventUuid: ev.event_uuid }, "Replay handler failed; will retry on next startup");
           }
         }
 
-        cursor = ev.event_uuid;
-        await recordEventCursor(cursor);
-        if (inserted.length > 0) processed++;
+        if (success) {
+          await db
+            .insert(processedEventsTable)
+            .values({ eventUuid: ev.event_uuid, eventType: ev.event_type })
+            .onConflictDoNothing();
+          cursor = ev.event_uuid;
+          await recordEventCursor(cursor);
+          processed++;
+        } else {
+          return;
+        }
       }
 
       if (!page.next_cursor) break;

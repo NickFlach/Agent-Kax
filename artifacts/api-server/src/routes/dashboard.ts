@@ -11,9 +11,24 @@ router.get("/dashboard/partner-sync", async (_req, res) => {
   const state = await getSyncState();
   const today = new Date().toISOString().slice(0, 10);
   const requestsToday = state && state.requestsDayKey === today ? state.requestsToday : 0;
+
+  const secretPresent = Boolean(process.env["OBC_WEBHOOK_SECRET"]);
+  const STALE_MS = 24 * 60 * 60 * 1000;
+  const lastWebhookMs = state?.lastWebhookAt?.getTime() ?? null;
+  let webhookSubscribed: string;
+  if (!secretPresent) {
+    webhookSubscribed = "missing_secret";
+  } else if (state?.webhookSubscribed === "active" && lastWebhookMs && Date.now() - lastWebhookMs < STALE_MS) {
+    webhookSubscribed = "active";
+  } else if (lastWebhookMs) {
+    webhookSubscribed = "stale";
+  } else {
+    webhookSubscribed = "configured";
+  }
+
   res.json({
     apiKeyConfigured: partnerApiAvailable(),
-    webhookSubscribed: state?.webhookSubscribed ?? "unknown",
+    webhookSubscribed,
     lastPollAt: state?.lastPollAt?.toISOString() ?? null,
     lastWebhookAt: state?.lastWebhookAt?.toISOString() ?? null,
     lastEventUuid: state?.lastEventUuid ?? null,

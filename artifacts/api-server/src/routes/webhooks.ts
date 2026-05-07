@@ -105,13 +105,14 @@ router.post(
       return;
     }
 
-    const inserted = await db
-      .insert(processedEventsTable)
-      .values({ eventUuid: envelope.event_uuid, eventType: envelope.event_type })
-      .onConflictDoNothing()
-      .returning({ eventUuid: processedEventsTable.eventUuid });
+    const already = await db
+      .select({ eventUuid: processedEventsTable.eventUuid })
+      .from(processedEventsTable)
+      .where(eq(processedEventsTable.eventUuid, envelope.event_uuid))
+      .limit(1);
 
-    if (inserted.length === 0) {
+    if (already.length > 0) {
+      await recordWebhookReceived(envelope.event_uuid);
       res.json({ received: true, deduped: true });
       return;
     }
@@ -122,6 +123,10 @@ router.post(
       } else {
         req.log.info({ type: envelope.event_type }, "Webhook event type not handled in v1");
       }
+      await db
+        .insert(processedEventsTable)
+        .values({ eventUuid: envelope.event_uuid, eventType: envelope.event_type })
+        .onConflictDoNothing();
       await recordWebhookReceived(envelope.event_uuid);
       res.json({ received: true, deduped: false });
     } catch (err) {
