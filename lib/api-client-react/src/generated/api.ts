@@ -42,6 +42,7 @@ import type {
   GetRecentActivityParams,
   GetScoreDistributionParams,
   GetStorefrontDropsParams,
+  GetStorefrontMarketplace200,
   HandleBrowserLoginCallbackParams,
   HarvestAgentBody,
   HarvesterResult,
@@ -3003,6 +3004,85 @@ export function useGetAgentStorefrontDrops<
     params,
     options,
   );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List all agents with public storefronts (published drops)
+ */
+export const getGetStorefrontMarketplaceUrl = () => {
+  return `/api/storefront/marketplace`;
+};
+
+export const getStorefrontMarketplace = async (
+  options?: RequestInit,
+): Promise<GetStorefrontMarketplace200> => {
+  return customFetch<GetStorefrontMarketplace200>(
+    getGetStorefrontMarketplaceUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetStorefrontMarketplaceQueryKey = () => {
+  return [`/api/storefront/marketplace`] as const;
+};
+
+export const getGetStorefrontMarketplaceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getStorefrontMarketplace>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getStorefrontMarketplace>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetStorefrontMarketplaceQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getStorefrontMarketplace>>
+  > = ({ signal }) => getStorefrontMarketplace({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getStorefrontMarketplace>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetStorefrontMarketplaceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getStorefrontMarketplace>>
+>;
+export type GetStorefrontMarketplaceQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all agents with public storefronts (published drops)
+ */
+
+export function useGetStorefrontMarketplace<
+  TData = Awaited<ReturnType<typeof getStorefrontMarketplace>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getStorefrontMarketplace>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetStorefrontMarketplaceQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

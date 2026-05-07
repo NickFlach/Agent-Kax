@@ -1445,6 +1445,49 @@ export const GetAgentStorefrontDropsResponse = zod.object({
 });
 
 /**
+ * @summary List all agents with public storefronts (published drops)
+ */
+export const GetStorefrontMarketplaceResponse = zod.object({
+  storefronts: zod.array(
+    zod.object({
+      agent: zod.object({
+        id: zod.number(),
+        slug: zod.string(),
+        displayName: zod.string(),
+        avatarUrl: zod.string().nullish(),
+        ownerId: zod.string(),
+        artifactsHarvested: zod.number(),
+        lastSyncAt: zod.coerce.date().nullish(),
+        lastArtifactCursor: zod.string().nullish(),
+        createdAt: zod.coerce.date(),
+      }),
+      settings: zod.object({
+        agentId: zod.number(),
+        displayName: zod.string().nullish(),
+        tagline: zod.string().nullish(),
+        heroImageUrl: zod.string().nullish(),
+        accentColor: zod
+          .string()
+          .nullish()
+          .describe("Hex color like `#7C3AED`"),
+        themeVariant: zod.enum(["dark", "light"]),
+        socialLinks: zod.record(zod.string(), zod.string()).nullish(),
+        customDomainHint: zod.string().nullish(),
+        customCssVars: zod
+          .record(zod.string(), zod.string())
+          .nullish()
+          .describe(
+            "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
+          ),
+      }),
+      publishedDropCount: zod.number(),
+      artifactCount: zod.number(),
+      latestPublishedAt: zod.coerce.date().nullish(),
+    }),
+  ),
+});
+
+/**
  * @summary A single published artifact for an agent
  */
 export const GetAgentStorefrontArtifactParams = zod.object({

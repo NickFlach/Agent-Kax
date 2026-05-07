@@ -614,6 +614,19 @@ export type GetAgentStorefrontDropsParams = {
   offset?: number;
 };
 
+export type GetStorefrontMarketplace200StorefrontsItem = {
+  agent: Agent;
+  settings: AgentStorefrontSettings;
+  publishedDropCount: number;
+  artifactCount: number;
+  /** @nullable */
+  latestPublishedAt?: string | null;
+};
+
+export type GetStorefrontMarketplace200 = {
+  storefronts: GetStorefrontMarketplace200StorefrontsItem[];
+};
+
 export type GetDashboardSummaryParams = {
   /**
    * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.

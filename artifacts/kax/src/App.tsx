@@ -21,6 +21,7 @@ import StorefrontSettings from "@/pages/storefront-settings";
 import AgentStorefront from "@/pages/agent-storefront";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
+import Marketplace from "@/pages/marketplace";
 
 const queryClient = new QueryClient();
 
@@ -93,6 +94,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
             <div className="w-px h-4 bg-border mx-2" />
+            <NavLink href="/marketplace">Marketplace</NavLink>
             <NavLink href="/s/kannaka">Storefront</NavLink>
             <AuthControls />
           </div>
@@ -158,6 +160,12 @@ function Router() {
       </Route>
       <Route path="/agents/:slug">
         <AdminLayout><RequireAuth><AgentDetail /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/s">
+        <Marketplace />
+      </Route>
+      <Route path="/marketplace">
+        <Marketplace />
       </Route>
       <Route path="/s/:slug">
         <AgentStorefront />

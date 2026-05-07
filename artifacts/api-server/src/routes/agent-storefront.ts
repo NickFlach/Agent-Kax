@@ -193,6 +193,68 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
   res.json(formatSettings(saved));
 });
 
+router.get("/storefront/marketplace", async (_req, res) => {
+  const rows = await db
+    .select({
+      agent: agentsTable,
+      settings: agentStorefrontSettingsTable,
+      dropId: dropsTable.id,
+      publishedAt: dropsTable.publishedAt,
+      artifactId: artifactsTable.id,
+    })
+    .from(artifactsTable)
+    .innerJoin(agentsTable, eq(artifactsTable.agentId, agentsTable.id))
+    .innerJoin(
+      dropsTable,
+      and(eq(dropsTable.id, artifactsTable.dropId), eq(dropsTable.status, "published")),
+    )
+    .leftJoin(
+      agentStorefrontSettingsTable,
+      eq(agentStorefrontSettingsTable.agentId, agentsTable.id),
+    );
+
+  const byAgent = new Map<
+    number,
+    {
+      agent: Agent;
+      settings: AgentStorefrontSettings | null;
+      drops: Set<number>;
+      artifacts: Set<number>;
+      latest: Date | null;
+    }
+  >();
+  for (const r of rows) {
+    let entry = byAgent.get(r.agent.id);
+    if (!entry) {
+      entry = {
+        agent: r.agent,
+        settings: r.settings,
+        drops: new Set(),
+        artifacts: new Set(),
+        latest: null,
+      };
+      byAgent.set(r.agent.id, entry);
+    }
+    entry.drops.add(r.dropId);
+    entry.artifacts.add(r.artifactId);
+    if (r.publishedAt && (!entry.latest || r.publishedAt > entry.latest)) {
+      entry.latest = r.publishedAt;
+    }
+  }
+
+  const storefronts = Array.from(byAgent.values())
+    .sort((a, b) => (b.latest?.getTime() ?? 0) - (a.latest?.getTime() ?? 0))
+    .map((e) => ({
+      agent: formatAgent(e.agent),
+      settings: formatSettings(e.settings ?? defaultSettings(e.agent)),
+      publishedDropCount: e.drops.size,
+      artifactCount: e.artifacts.size,
+      latestPublishedAt: e.latest?.toISOString() ?? null,
+    }));
+
+  res.json({ storefronts });
+});
+
 router.get("/storefront/by-agent/:slug", async (req, res) => {
   const { slug } = GetAgentStorefrontParams.parse(req.params);
   const agent = await loadAgentBySlug(slug);

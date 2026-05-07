@@ -746,6 +746,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/DropListResponse"
 
+  /storefront/marketplace:
+    get:
+      operationId: getStorefrontMarketplace
+      tags: [storefront]
+      summary: List all agents with public storefronts (published drops)
+      responses:
+        "200":
+          description: Marketplace listing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [storefronts]
+                properties:
+                  storefronts:
+                    type: array
+                    items:
+                      type: object
+                      required: [agent, settings, publishedDropCount, artifactCount]
+                      properties:
+                        agent:
+                          $ref: "#/components/schemas/Agent"
+                        settings:
+                          $ref: "#/components/schemas/AgentStorefrontSettings"
+                        publishedDropCount:
+                          type: integer
+                        artifactCount:
+                          type: integer
+                        latestPublishedAt:
+                          type: [string, "null"]
+                          format: date-time
+
   /storefront/by-agent/{slug}/artifacts/{id}:
     get:
       operationId: getAgentStorefrontArtifact

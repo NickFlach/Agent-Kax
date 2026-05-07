@@ -52,6 +52,8 @@ export * from "./getDashboardSummaryParams";
 export * from "./getRecentActivityParams";
 export * from "./getScoreDistributionParams";
 export * from "./getStorefrontDropsParams";
+export * from "./getStorefrontMarketplace200";
+export * from "./getStorefrontMarketplace200StorefrontsItem";
 export * from "./handleBrowserLoginCallbackParams";
 export * from "./harvestAgentBody";
 export * from "./harvestAgentBodyType";
