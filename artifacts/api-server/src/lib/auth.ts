@@ -5,7 +5,30 @@ import { db, sessionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { AuthUser } from "@workspace/api-zod";
 
-export const ISSUER_URL = process.env.ISSUER_URL ?? "https://replit.com/oidc";
+const SPACECHILD_ISSUER = "https://spacechild.love";
+
+function spaceChildEnabled(): boolean {
+  return Boolean(
+    process.env.SPACECHILD_CLIENT_ID && process.env.SPACECHILD_CLIENT_SECRET,
+  );
+}
+
+export function getOidcIssuer(): string {
+  if (spaceChildEnabled()) return SPACECHILD_ISSUER;
+  return process.env.ISSUER_URL ?? "https://replit.com/oidc";
+}
+
+export function getOidcClientId(): string {
+  if (spaceChildEnabled()) return process.env.SPACECHILD_CLIENT_ID!;
+  return process.env.REPL_ID!;
+}
+
+export function getOidcClientSecret(): string | undefined {
+  if (spaceChildEnabled()) return process.env.SPACECHILD_CLIENT_SECRET;
+  return undefined;
+}
+
+export const ISSUER_URL = getOidcIssuer();
 export const SESSION_COOKIE = "sid";
 export const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 
@@ -20,9 +43,11 @@ let oidcConfig: client.Configuration | null = null;
 
 export async function getOidcConfig(): Promise<client.Configuration> {
   if (!oidcConfig) {
+    const secret = getOidcClientSecret();
     oidcConfig = await client.discovery(
-      new URL(ISSUER_URL),
-      process.env.REPL_ID!,
+      new URL(getOidcIssuer()),
+      getOidcClientId(),
+      secret ? { client_secret: secret } : undefined,
     );
   }
   return oidcConfig;

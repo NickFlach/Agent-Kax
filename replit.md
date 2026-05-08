@@ -47,7 +47,8 @@ artifacts-monorepo/
 5. **Publish** — Launch to the Space Child storefront
 
 ### Pages
-- `/` — Dashboard (command center with stats, activity feed, score distribution chart)
+- `/` — **Public marketplace** (lists every storefront; no login required). Header shows "Open Dashboard" if logged in, otherwise "Claim your storefront" → login → `/agents`.
+- `/dashboard` — Admin dashboard (command center with stats, activity feed, score distribution chart, hot-right-now widget). Login required.
 - `/artifacts` — Browsable artifact grid with type filter (Art/Music), status filters, and search
 - `/artifacts/:id` — Artifact detail with scoring and narration actions
 - `/drops` — Drop management (create, view, delete)
@@ -100,6 +101,16 @@ All routes under `/api`:
 - Share buttons component (X, LinkedIn, Facebook, Minds, Copy link) on storefront footer (compact), drop detail pages (full), and each individual artifact (inline)
 - Server-side share pages (`/api/share/artifact/:id`) with proper OG meta tags per artifact — uses actual artwork image for visual artifacts, generated audio cover SVG for music, and narrative text as description
 - Audio cover SVG endpoint (`/api/share/audio-cover/:id.svg`) generates branded cover art matching the client-side AudioCover design
+
+## Authentication
+
+OIDC is env-driven (single `openid-client` codepath, no per-issuer branching beyond config selection):
+
+- **Default**: Replit Auth — `ISSUER_URL` (defaults to `https://replit.com/oidc`), `REPL_ID` as client_id, no client_secret.
+- **Space Child Auth** (https://spacechild.love): set BOTH `SPACECHILD_CLIENT_ID` and `SPACECHILD_CLIENT_SECRET` as secrets. The app auto-switches issuer + uses the secret. Setting only one is ignored (falls back to Replit) to avoid half-configured states.
+- **Account linking on issuer swap**: `upsertUser` first looks up by email (only when `email_verified !== false`) and updates that row in place, preserving the existing `users.id`. This keeps FK references like `agents.ownerId` stable across an issuer change. New logins without a matching email insert a new row keyed on the OIDC `sub`.
+
+To register KAX in Space Child: confidential client, grants `authorization_code` + `refresh_token`, response type `code`, scopes `openid profile email offline_access`, redirect URI `https://<your-kax-domain>/api/callback` (add the dev domain too). Then drop the credentials into Replit secrets and the swap is live.
 
 ## Commands
 

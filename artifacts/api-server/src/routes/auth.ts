@@ -11,12 +11,13 @@ import { eq } from "drizzle-orm";
 import {
   clearSession,
   getOidcConfig,
+  getOidcClientId,
+  getOidcIssuer,
   getSessionId,
   createSession,
   deleteSession,
   SESSION_COOKIE,
   SESSION_TTL,
-  ISSUER_URL,
   type SessionData,
 } from "../lib/auth";
 
@@ -69,35 +70,66 @@ function getAdminEmails(): Set<string> {
 
 async function upsertUser(claims: Record<string, unknown>) {
   const email = (claims.email as string) || null;
+  const sub = claims.sub as string;
   const adminEmails = getAdminEmails();
   const isBootstrapAdmin = email ? adminEmails.has(email.toLowerCase()) : false;
 
-  const userData = {
-    id: claims.sub as string,
+  const profileFields = {
     email,
-    firstName: (claims.first_name as string) || null,
-    lastName: (claims.last_name as string) || null,
+    firstName:
+      ((claims.first_name as string) || (claims.given_name as string)) ?? null,
+    lastName:
+      ((claims.last_name as string) || (claims.family_name as string)) ?? null,
     profileImageUrl: (claims.profile_image_url || claims.picture) as
       | string
       | null,
   };
 
-  const insertData = isBootstrapAdmin
-    ? { ...userData, role: "admin" as const }
-    : userData;
+  // Email-based linking: if a user with this verified email already exists,
+  // update that row in place so its existing `id` (and any FK references like
+  // agents.ownerId) stay stable across an issuer swap. We require
+  // email_verified to be true (or omitted by an issuer that only emits
+  // verified emails — Replit OIDC) to prevent account takeover via spoofed
+  // email claims from a different issuer.
+  const emailVerified =
+    claims.email_verified === undefined || claims.email_verified === true;
+  let existing: typeof usersTable.$inferSelect | undefined;
+  if (email && emailVerified) {
+    [existing] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.email, email))
+      .limit(1);
+  }
+  if (!existing) {
+    [existing] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, sub))
+      .limit(1);
+  }
 
-  const updateData: Record<string, unknown> = {
-    ...userData,
+  const updates: Record<string, unknown> = {
+    ...profileFields,
     updatedAt: new Date(),
   };
-  if (isBootstrapAdmin) updateData.role = "admin";
+  if (isBootstrapAdmin) updates.role = "admin";
+
+  if (existing) {
+    const [user] = await db
+      .update(usersTable)
+      .set(updates)
+      .where(eq(usersTable.id, existing.id))
+      .returning();
+    return user;
+  }
 
   const [user] = await db
     .insert(usersTable)
-    .values(insertData)
-    .onConflictDoUpdate({
-      target: usersTable.id,
-      set: updateData,
+    .values({
+      id: sub,
+      ...profileFields,
+      ...(isBootstrapAdmin ? { role: "admin" as const } : {}),
     })
     .returning();
   return user;
@@ -240,7 +272,7 @@ router.get("/logout", async (req: Request, res: Response) => {
   await clearSession(res, sid);
 
   const endSessionUrl = oidc.buildEndSessionUrl(config, {
-    client_id: process.env.REPL_ID!,
+    client_id: getOidcClientId(),
     post_logout_redirect_uri: origin,
   });
 
@@ -264,7 +296,7 @@ router.post(
       const callbackUrl = new URL(redirect_uri);
       callbackUrl.searchParams.set("code", code);
       callbackUrl.searchParams.set("state", state);
-      callbackUrl.searchParams.set("iss", ISSUER_URL);
+      callbackUrl.searchParams.set("iss", getOidcIssuer());
 
       const tokens = await oidc.authorizationCodeGrant(config, callbackUrl, {
         pkceCodeVerifier: code_verifier,

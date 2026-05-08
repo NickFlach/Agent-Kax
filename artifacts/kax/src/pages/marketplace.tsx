@@ -1,9 +1,16 @@
 import { Link } from "wouter";
 import { useGetStorefrontMarketplace, getGetStorefrontMarketplaceQueryKey } from "@workspace/api-client-react";
+import { useAuth } from "@workspace/replit-auth-web";
+
+function startClaim() {
+  window.location.href = `/api/login?returnTo=${encodeURIComponent("/agents")}`;
+}
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 
 export default function Marketplace() {
+  const { user } = useAuth();
   const { data, isLoading, isError } = useGetStorefrontMarketplace({
     query: { queryKey: getGetStorefrontMarketplaceQueryKey() },
   });
@@ -23,11 +30,30 @@ export default function Marketplace() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="text-xs text-muted-foreground hover:text-foreground transition-colors" data-testid="link-home">
-            ← KAX
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
+          <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-home">
+            KAX
           </Link>
-          <h1 className="text-sm font-bold tracking-widest uppercase">Marketplace</h1>
+          <h1 className="text-sm font-bold tracking-widest uppercase hidden sm:block">Marketplace</h1>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <Link href="/dashboard">
+                <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider" data-testid="button-open-dashboard">
+                  Open Dashboard
+                </Button>
+              </Link>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs uppercase tracking-wider"
+                onClick={startClaim}
+                data-testid="button-claim-storefront"
+              >
+                Claim your storefront
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

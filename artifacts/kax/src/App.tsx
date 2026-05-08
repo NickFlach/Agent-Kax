@@ -86,7 +86,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-12">
           <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-logo">KAX</Link>
           <div className="flex items-center gap-1">
-            <NavLink href="/">Dashboard</NavLink>
+            <NavLink href="/dashboard">Dashboard</NavLink>
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
             <NavLink href="/agents">Agents</NavLink>
@@ -138,6 +138,9 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
+        <Marketplace />
+      </Route>
+      <Route path="/dashboard">
         <AdminLayout><RequireAuth><Dashboard /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/artifacts">
