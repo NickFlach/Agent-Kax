@@ -3,12 +3,14 @@ import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, 
 import { Link as WLink } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from "recharts";
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 import { NotificationPrefsCard } from "@/components/notification-prefs-card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TrendingDown } from "lucide-react";
 
 export default function Dashboard() {
   const [showAll, setShowAll] = useState(false);
@@ -45,6 +47,7 @@ export default function Dashboard() {
   };
 
   return (
+    <TooltipProvider delayDuration={200}>
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -124,7 +127,7 @@ export default function Dashboard() {
             Hot Right Now
             <span className="ml-2 text-[10px] text-accent">● live</span>
           </CardTitle>
-          <span className="text-xs text-muted-foreground">last 60 min</span>
+          <span className="text-xs text-muted-foreground">last 60 min · cooling shown 24h</span>
         </CardHeader>
         <CardContent>
           {hotLoading ? (
@@ -142,9 +145,16 @@ export default function Dashboard() {
                       <p className="text-sm font-medium truncate">{item.title}</p>
                       <p className="text-xs text-muted-foreground truncate">{item.creatorName}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex flex-col items-end gap-0.5">
                       <p className="text-sm font-bold text-accent font-mono">+{item.reactionsLastHour}</p>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">heat {item.heat}</p>
+                      <div className="flex items-center gap-1.5">
+                        <CoolingBadge
+                          previousHeat={item.previousHeat ?? null}
+                          lastHeatDecayAt={item.lastHeatDecayAt ?? null}
+                          heat={item.heat}
+                        />
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">heat {item.heat}</p>
+                      </div>
                     </div>
                   </div>
                 </Link>
@@ -170,7 +180,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 10% 15%)" />
                   <XAxis dataKey="range" tick={{ fill: "hsl(240 5% 65%)", fontSize: 12 }} />
                   <YAxis tick={{ fill: "hsl(240 5% 65%)", fontSize: 12 }} />
-                  <Tooltip
+                  <ChartTooltip
                     contentStyle={{
                       backgroundColor: "hsl(240 10% 6%)",
                       border: "1px solid hsl(240 10% 15%)",
@@ -244,7 +254,54 @@ export default function Dashboard() {
         </Card>
       )}
     </div>
+    </TooltipProvider>
   );
+}
+
+function CoolingBadge({
+  previousHeat,
+  lastHeatDecayAt,
+  heat,
+}: {
+  previousHeat: number | null;
+  lastHeatDecayAt: string | null;
+  heat: number;
+}) {
+  if (!lastHeatDecayAt || previousHeat == null || previousHeat <= heat) return null;
+  const decayedAt = new Date(lastHeatDecayAt);
+  const ageMs = Date.now() - decayedAt.getTime();
+  if (ageMs > 24 * 60 * 60 * 1000) return null;
+  const ago = formatRelativeShort(ageMs);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/15 text-blue-300 text-[9px] uppercase tracking-wider font-mono cursor-help"
+          data-testid="badge-cooling"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <TrendingDown className="h-2.5 w-2.5" />
+          cooling
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        Heat halved {ago} after 6 hours with no new reactions. Was {previousHeat}, now {heat}.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function formatRelativeShort(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.round(hr / 24);
+  return `${d}d ago`;
 }
 
 function StatCard({ label, value }: { label: string; value: string | number }) {

@@ -36,7 +36,11 @@ export async function runHeatDecayOnce(now: Date = new Date()): Promise<HeatDeca
   // bumps heat and advances lastReactionAt) cannot have its work erased.
   const decayedRows = await db
     .update(artifactsTable)
-    .set({ heat: sql`${artifactsTable.heat} / 2` })
+    .set({
+      heat: sql`${artifactsTable.heat} / 2`,
+      previousHeat: sql`${artifactsTable.heat}`,
+      lastHeatDecayAt: now,
+    })
     .where(
       and(
         gt(artifactsTable.heat, 0),

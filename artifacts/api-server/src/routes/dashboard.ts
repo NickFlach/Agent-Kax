@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, activitiesTable, reactionsTable } from "@workspace/db/schema";
-import { eq, desc, count, avg, sql, isNotNull, and, gte } from "drizzle-orm";
+import { eq, desc, count, avg, sql, isNotNull, and, gte, or, gt } from "drizzle-orm";
 import { decayedHeatSignal } from "../lib/tasteEngine";
 import { GetRecentActivityQueryParams } from "@workspace/api-zod";
 import { getSyncState, DAILY_REQUEST_BUDGET, partnerApiAvailable } from "../lib/partnerClient";
@@ -143,9 +143,21 @@ router.get("/dashboard/score-distribution", requireAuth, async (req, res) => {
 router.get("/dashboard/hot", requireAuth, async (req, res) => {
   const ownerScope = await getOwnerScope(req);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const decayWindowAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   const recentCountSql = sql<number>`count(${reactionsTable.id}) filter (where ${reactionsTable.createdAt} >= ${hourAgo})`;
-  const conditions = [isNotNull(artifactsTable.lastReactionAt), gte(artifactsTable.lastReactionAt, hourAgo)];
+  // Show artifacts that are either actively hot (a reaction in the last hour)
+  // OR were recently cooled by the decay job and still carry residual heat —
+  // so curators can see why a previously-hot artifact's heat number dropped.
+  const visibilityCond = or(
+    and(isNotNull(artifactsTable.lastReactionAt), gte(artifactsTable.lastReactionAt, hourAgo)),
+    and(
+      isNotNull(artifactsTable.lastHeatDecayAt),
+      gte(artifactsTable.lastHeatDecayAt, decayWindowAgo),
+      gt(artifactsTable.heat, 0),
+    ),
+  );
+  const conditions = [visibilityCond];
   if (ownerScope !== null) conditions.push(eq(artifactsTable.ownerId, ownerScope));
 
   const rows = await db
@@ -157,6 +169,8 @@ router.get("/dashboard/hot", requireAuth, async (req, res) => {
       publicUrl: artifactsTable.publicUrl,
       artifactType: artifactsTable.artifactType,
       heat: artifactsTable.heat,
+      previousHeat: artifactsTable.previousHeat,
+      lastHeatDecayAt: artifactsTable.lastHeatDecayAt,
       lastReactionAt: artifactsTable.lastReactionAt,
       reactionsLastHour: recentCountSql,
     })
@@ -177,6 +191,8 @@ router.get("/dashboard/hot", requireAuth, async (req, res) => {
       publicUrl: r.publicUrl,
       artifactType: r.artifactType,
       heat: r.heat,
+      previousHeat: r.previousHeat,
+      lastHeatDecayAt: r.lastHeatDecayAt?.toISOString() ?? null,
       reactionsLastHour: Number(r.reactionsLastHour) || 0,
       lastReactionAt: r.lastReactionAt?.toISOString() ?? null,
       heatSignal: decayedHeatSignal({ heat: r.heat, lastReactionAt: r.lastReactionAt, now }),

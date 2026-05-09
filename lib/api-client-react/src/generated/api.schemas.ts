@@ -207,6 +207,8 @@ export interface HotArtifact {
   publicUrl: string;
   artifactType: HotArtifactArtifactType;
   heat: number;
+  previousHeat: number | null;
+  lastHeatDecayAt: string | null;
   reactionsLastHour: number;
   lastReactionAt?: string | null;
   heatSignal: number;

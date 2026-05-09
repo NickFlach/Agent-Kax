@@ -64,6 +64,8 @@ export const handleReactionReceived: EventHandler = async (data, { log }) => {
       heat: sql`${artifactsTable.heat} + 1`,
       reactionCount: sql`${artifactsTable.reactionCount} + 1`,
       lastReactionAt: sql`GREATEST(COALESCE(${artifactsTable.lastReactionAt}, 'epoch'::timestamp), ${occurredAt})`,
+      previousHeat: null,
+      lastHeatDecayAt: null,
     })
     .where(eq(artifactsTable.id, artifact.id));
 

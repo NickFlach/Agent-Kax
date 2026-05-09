@@ -1447,7 +1447,7 @@ components:
 
     HotArtifact:
       type: object
-      required: [id, title, creatorName, publicUrl, artifactType, heat, reactionsLastHour, heatSignal]
+      required: [id, title, creatorName, publicUrl, artifactType, heat, reactionsLastHour, heatSignal, previousHeat, lastHeatDecayAt]
       properties:
         id:
           type: integer
@@ -1465,6 +1465,13 @@ components:
           enum: [image, music, text, audio, furniture]
         heat:
           type: integer
+        previousHeat:
+          type: integer
+          nullable: true
+        lastHeatDecayAt:
+          type: string
+          format: date-time
+          nullable: true
         reactionsLastHour:
           type: integer
         lastReactionAt:

@@ -18,6 +18,8 @@ export const artifactsTable = pgTable("artifacts", {
   thumbnailUrl: text("thumbnail_url"),
   reactionCount: integer("reaction_count").notNull().default(0),
   heat: integer("heat").notNull().default(0),
+  previousHeat: integer("previous_heat"),
+  lastHeatDecayAt: timestamp("last_heat_decay_at"),
   lastReactionAt: timestamp("last_reaction_at"),
   artifactType: artifactTypeEnum("artifact_type").notNull().default("image"),
   status: artifactStatusEnum("status").notNull().default("raw"),

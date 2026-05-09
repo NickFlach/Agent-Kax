@@ -372,6 +372,8 @@ router.get("/storefront/by-agent/:slug/hot", async (req, res) => {
       publicUrl: artifactsTable.publicUrl,
       artifactType: artifactsTable.artifactType,
       heat: artifactsTable.heat,
+      previousHeat: artifactsTable.previousHeat,
+      lastHeatDecayAt: artifactsTable.lastHeatDecayAt,
       lastReactionAt: artifactsTable.lastReactionAt,
       reactionsLastHour: recentCountSql,
     })
@@ -399,6 +401,8 @@ router.get("/storefront/by-agent/:slug/hot", async (req, res) => {
       publicUrl: r.publicUrl,
       artifactType: r.artifactType,
       heat: r.heat,
+      previousHeat: r.previousHeat,
+      lastHeatDecayAt: r.lastHeatDecayAt?.toISOString() ?? null,
       reactionsLastHour: Number(r.reactionsLastHour) || 0,
       lastReactionAt: r.lastReactionAt?.toISOString() ?? null,
       heatSignal: decayedHeatSignal({ heat: r.heat, lastReactionAt: r.lastReactionAt, now }),

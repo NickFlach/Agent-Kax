@@ -15,6 +15,8 @@ export interface HotArtifact {
   publicUrl: string;
   artifactType: HotArtifactArtifactType;
   heat: number;
+  previousHeat: number | null;
+  lastHeatDecayAt: Date | null;
   reactionsLastHour: number;
   lastReactionAt?: Date | null;
   heatSignal: number;
