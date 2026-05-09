@@ -20,6 +20,7 @@ import {
   SESSION_TTL,
   type SessionData,
 } from "../lib/auth";
+import { maybeClaimKannakaOwnership } from "../lib/backfill";
 
 const OIDC_COOKIE_TTL = 10 * 60 * 1000;
 
@@ -115,23 +116,30 @@ async function upsertUser(claims: Record<string, unknown>) {
   };
   if (isBootstrapAdmin) updates.role = "admin";
 
+  let user: typeof usersTable.$inferSelect;
   if (existing) {
-    const [user] = await db
+    [user] = await db
       .update(usersTable)
       .set(updates)
       .where(eq(usersTable.id, existing.id))
       .returning();
-    return user;
+  } else {
+    [user] = await db
+      .insert(usersTable)
+      .values({
+        id: sub,
+        ...profileFields,
+        ...(isBootstrapAdmin ? { role: "admin" as const } : {}),
+      })
+      .returning();
   }
 
-  const [user] = await db
-    .insert(usersTable)
-    .values({
-      id: sub,
-      ...profileFields,
-      ...(isBootstrapAdmin ? { role: "admin" as const } : {}),
-    })
-    .returning();
+  await maybeClaimKannakaOwnership({
+    id: user.id,
+    email: user.email,
+    emailVerified,
+    role: user.role,
+  });
   return user;
 }
 
