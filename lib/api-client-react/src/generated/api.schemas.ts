@@ -548,6 +548,104 @@ export interface PartnerSyncStatus {
   dailyBudget: number;
 }
 
+export type ProposalStatus =
+  (typeof ProposalStatus)[keyof typeof ProposalStatus];
+
+export const ProposalStatus = {
+  pending: "pending",
+  accepted: "accepted",
+  declined: "declined",
+} as const;
+
+export interface Proposal {
+  id: number;
+  sourceUuid: string;
+  /** @nullable */
+  agentId?: number | null;
+  /** @nullable */
+  ownerId?: string | null;
+  /** @nullable */
+  fromAgentSlug?: string | null;
+  /** @nullable */
+  fromDisplayName?: string | null;
+  kind: string;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  status: ProposalStatus;
+  occurredAt: string;
+  createdAt: string;
+  /** @nullable */
+  decidedAt?: string | null;
+}
+
+export interface ProposalListResponse {
+  proposals: Proposal[];
+}
+
+export type ProposalDecisionBodyDecision =
+  (typeof ProposalDecisionBodyDecision)[keyof typeof ProposalDecisionBodyDecision];
+
+export const ProposalDecisionBodyDecision = {
+  accepted: "accepted",
+  declined: "declined",
+} as const;
+
+export interface ProposalDecisionBody {
+  decision: ProposalDecisionBodyDecision;
+}
+
+export interface Dm {
+  id: number;
+  sourceUuid: string;
+  /** @nullable */
+  agentId?: number | null;
+  /** @nullable */
+  ownerId?: string | null;
+  /** @nullable */
+  fromAgentSlug?: string | null;
+  /** @nullable */
+  fromDisplayName?: string | null;
+  body: string;
+  occurredAt: string;
+  /** @nullable */
+  readAt?: string | null;
+  createdAt: string;
+}
+
+export interface DmListResponse {
+  dms: Dm[];
+}
+
+export interface Match {
+  id: number;
+  sourceUuid: string;
+  /** @nullable */
+  agentId?: number | null;
+  /** @nullable */
+  ownerId?: string | null;
+  /** @nullable */
+  partnerAgentSlug?: string | null;
+  /** @nullable */
+  partnerDisplayName?: string | null;
+  matchType: string;
+  /** @nullable */
+  score?: number | null;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface MatchListResponse {
+  matches: Match[];
+}
+
+export interface InboxCounts {
+  proposalsPending: number;
+  dmsUnread: number;
+  matchesTotal: number;
+}
+
 export type ScoreDistributionBucketsItem = {
   range: string;
   count: number;
@@ -659,6 +757,33 @@ export type GetStorefrontMarketplace200StorefrontsItem = {
 
 export type GetStorefrontMarketplace200 = {
   storefronts: GetStorefrontMarketplace200StorefrontsItem[];
+};
+
+export type ListProposalsParams = {
+  status?: ListProposalsStatus;
+  all?: boolean;
+};
+
+export type ListProposalsStatus =
+  (typeof ListProposalsStatus)[keyof typeof ListProposalsStatus];
+
+export const ListProposalsStatus = {
+  pending: "pending",
+  accepted: "accepted",
+  declined: "declined",
+} as const;
+
+export type ListDmsParams = {
+  unreadOnly?: boolean;
+  all?: boolean;
+};
+
+export type ListMatchesParams = {
+  all?: boolean;
+};
+
+export type GetInboxCountsParams = {
+  all?: boolean;
 };
 
 export type GetDashboardSummaryParams = {

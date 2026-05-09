@@ -25,6 +25,8 @@ tags:
     description: Dashboard summaries
   - name: agents
     description: OpenBotCity agent onboarding and per-agent dashboards
+  - name: inbox
+    description: Partner-driven proposals, DMs, and matches
 
 paths:
   /healthz:
@@ -799,6 +801,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HotArtifactsResponse"
+
+  /proposals:
+    get:
+      operationId: listProposals
+      tags: [inbox]
+      summary: List partner proposals scoped to the current user
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, accepted, declined]
+        - name: all
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Proposal list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalListResponse"
+
+  /proposals/{id}/decision:
+    post:
+      operationId: decideProposal
+      tags: [inbox]
+      summary: Accept or decline a proposal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProposalDecisionBody"
+      responses:
+        "200":
+          description: Updated proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+
+  /dms:
+    get:
+      operationId: listDms
+      tags: [inbox]
+      summary: List DMs delivered to the current user's agents
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+        - name: all
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: DM list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DmListResponse"
+
+  /dms/{id}/read:
+    post:
+      operationId: markDmRead
+      tags: [inbox]
+      summary: Mark a DM as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated DM
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dm"
+
+  /matches:
+    get:
+      operationId: listMatches
+      tags: [inbox]
+      summary: List completed matches for the current user's agents
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Match list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchListResponse"
+
+  /dashboard/inbox-counts:
+    get:
+      operationId: getInboxCounts
+      tags: [inbox]
+      summary: Counts of pending proposals, unread DMs, and matches for the dashboard
+      parameters:
+        - name: all
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Inbox counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxCounts"
 
   /storefront/by-agent/{slug}/artifacts/{id}:
     get:
@@ -1681,6 +1808,142 @@ components:
         requestsToday:
           type: integer
         dailyBudget:
+          type: integer
+
+    Proposal:
+      type: object
+      required: [id, sourceUuid, kind, status, occurredAt, createdAt]
+      properties:
+        id:
+          type: integer
+        sourceUuid:
+          type: string
+        agentId:
+          type: [integer, "null"]
+        ownerId:
+          type: [string, "null"]
+        fromAgentSlug:
+          type: [string, "null"]
+        fromDisplayName:
+          type: [string, "null"]
+        kind:
+          type: string
+        subject:
+          type: [string, "null"]
+        body:
+          type: [string, "null"]
+        status:
+          type: string
+          enum: [pending, accepted, declined]
+        occurredAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: [string, "null"]
+          format: date-time
+
+    ProposalListResponse:
+      type: object
+      required: [proposals]
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: "#/components/schemas/Proposal"
+
+    ProposalDecisionBody:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [accepted, declined]
+
+    Dm:
+      type: object
+      required: [id, sourceUuid, body, occurredAt, createdAt]
+      properties:
+        id:
+          type: integer
+        sourceUuid:
+          type: string
+        agentId:
+          type: [integer, "null"]
+        ownerId:
+          type: [string, "null"]
+        fromAgentSlug:
+          type: [string, "null"]
+        fromDisplayName:
+          type: [string, "null"]
+        body:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        readAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    DmListResponse:
+      type: object
+      required: [dms]
+      properties:
+        dms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dm"
+
+    Match:
+      type: object
+      required: [id, sourceUuid, matchType, occurredAt, createdAt]
+      properties:
+        id:
+          type: integer
+        sourceUuid:
+          type: string
+        agentId:
+          type: [integer, "null"]
+        ownerId:
+          type: [string, "null"]
+        partnerAgentSlug:
+          type: [string, "null"]
+        partnerDisplayName:
+          type: [string, "null"]
+        matchType:
+          type: string
+        score:
+          type: [integer, "null"]
+        occurredAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    MatchListResponse:
+      type: object
+      required: [matches]
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/Match"
+
+    InboxCounts:
+      type: object
+      required: [proposalsPending, dmsUnread, matchesTotal]
+      properties:
+        proposalsPending:
+          type: integer
+        dmsUnread:
+          type: integer
+        matchesTotal:
           type: integer
 
     ScoreDistribution:

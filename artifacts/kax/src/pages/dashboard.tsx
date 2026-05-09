@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, useGetHotArtifacts, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey, getGetHotArtifactsQueryKey } from "@workspace/api-client-react";
+import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, useGetHotArtifacts, useGetInboxCounts, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey, getGetHotArtifactsQueryKey, getGetInboxCountsQueryKey } from "@workspace/api-client-react";
+import { Link as WLink } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -28,6 +29,10 @@ export default function Dashboard() {
 
   const { data: hot, isLoading: hotLoading } = useGetHotArtifacts({
     query: { queryKey: getGetHotArtifactsQueryKey(), refetchInterval: 30_000 },
+  });
+
+  const { data: inboxCounts } = useGetInboxCounts(scope, {
+    query: { queryKey: getGetInboxCountsQueryKey(scope), refetchInterval: 60_000 },
   });
 
   const activityColors: Record<string, string> = {
@@ -71,6 +76,44 @@ export default function Dashboard() {
           <StatCard label="Avg Score" value={`${(summary.averageScore * 100).toFixed(0)}%`} />
         </div>
       ) : null}
+
+      {inboxCounts && (inboxCounts.proposalsPending > 0 || inboxCounts.dmsUnread > 0 || inboxCounts.matchesTotal > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="inbox-counts">
+          <WLink href="/proposals">
+            <Card className="cursor-pointer hover-elevate">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Pending Proposals</p>
+                  <p className="text-2xl font-bold mt-1" data-testid="stat-proposals-pending">{inboxCounts.proposalsPending}</p>
+                </div>
+                <span className="text-xs text-muted-foreground">review →</span>
+              </CardContent>
+            </Card>
+          </WLink>
+          <WLink href="/inbox">
+            <Card className="cursor-pointer hover-elevate">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Unread DMs</p>
+                  <p className="text-2xl font-bold mt-1" data-testid="stat-dms-unread">{inboxCounts.dmsUnread}</p>
+                </div>
+                <span className="text-xs text-muted-foreground">open inbox →</span>
+              </CardContent>
+            </Card>
+          </WLink>
+          <WLink href="/proposals">
+            <Card className="cursor-pointer hover-elevate">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Total Matches</p>
+                  <p className="text-2xl font-bold mt-1" data-testid="stat-matches-total">{inboxCounts.matchesTotal}</p>
+                </div>
+                <span className="text-xs text-muted-foreground">view →</span>
+              </CardContent>
+            </Card>
+          </WLink>
+        </div>
+      )}
 
       <PartnerSyncWidget />
 

@@ -1,7 +1,9 @@
 import { registerEventHandler } from "../eventDispatcher";
 import { handleArtifactCreated } from "./artifactCreated";
 import { handleReactionReceived } from "./reactionReceived";
-import { handleProposalCreated, handleDmReceived, handleMatchCompleted } from "./stubs";
+import { handleProposalCreated } from "./proposalCreated";
+import { handleDmReceived } from "./dmReceived";
+import { handleMatchCompleted } from "./matchCompleted";
 
 let registered = false;
 

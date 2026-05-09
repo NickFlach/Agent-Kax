@@ -6,3 +6,4 @@ export * from "./partner";
 export * from "./agents";
 export * from "./agent-storefront";
 export * from "./reactions";
+export * from "./partner-events";

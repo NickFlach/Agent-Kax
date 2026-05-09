@@ -32,6 +32,8 @@ import type {
   CreateAgentBody,
   CreateDropBody,
   DashboardSummary,
+  Dm,
+  DmListResponse,
   Drop,
   DropListResponse,
   DropSuggestionsResponse,
@@ -39,6 +41,7 @@ import type {
   FeaturedResponse,
   GetAgentStorefrontDropsParams,
   GetDashboardSummaryParams,
+  GetInboxCountsParams,
   GetRecentActivityParams,
   GetScoreDistributionParams,
   GetStorefrontDropsParams,
@@ -49,13 +52,21 @@ import type {
   HarvesterRunBody,
   HealthStatus,
   HotArtifactsResponse,
+  InboxCounts,
   ListAdminUsersResponse,
   ListArtifactsParams,
+  ListDmsParams,
   ListDropsParams,
+  ListMatchesParams,
+  ListProposalsParams,
   LogoutSuccess,
+  MatchListResponse,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
   PartnerSyncStatus,
+  Proposal,
+  ProposalDecisionBody,
+  ProposalListResponse,
   ScoreDistribution,
   UpdateAdminUserBody,
   UpdateAgentStorefrontSettingsBody,
@@ -3173,6 +3184,545 @@ export function useGetAgentStorefrontHot<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAgentStorefrontHotQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List partner proposals scoped to the current user
+ */
+export const getListProposalsUrl = (params?: ListProposalsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/proposals?${stringifiedParams}`
+    : `/api/proposals`;
+};
+
+export const listProposals = async (
+  params?: ListProposalsParams,
+  options?: RequestInit,
+): Promise<ProposalListResponse> => {
+  return customFetch<ProposalListResponse>(getListProposalsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListProposalsQueryKey = (params?: ListProposalsParams) => {
+  return [`/api/proposals`, ...(params ? [params] : [])] as const;
+};
+
+export const getListProposalsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProposals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListProposalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProposals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListProposalsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listProposals>>> = ({
+    signal,
+  }) => listProposals(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listProposals>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListProposalsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProposals>>
+>;
+export type ListProposalsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List partner proposals scoped to the current user
+ */
+
+export function useListProposals<
+  TData = Awaited<ReturnType<typeof listProposals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListProposalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listProposals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListProposalsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Accept or decline a proposal
+ */
+export const getDecideProposalUrl = (id: number) => {
+  return `/api/proposals/${id}/decision`;
+};
+
+export const decideProposal = async (
+  id: number,
+  proposalDecisionBody: ProposalDecisionBody,
+  options?: RequestInit,
+): Promise<Proposal> => {
+  return customFetch<Proposal>(getDecideProposalUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(proposalDecisionBody),
+  });
+};
+
+export const getDecideProposalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof decideProposal>>,
+    TError,
+    { id: number; data: BodyType<ProposalDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof decideProposal>>,
+  TError,
+  { id: number; data: BodyType<ProposalDecisionBody> },
+  TContext
+> => {
+  const mutationKey = ["decideProposal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof decideProposal>>,
+    { id: number; data: BodyType<ProposalDecisionBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return decideProposal(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DecideProposalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof decideProposal>>
+>;
+export type DecideProposalMutationBody = BodyType<ProposalDecisionBody>;
+export type DecideProposalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Accept or decline a proposal
+ */
+export const useDecideProposal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof decideProposal>>,
+    TError,
+    { id: number; data: BodyType<ProposalDecisionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof decideProposal>>,
+  TError,
+  { id: number; data: BodyType<ProposalDecisionBody> },
+  TContext
+> => {
+  return useMutation(getDecideProposalMutationOptions(options));
+};
+
+/**
+ * @summary List DMs delivered to the current user's agents
+ */
+export const getListDmsUrl = (params?: ListDmsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dms?${stringifiedParams}`
+    : `/api/dms`;
+};
+
+export const listDms = async (
+  params?: ListDmsParams,
+  options?: RequestInit,
+): Promise<DmListResponse> => {
+  return customFetch<DmListResponse>(getListDmsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListDmsQueryKey = (params?: ListDmsParams) => {
+  return [`/api/dms`, ...(params ? [params] : [])] as const;
+};
+
+export const getListDmsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDms>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListDmsParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof listDms>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListDmsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listDms>>> = ({
+    signal,
+  }) => listDms(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDms>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListDmsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDms>>
+>;
+export type ListDmsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List DMs delivered to the current user's agents
+ */
+
+export function useListDms<
+  TData = Awaited<ReturnType<typeof listDms>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListDmsParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof listDms>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListDmsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Mark a DM as read
+ */
+export const getMarkDmReadUrl = (id: number) => {
+  return `/api/dms/${id}/read`;
+};
+
+export const markDmRead = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Dm> => {
+  return customFetch<Dm>(getMarkDmReadUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getMarkDmReadMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markDmRead>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markDmRead>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["markDmRead"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markDmRead>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return markDmRead(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkDmReadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markDmRead>>
+>;
+
+export type MarkDmReadMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark a DM as read
+ */
+export const useMarkDmRead = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markDmRead>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markDmRead>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getMarkDmReadMutationOptions(options));
+};
+
+/**
+ * @summary List completed matches for the current user's agents
+ */
+export const getListMatchesUrl = (params?: ListMatchesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/matches?${stringifiedParams}`
+    : `/api/matches`;
+};
+
+export const listMatches = async (
+  params?: ListMatchesParams,
+  options?: RequestInit,
+): Promise<MatchListResponse> => {
+  return customFetch<MatchListResponse>(getListMatchesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListMatchesQueryKey = (params?: ListMatchesParams) => {
+  return [`/api/matches`, ...(params ? [params] : [])] as const;
+};
+
+export const getListMatchesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMatches>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListMatchesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMatches>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListMatchesQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listMatches>>> = ({
+    signal,
+  }) => listMatches(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMatches>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMatchesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMatches>>
+>;
+export type ListMatchesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List completed matches for the current user's agents
+ */
+
+export function useListMatches<
+  TData = Awaited<ReturnType<typeof listMatches>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListMatchesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listMatches>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMatchesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Counts of pending proposals, unread DMs, and matches for the dashboard
+ */
+export const getGetInboxCountsUrl = (params?: GetInboxCountsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/inbox-counts?${stringifiedParams}`
+    : `/api/dashboard/inbox-counts`;
+};
+
+export const getInboxCounts = async (
+  params?: GetInboxCountsParams,
+  options?: RequestInit,
+): Promise<InboxCounts> => {
+  return customFetch<InboxCounts>(getGetInboxCountsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetInboxCountsQueryKey = (params?: GetInboxCountsParams) => {
+  return [`/api/dashboard/inbox-counts`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetInboxCountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getInboxCounts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetInboxCountsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInboxCounts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetInboxCountsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getInboxCounts>>> = ({
+    signal,
+  }) => getInboxCounts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getInboxCounts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetInboxCountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getInboxCounts>>
+>;
+export type GetInboxCountsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Counts of pending proposals, unread DMs, and matches for the dashboard
+ */
+
+export function useGetInboxCounts<
+  TData = Awaited<ReturnType<typeof getInboxCounts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetInboxCountsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getInboxCounts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetInboxCountsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

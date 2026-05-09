@@ -11,6 +11,7 @@ import storefrontRouter from "./storefront";
 import dashboardRouter from "./dashboard";
 import shareRouter from "./share";
 import webhooksRouter from "./webhooks";
+import partnerEventsRouter from "./partner-events";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(storefrontRouter);
 router.use(dashboardRouter);
 router.use(shareRouter);
 router.use(webhooksRouter);
+router.use(partnerEventsRouter);
 
 export default router;

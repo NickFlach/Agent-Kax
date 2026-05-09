@@ -1572,6 +1572,143 @@ export const GetAgentStorefrontHotResponse = zod.object({
 });
 
 /**
+ * @summary List partner proposals scoped to the current user
+ */
+export const ListProposalsQueryParams = zod.object({
+  status: zod.enum(["pending", "accepted", "declined"]).optional(),
+  all: zod.coerce.boolean().optional(),
+});
+
+export const ListProposalsResponse = zod.object({
+  proposals: zod.array(
+    zod.object({
+      id: zod.number(),
+      sourceUuid: zod.string(),
+      agentId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      fromAgentSlug: zod.string().nullish(),
+      fromDisplayName: zod.string().nullish(),
+      kind: zod.string(),
+      subject: zod.string().nullish(),
+      body: zod.string().nullish(),
+      status: zod.enum(["pending", "accepted", "declined"]),
+      occurredAt: zod.coerce.date(),
+      createdAt: zod.coerce.date(),
+      decidedAt: zod.coerce.date().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Accept or decline a proposal
+ */
+export const DecideProposalParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DecideProposalBody = zod.object({
+  decision: zod.enum(["accepted", "declined"]),
+});
+
+export const DecideProposalResponse = zod.object({
+  id: zod.number(),
+  sourceUuid: zod.string(),
+  agentId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
+  fromAgentSlug: zod.string().nullish(),
+  fromDisplayName: zod.string().nullish(),
+  kind: zod.string(),
+  subject: zod.string().nullish(),
+  body: zod.string().nullish(),
+  status: zod.enum(["pending", "accepted", "declined"]),
+  occurredAt: zod.coerce.date(),
+  createdAt: zod.coerce.date(),
+  decidedAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * @summary List DMs delivered to the current user's agents
+ */
+export const ListDmsQueryParams = zod.object({
+  unreadOnly: zod.coerce.boolean().optional(),
+  all: zod.coerce.boolean().optional(),
+});
+
+export const ListDmsResponse = zod.object({
+  dms: zod.array(
+    zod.object({
+      id: zod.number(),
+      sourceUuid: zod.string(),
+      agentId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      fromAgentSlug: zod.string().nullish(),
+      fromDisplayName: zod.string().nullish(),
+      body: zod.string(),
+      occurredAt: zod.coerce.date(),
+      readAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Mark a DM as read
+ */
+export const MarkDmReadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const MarkDmReadResponse = zod.object({
+  id: zod.number(),
+  sourceUuid: zod.string(),
+  agentId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
+  fromAgentSlug: zod.string().nullish(),
+  fromDisplayName: zod.string().nullish(),
+  body: zod.string(),
+  occurredAt: zod.coerce.date(),
+  readAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List completed matches for the current user's agents
+ */
+export const ListMatchesQueryParams = zod.object({
+  all: zod.coerce.boolean().optional(),
+});
+
+export const ListMatchesResponse = zod.object({
+  matches: zod.array(
+    zod.object({
+      id: zod.number(),
+      sourceUuid: zod.string(),
+      agentId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      partnerAgentSlug: zod.string().nullish(),
+      partnerDisplayName: zod.string().nullish(),
+      matchType: zod.string(),
+      score: zod.number().nullish(),
+      occurredAt: zod.coerce.date(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Counts of pending proposals, unread DMs, and matches for the dashboard
+ */
+export const GetInboxCountsQueryParams = zod.object({
+  all: zod.coerce.boolean().optional(),
+});
+
+export const GetInboxCountsResponse = zod.object({
+  proposalsPending: zod.number(),
+  dmsUnread: zod.number(),
+  matchesTotal: zod.number(),
+});
+
+/**
  * @summary A single published artifact for an agent
  */
 export const GetAgentStorefrontArtifactParams = zod.object({

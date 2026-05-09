@@ -23,6 +23,8 @@ import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
 import Marketplace3D from "@/pages/marketplace-3d";
+import Inbox from "@/pages/inbox";
+import Proposals from "@/pages/proposals";
 
 const queryClient = new QueryClient();
 
@@ -91,6 +93,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
             <NavLink href="/agents">Agents</NavLink>
+            <NavLink href="/inbox">Inbox</NavLink>
+            <NavLink href="/proposals">Proposals</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
             <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
@@ -182,6 +186,12 @@ function Router() {
       </Route>
       <Route path="/s/:slug/artifacts/:id">
         <AgentStorefrontArtifact />
+      </Route>
+      <Route path="/inbox">
+        <AdminLayout><RequireAuth><Inbox /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/proposals">
+        <AdminLayout><RequireAuth><Proposals /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/harvester">
         <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>
