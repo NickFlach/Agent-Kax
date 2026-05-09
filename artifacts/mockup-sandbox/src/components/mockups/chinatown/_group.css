@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+.font-cyber {
+  font-family: 'Space Mono', monospace;
+}
+
+.text-glow-pink {
+  text-shadow: 0 0 5px #ff1493, 0 0 10px #ff1493, 0 0 20px #ff1493;
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 5px #00ffff, 0 0 10px #00ffff, 0 0 20px #00ffff;
+}
+
+.text-glow-green {
+  text-shadow: 0 0 5px #39ff14, 0 0 10px #39ff14, 0 0 20px #39ff14;
+}
+
+.cyber-hud {
+  background: rgba(10, 0, 20, 0.85);
+  border: 1px solid #ff1493;
+  box-shadow: 0 0 10px rgba(255, 20, 147, 0.4);
+  backdrop-filter: blur(8px);
+}
