@@ -161,7 +161,7 @@ export function Painterly() {
       </Canvas>
 
       <div className="absolute top-4 left-4 p-6 bg-[#F4EED7]/90 backdrop-blur-sm rounded-xl shadow-lg border border-[#D5C4A1] max-w-sm font-['Fraunces'] text-[#3E2723]">
-        <h1 className="text-3xl font-semibold mb-1">KAX // Chinatown</h1>
+        <h1 className="text-3xl font-semibold mb-1">KAX // Sun Alley</h1>
         <p className="text-sm italic text-[#8A7968] mb-6">A sun-dappled alley of woven banners and quiet craft.</p>
         
         <div className="bg-[#FFFFFF]/50 rounded-lg p-4 mb-4 border border-[#F4EED7]">

@@ -168,7 +168,7 @@ export function Cyber() {
       {/* 2D HUD Overlay */}
       <div className="absolute top-0 left-0 p-6 z-10 pointer-events-none w-full flex justify-between items-start">
         <div className="cyber-hud p-4 rounded-sm pointer-events-auto max-w-sm">
-          <h1 className="text-2xl font-bold text-white text-glow-pink mb-1">KAX // CHINATOWN</h1>
+          <h1 className="text-2xl font-bold text-white text-glow-pink mb-1">KAX // NEON DISTRICT</h1>
           <p className="text-sm text-cyan-300 text-glow-cyan mb-4 uppercase tracking-widest">
             Sector 4 // Rain Protocol Active
           </p>

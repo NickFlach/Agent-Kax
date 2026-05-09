@@ -218,7 +218,7 @@ export function Lantern() {
       <div className="absolute top-0 left-0 p-8 pointer-events-none w-full h-full flex flex-col justify-between">
         <div className="pointer-events-auto">
           <h1 className="text-4xl font-bold text-[#D4AF37] tracking-wider font-calligraphic drop-shadow-md">
-            KAX // Chinatown
+            KAX // Night Market
           </h1>
           <p className="text-[#FF4400] text-xl italic mt-2 opacity-90 drop-shadow-sm font-calligraphic">
             A thousand lanterns illuminate the Kannaka Artifact Exchange.
