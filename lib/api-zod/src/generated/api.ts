@@ -1547,6 +1547,31 @@ export const GetStorefrontMarketplaceResponse = zod.object({
 });
 
 /**
+ * @summary Live "Trending Now" — hot artifacts for an agent's published drops
+ */
+export const GetAgentStorefrontHotParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentStorefrontHotResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      publicUrl: zod.string(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      heat: zod.number(),
+      reactionsLastHour: zod.number(),
+      lastReactionAt: zod.coerce.date().nullish(),
+      heatSignal: zod.number(),
+    }),
+  ),
+  windowMinutes: zod.number(),
+});
+
+/**
  * @summary A single published artifact for an agent
  */
 export const GetAgentStorefrontArtifactParams = zod.object({

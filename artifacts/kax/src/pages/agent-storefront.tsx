@@ -3,8 +3,10 @@ import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontDrops,
+  useGetAgentStorefrontHot,
   getGetAgentStorefrontQueryKey,
   getGetAgentStorefrontDropsQueryKey,
+  getGetAgentStorefrontHotQueryKey,
 } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AudioCover } from "@/components/audio-cover";
@@ -23,6 +25,12 @@ export default function AgentStorefront() {
     { limit: 20, offset: 0 },
     { query: { queryKey: getGetAgentStorefrontDropsQueryKey(slug, { limit: 20, offset: 0 }) } },
   );
+  const { data: hot } = useGetAgentStorefrontHot(slug, {
+    query: {
+      queryKey: getGetAgentStorefrontHotQueryKey(slug),
+      refetchInterval: 30_000,
+    },
+  });
 
   const seoTitle = landing
     ? `${landing.settings.displayName || landing.agent.displayName} — KAX`
@@ -109,6 +117,65 @@ export default function AgentStorefront() {
             data-testid="img-hero"
             onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
           />
+        </div>
+      )}
+
+      {hot && hot.items.length > 0 && (
+        <div className="border-b border-border">
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">
+                Trending Now
+                <span className="ml-2 text-[10px] text-accent">● live</span>
+              </p>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                last 60 min
+              </span>
+            </div>
+            <div
+              className="flex gap-3 overflow-x-auto pb-2"
+              data-testid="trending-strip"
+            >
+              {hot.items.map((item, idx) => (
+                <Link key={item.id} href={`/s/${slug}/artifacts/${item.id}`}>
+                  <div
+                    className="group flex-shrink-0 w-40 cursor-pointer"
+                    data-testid={`trending-item-${item.id}`}
+                  >
+                    <div className="relative aspect-square bg-secondary overflow-hidden">
+                      {isAudio(item.artifactType) ? (
+                        item.thumbnailUrl && !item.thumbnailUrl.includes("suno.ai") ? (
+                          <img
+                            src={item.thumbnailUrl}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <AudioCover title={item.title} />
+                        )
+                      ) : (
+                        <img
+                          src={item.publicUrl}
+                          alt={item.title}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${item.id}/400/400`;
+                          }}
+                        />
+                      )}
+                      <div className="absolute top-1 left-1 bg-background/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                        #{idx + 1}
+                      </div>
+                      <div className="absolute bottom-1 right-1 bg-background/80 px-1.5 py-0.5 text-[10px] font-mono text-accent">
+                        +{item.reactionsLastHour}
+                      </div>
+                    </div>
+                    <p className="text-xs mt-2 truncate">{item.title}</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

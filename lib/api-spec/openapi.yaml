@@ -781,6 +781,25 @@ paths:
                           type: boolean
                           description: True when this agent has a real human owner (not the kannaka-system placeholder).
 
+  /storefront/by-agent/{slug}/hot:
+    get:
+      operationId: getAgentStorefrontHot
+      tags: [storefront]
+      summary: Live "Trending Now" — hot artifacts for an agent's published drops
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Hot artifacts for this agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotArtifactsResponse"
+
   /storefront/by-agent/{slug}/artifacts/{id}:
     get:
       operationId: getAgentStorefrontArtifact

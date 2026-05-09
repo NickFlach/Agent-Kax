@@ -5,15 +5,18 @@ import {
   agentStorefrontSettingsTable,
   artifactsTable,
   dropsTable,
+  reactionsTable,
   type AgentStorefrontSettings,
   type Agent,
 } from "@workspace/db/schema";
-import { eq, and, desc, count, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, desc, count, gte, isNotNull, inArray, sql } from "drizzle-orm";
+import { decayedHeatSignal } from "../lib/tasteEngine";
 import {
   GetAgentStorefrontSettingsParams,
   UpdateAgentStorefrontSettingsParams,
   UpdateAgentStorefrontSettingsBody,
   GetAgentStorefrontParams,
+  GetAgentStorefrontHotParams,
   GetAgentStorefrontDropsParams,
   GetAgentStorefrontDropsQueryParams,
   GetAgentStorefrontDropParams,
@@ -330,6 +333,79 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
     featured: featuredRows.map(formatArtifact),
     ...(latestDropWithArtifacts ? { latestDrop: latestDropWithArtifacts } : {}),
   });
+});
+
+router.get("/storefront/by-agent/:slug/hot", async (req, res) => {
+  const { slug } = GetAgentStorefrontHotParams.parse(req.params);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+
+  const publishedDropIdsRows = await db
+    .selectDistinct({ dropId: artifactsTable.dropId })
+    .from(artifactsTable)
+    .innerJoin(
+      dropsTable,
+      and(eq(dropsTable.id, artifactsTable.dropId), eq(dropsTable.status, "published")),
+    )
+    .where(and(eq(artifactsTable.agentId, agent.id), isNotNull(artifactsTable.dropId)));
+  const publishedDropIds = publishedDropIdsRows
+    .map((r) => r.dropId)
+    .filter((id): id is number => id !== null);
+
+  if (publishedDropIds.length === 0) {
+    res.json({ items: [], windowMinutes: 60 });
+    return;
+  }
+
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const recentCountSql = sql<number>`count(${reactionsTable.id}) filter (where ${reactionsTable.createdAt} >= ${hourAgo})`;
+
+  const rows = await db
+    .select({
+      id: artifactsTable.id,
+      title: artifactsTable.title,
+      creatorName: artifactsTable.creatorName,
+      thumbnailUrl: artifactsTable.thumbnailUrl,
+      publicUrl: artifactsTable.publicUrl,
+      artifactType: artifactsTable.artifactType,
+      heat: artifactsTable.heat,
+      lastReactionAt: artifactsTable.lastReactionAt,
+      reactionsLastHour: recentCountSql,
+    })
+    .from(artifactsTable)
+    .leftJoin(reactionsTable, eq(reactionsTable.artifactId, artifactsTable.id))
+    .where(
+      and(
+        eq(artifactsTable.agentId, agent.id),
+        inArray(artifactsTable.dropId, publishedDropIds),
+        isNotNull(artifactsTable.lastReactionAt),
+        gte(artifactsTable.lastReactionAt, hourAgo),
+      ),
+    )
+    .groupBy(artifactsTable.id)
+    .orderBy(desc(recentCountSql), desc(artifactsTable.lastReactionAt))
+    .limit(10);
+
+  const now = new Date();
+  const items = rows
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      creatorName: r.creatorName,
+      thumbnailUrl: r.thumbnailUrl,
+      publicUrl: r.publicUrl,
+      artifactType: r.artifactType,
+      heat: r.heat,
+      reactionsLastHour: Number(r.reactionsLastHour) || 0,
+      lastReactionAt: r.lastReactionAt?.toISOString() ?? null,
+      heatSignal: decayedHeatSignal({ heat: r.heat, lastReactionAt: r.lastReactionAt, now }),
+    }))
+    .sort((a, b) => b.heatSignal - a.heatSignal || b.reactionsLastHour - a.reactionsLastHour);
+
+  res.json({ items, windowMinutes: 60 });
 });
 
 router.get("/storefront/by-agent/:slug/drops", async (req, res) => {

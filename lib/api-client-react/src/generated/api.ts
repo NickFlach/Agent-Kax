@@ -3093,6 +3093,95 @@ export function useGetStorefrontMarketplace<
 }
 
 /**
+ * @summary Live "Trending Now" — hot artifacts for an agent's published drops
+ */
+export const getGetAgentStorefrontHotUrl = (slug: string) => {
+  return `/api/storefront/by-agent/${slug}/hot`;
+};
+
+export const getAgentStorefrontHot = async (
+  slug: string,
+  options?: RequestInit,
+): Promise<HotArtifactsResponse> => {
+  return customFetch<HotArtifactsResponse>(getGetAgentStorefrontHotUrl(slug), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAgentStorefrontHotQueryKey = (slug: string) => {
+  return [`/api/storefront/by-agent/${slug}/hot`] as const;
+};
+
+export const getGetAgentStorefrontHotQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentStorefrontHot>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontHot>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentStorefrontHotQueryKey(slug);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentStorefrontHot>>
+  > = ({ signal }) =>
+    getAgentStorefrontHot(slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStorefrontHot>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentStorefrontHotQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentStorefrontHot>>
+>;
+export type GetAgentStorefrontHotQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Live "Trending Now" — hot artifacts for an agent's published drops
+ */
+
+export function useGetAgentStorefrontHot<
+  TData = Awaited<ReturnType<typeof getAgentStorefrontHot>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontHot>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentStorefrontHotQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary A single published artifact for an agent
  */
 export const getGetAgentStorefrontArtifactUrl = (slug: string, id: number) => {
