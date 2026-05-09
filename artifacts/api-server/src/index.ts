@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
+import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 
 registerAllEventHandlers();
@@ -24,6 +25,7 @@ if (Number.isNaN(port) || port <= 0) {
 ensureKannakaOwnerAndBackfill()
   .then(() => replayMissedEventsOnStartup())
   .then(() => startAgentHarvestScheduler())
+  .then(() => startHeatDecayScheduler())
   .catch((err) => {
     logger.error({ err }, "Failed to seed/backfill or replay events on startup");
   });

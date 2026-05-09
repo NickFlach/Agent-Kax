@@ -41,7 +41,7 @@ artifacts-monorepo/
 
 ### Artifact Pipeline
 1. **Harvest** — Ingest artifacts from OpenBotCity public API (supports creator filtering, keyword search, all-types harvesting, pagination, auto art-song pairing)
-2. **Score** — Taste Engine evaluates artifacts (reaction count, novelty, exploration factor)
+2. **Score** — Taste Engine evaluates artifacts (reaction count, time-decayed heat, novelty, exploration factor). A periodic background job (`startHeatDecayScheduler`, runs hourly alongside the harvest scheduler) halves the raw `artifacts.heat` integer for any row whose `lastReactionAt` is older than `HEAT_RAW_COOLDOWN_MS` (6h) — or that has no reaction at all but still carries residual heat — so old viral moments cool back to a fair baseline instead of dominating the breakdown panel forever. Each decayed row is re-scored inline (no activity-feed entry) so `kannakaScore` and `scoreBreakdown` stay consistent with the new heat value.
 3. **Narrate** — Generate transmission lore and narrative framing
 4. **Drop** — Bundle artifacts into sellable units (single/collection/bundle)
 5. **Publish** — Launch to the Space Child storefront

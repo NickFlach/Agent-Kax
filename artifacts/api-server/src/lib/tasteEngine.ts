@@ -11,6 +11,11 @@ export const SCARCITY_MULTIPLIERS: Record<string, number> = {
 // Heat half-life in minutes — heat from a reaction loses half its weight every hour.
 export const HEAT_HALF_LIFE_MIN = 60;
 
+// Cooldown window for the raw `heat` integer. If an artifact has had no new
+// reactions inside this window, the periodic decay job halves its raw heat
+// so old viral moments stop dominating the breakdown panel and scoring.
+export const HEAT_RAW_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 export type ScoreBreakdown = {
   reactionSignal: number;
   heatSignal: number;
