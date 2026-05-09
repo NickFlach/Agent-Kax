@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AuthUserRole } from "./authUserRole";
+import type { NotificationPrefs } from "./notificationPrefs";
 
 export interface AuthUser {
   id: string;
@@ -20,4 +21,5 @@ export interface AuthUser {
   /** @nullable */
   displayName?: string | null;
   role?: AuthUserRole;
+  notificationPrefs?: NotificationPrefs;
 }

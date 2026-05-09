@@ -1,7 +1,10 @@
+import { useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter, Link, Redirect, useLocation, useParams } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuth } from "@workspace/replit-auth-web";
+import { useGetInboxCounts, getGetInboxCountsQueryKey } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
+import { toast } from "@/hooks/use-toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { PlayerProvider } from "@/contexts/player-context";
@@ -28,20 +31,70 @@ import Proposals from "@/pages/proposals";
 
 const queryClient = new QueryClient();
 
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+function NavLink({ href, children, badge }: { href: string; children: React.ReactNode; badge?: number }) {
   const [location] = useLocation();
   const isActive = location === href || (href !== "/" && location.startsWith(href));
   return (
     <Link
       href={href}
-      className={`text-xs uppercase tracking-wider px-3 py-2 transition-colors ${
+      className={`relative text-xs uppercase tracking-wider px-3 py-2 transition-colors inline-flex items-center gap-1.5 ${
         isActive ? "text-primary border-b border-primary" : "text-muted-foreground hover:text-foreground"
       }`}
       data-testid={`nav-link-${href.replace(/\//g, "") || "home"}`}
     >
-      {children}
+      <span>{children}</span>
+      {badge && badge > 0 ? (
+        <span
+          className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-primary text-primary-foreground"
+          data-testid={`nav-badge-${href.replace(/\//g, "") || "home"}`}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </Link>
   );
+}
+
+interface InboxCountSnapshot {
+  proposalsPending: number;
+  dmsUnread: number;
+}
+
+function useInboxNotifications(enabled: boolean): InboxCountSnapshot {
+  const { data } = useGetInboxCounts(undefined, {
+    query: {
+      queryKey: getGetInboxCountsQueryKey(),
+      refetchInterval: enabled ? 30_000 : false,
+      enabled,
+    },
+  });
+  const previous = useRef<InboxCountSnapshot | null>(null);
+  const proposalsPending = data?.proposalsPending ?? 0;
+  const dmsUnread = data?.dmsUnread ?? 0;
+
+  useEffect(() => {
+    if (!enabled || !data) return;
+    const prev = previous.current;
+    if (prev) {
+      const dmDelta = dmsUnread - prev.dmsUnread;
+      const proposalDelta = proposalsPending - prev.proposalsPending;
+      if (proposalDelta > 0) {
+        toast({
+          title: proposalDelta === 1 ? "New proposal" : `${proposalDelta} new proposals`,
+          description: "Open Proposals to review.",
+        });
+      }
+      if (dmDelta > 0) {
+        toast({
+          title: dmDelta === 1 ? "New DM" : `${dmDelta} new DMs`,
+          description: "Open Inbox to read.",
+        });
+      }
+    }
+    previous.current = { proposalsPending, dmsUnread };
+  }, [enabled, data, proposalsPending, dmsUnread]);
+
+  return { proposalsPending, dmsUnread };
 }
 
 function AuthControls() {
@@ -83,6 +136,7 @@ function AuthControls() {
 function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const { proposalsPending, dmsUnread } = useInboxNotifications(!!user);
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-50">
@@ -93,8 +147,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
             <NavLink href="/agents">Agents</NavLink>
-            <NavLink href="/inbox">Inbox</NavLink>
-            <NavLink href="/proposals">Proposals</NavLink>
+            <NavLink href="/inbox" badge={dmsUnread}>Inbox</NavLink>
+            <NavLink href="/proposals" badge={proposalsPending}>Proposals</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
             <NavLink href="/vault">Vault</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}

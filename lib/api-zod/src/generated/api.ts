@@ -35,9 +35,28 @@ export const GetCurrentAuthUserResponse = zod.object({
       profileImageUrl: zod.string().nullable(),
       displayName: zod.string().nullish(),
       role: zod.enum(["user", "admin"]).optional(),
+      notificationPrefs: zod
+        .object({
+          emailOnProposal: zod.boolean(),
+          emailOnDm: zod.boolean(),
+        })
+        .optional(),
     }),
     zod.null(),
   ]),
+});
+
+/**
+ * @summary Update the current user's notification preferences
+ */
+export const UpdateNotificationPrefsBody = zod.object({
+  emailOnProposal: zod.boolean().optional(),
+  emailOnDm: zod.boolean().optional(),
+});
+
+export const UpdateNotificationPrefsResponse = zod.object({
+  emailOnProposal: zod.boolean(),
+  emailOnDm: zod.boolean(),
 });
 
 /**

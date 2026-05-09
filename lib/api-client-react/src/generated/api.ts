@@ -63,6 +63,7 @@ import type {
   MatchListResponse,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
+  NotificationPrefs,
   PartnerSyncStatus,
   Proposal,
   ProposalDecisionBody,
@@ -71,6 +72,7 @@ import type {
   UpdateAdminUserBody,
   UpdateAgentStorefrontSettingsBody,
   UpdateDropBody,
+  UpdateNotificationPrefsBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -232,6 +234,93 @@ export function useGetCurrentAuthUser<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Update the current user's notification preferences
+ */
+export const getUpdateNotificationPrefsUrl = () => {
+  return `/api/me/notification-prefs`;
+};
+
+export const updateNotificationPrefs = async (
+  updateNotificationPrefsBody: UpdateNotificationPrefsBody,
+  options?: RequestInit,
+): Promise<NotificationPrefs> => {
+  return customFetch<NotificationPrefs>(getUpdateNotificationPrefsUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateNotificationPrefsBody),
+  });
+};
+
+export const getUpdateNotificationPrefsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateNotificationPrefs>>,
+    TError,
+    { data: BodyType<UpdateNotificationPrefsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateNotificationPrefs>>,
+  TError,
+  { data: BodyType<UpdateNotificationPrefsBody> },
+  TContext
+> => {
+  const mutationKey = ["updateNotificationPrefs"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateNotificationPrefs>>,
+    { data: BodyType<UpdateNotificationPrefsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateNotificationPrefs(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateNotificationPrefsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateNotificationPrefs>>
+>;
+export type UpdateNotificationPrefsMutationBody =
+  BodyType<UpdateNotificationPrefsBody>;
+export type UpdateNotificationPrefsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update the current user's notification preferences
+ */
+export const useUpdateNotificationPrefs = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateNotificationPrefs>>,
+    TError,
+    { data: BodyType<UpdateNotificationPrefsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateNotificationPrefs>>,
+  TError,
+  { data: BodyType<UpdateNotificationPrefsBody> },
+  TContext
+> => {
+  return useMutation(getUpdateNotificationPrefsMutationOptions(options));
+};
 
 /**
  * @summary Start the browser OIDC login flow

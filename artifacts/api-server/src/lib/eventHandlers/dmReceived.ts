@@ -1,7 +1,8 @@
 import { db } from "@workspace/db";
-import { dmsTable, agentsTable } from "@workspace/db/schema";
+import { dmsTable, agentsTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import type { EventHandler } from "../eventDispatcher";
+import { sendNotificationEmail } from "../notify";
 
 interface DmPayload {
   dm_uuid?: string;
@@ -66,5 +67,26 @@ export const handleDmReceived: EventHandler = async (data, { log }) => {
 
   if (inserted.length === 0) {
     log.info({ sourceUuid }, "dm.received deduped on source_uuid");
+    return;
+  }
+
+  if (ownerId) {
+    const [owner] = await db
+      .select({
+        email: usersTable.email,
+        emailOnDm: usersTable.emailOnDm,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, ownerId))
+      .limit(1);
+    if (owner?.email && owner.emailOnDm) {
+      const fromName = p.from_display_name ?? p.sender_display_name ?? p.from_agent_slug ?? p.sender_slug ?? "an agent";
+      const preview = (p.body ?? p.message ?? "").slice(0, 240);
+      await sendNotificationEmail({
+        to: owner.email,
+        subject: `New DM from ${fromName}`,
+        text: `${fromName} sent you a direct message on KAX:\n\n${preview}\n\nOpen your inbox: ${process.env.PUBLIC_APP_URL ?? ""}/inbox`,
+      });
+    }
   }
 };

@@ -58,6 +58,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthUserEnvelope'
+  /me/notification-prefs:
+    patch:
+      tags: [Auth]
+      operationId: updateNotificationPrefs
+      summary: Update the current user's notification preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNotificationPrefsBody'
+      responses:
+        '200':
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPrefs'
   /login:
     get:
       tags: [Auth]
@@ -1108,6 +1126,23 @@ components:
         role:
           type: string
           enum: [user, admin]
+        notificationPrefs:
+          $ref: '#/components/schemas/NotificationPrefs'
+    NotificationPrefs:
+      type: object
+      required: [emailOnProposal, emailOnDm]
+      properties:
+        emailOnProposal:
+          type: boolean
+        emailOnDm:
+          type: boolean
+    UpdateNotificationPrefsBody:
+      type: object
+      properties:
+        emailOnProposal:
+          type: boolean
+        emailOnDm:
+          type: boolean
     AuthUserEnvelope:
       type: object
       required: [user]

@@ -16,6 +16,11 @@ export const AuthUserRole = {
   admin: "admin",
 } as const;
 
+export interface NotificationPrefs {
+  emailOnProposal: boolean;
+  emailOnDm: boolean;
+}
+
 export interface AuthUser {
   id: string;
   /** @nullable */
@@ -29,6 +34,12 @@ export interface AuthUser {
   /** @nullable */
   displayName?: string | null;
   role?: AuthUserRole;
+  notificationPrefs?: NotificationPrefs;
+}
+
+export interface UpdateNotificationPrefsBody {
+  emailOnProposal?: boolean;
+  emailOnDm?: boolean;
 }
 
 export interface AuthUserEnvelope {

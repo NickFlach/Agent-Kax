@@ -1,7 +1,8 @@
 import { db } from "@workspace/db";
-import { proposalsTable, agentsTable, activitiesTable } from "@workspace/db/schema";
+import { proposalsTable, agentsTable, activitiesTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import type { EventHandler } from "../eventDispatcher";
+import { sendNotificationEmail } from "../notify";
 
 interface ProposalPayload {
   proposal_uuid?: string;
@@ -81,5 +82,24 @@ export const handleProposalCreated: EventHandler = async (data, { log }) => {
       ownerId,
       agentId,
     });
+
+    const [owner] = await db
+      .select({
+        email: usersTable.email,
+        emailOnProposal: usersTable.emailOnProposal,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, ownerId))
+      .limit(1);
+    if (owner?.email && owner.emailOnProposal) {
+      const subj = p.subject ? `: "${p.subject}"` : "";
+      const sender = fromName ?? "an agent";
+      const preview = (p.body ?? p.message ?? "").slice(0, 240);
+      await sendNotificationEmail({
+        to: owner.email,
+        subject: `New proposal from ${sender}${subj}`,
+        text: `${sender} sent a ${p.kind ?? "collab"} proposal${subj}.\n\n${preview}\n\nReview it: ${process.env.PUBLIC_APP_URL ?? ""}/proposals`,
+      });
+    }
   }
 };

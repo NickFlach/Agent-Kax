@@ -5,6 +5,8 @@ import {
   ExchangeMobileAuthorizationCodeBody,
   ExchangeMobileAuthorizationCodeResponse,
   LogoutMobileSessionResponse,
+  UpdateNotificationPrefsBody,
+  UpdateNotificationPrefsResponse,
 } from "@workspace/api-zod";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
@@ -167,6 +169,10 @@ const getCurrentUser = async (req: Request, res: Response) => {
         profileImageUrl: dbUser.profileImageUrl,
         displayName: dbUser.displayName,
         role: dbUser.role,
+        notificationPrefs: {
+          emailOnProposal: dbUser.emailOnProposal,
+          emailOnDm: dbUser.emailOnDm,
+        },
       },
     }),
   );
@@ -174,6 +180,42 @@ const getCurrentUser = async (req: Request, res: Response) => {
 
 router.get("/auth/user", getCurrentUser);
 router.get("/me", getCurrentUser);
+
+router.patch("/me/notification-prefs", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const parsed = UpdateNotificationPrefsBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
+    return;
+  }
+  const updates: { emailOnProposal?: boolean; emailOnDm?: boolean } = {};
+  if (parsed.data.emailOnProposal !== undefined) updates.emailOnProposal = parsed.data.emailOnProposal;
+  if (parsed.data.emailOnDm !== undefined) updates.emailOnDm = parsed.data.emailOnDm;
+  if (Object.keys(updates).length === 0) {
+    const [u] = await db.select().from(usersTable).where(eq(usersTable.id, req.user.id)).limit(1);
+    res.json(
+      UpdateNotificationPrefsResponse.parse({
+        emailOnProposal: u?.emailOnProposal ?? false,
+        emailOnDm: u?.emailOnDm ?? false,
+      }),
+    );
+    return;
+  }
+  const [updated] = await db
+    .update(usersTable)
+    .set(updates)
+    .where(eq(usersTable.id, req.user.id))
+    .returning();
+  res.json(
+    UpdateNotificationPrefsResponse.parse({
+      emailOnProposal: updated.emailOnProposal,
+      emailOnDm: updated.emailOnDm,
+    }),
+  );
+});
 
 router.get("/login", async (req: Request, res: Response) => {
   const config = await getOidcConfig();

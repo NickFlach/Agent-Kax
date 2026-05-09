@@ -8,6 +8,7 @@ import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
+import { NotificationPrefsCard } from "@/components/notification-prefs-card";
 
 export default function Dashboard() {
   const [showAll, setShowAll] = useState(false);
@@ -215,6 +216,10 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <NotificationPrefsCard />
       </div>
 
       {summary && summary.topCreators.length > 0 && (
