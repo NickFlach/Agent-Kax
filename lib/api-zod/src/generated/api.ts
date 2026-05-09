@@ -1537,6 +1537,11 @@ export const GetStorefrontMarketplaceResponse = zod.object({
       publishedDropCount: zod.number(),
       artifactCount: zod.number(),
       latestPublishedAt: zod.coerce.date().nullish(),
+      claimed: zod
+        .boolean()
+        .describe(
+          "True when this agent has a real human owner (not the kannaka-system placeholder).",
+        ),
     }),
   ),
 });

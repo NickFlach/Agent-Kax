@@ -764,7 +764,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [agent, settings, publishedDropCount, artifactCount]
+                      required: [agent, settings, publishedDropCount, artifactCount, claimed]
                       properties:
                         agent:
                           $ref: "#/components/schemas/Agent"
@@ -777,6 +777,9 @@ paths:
                         latestPublishedAt:
                           type: [string, "null"]
                           format: date-time
+                        claimed:
+                          type: boolean
+                          description: True when this agent has a real human owner (not the kannaka-system placeholder).
 
   /storefront/by-agent/{slug}/artifacts/{id}:
     get:

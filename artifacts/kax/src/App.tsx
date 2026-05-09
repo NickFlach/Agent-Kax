@@ -22,6 +22,7 @@ import AgentStorefront from "@/pages/agent-storefront";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
+import Marketplace3D from "@/pages/marketplace-3d";
 
 const queryClient = new QueryClient();
 
@@ -138,7 +139,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
-        <Marketplace />
+        <Marketplace3D />
       </Route>
       <Route path="/dashboard">
         <AdminLayout><RequireAuth><Dashboard /></RequireAuth></AdminLayout>
@@ -168,6 +169,9 @@ function Router() {
         <Marketplace />
       </Route>
       <Route path="/marketplace">
+        <Marketplace3D />
+      </Route>
+      <Route path="/marketplace/list">
         <Marketplace />
       </Route>
       <Route path="/s/:slug">

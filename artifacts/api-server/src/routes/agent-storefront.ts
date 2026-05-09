@@ -21,6 +21,12 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
 import { formatArtifact } from "./artifacts";
+import { KANNAKA_SYSTEM_USER_ID, KANNAKA_AGENT_SLUG } from "../lib/backfill";
+
+function isAgentClaimed(agent: Agent): boolean {
+  if (agent.slug === KANNAKA_AGENT_SLUG) return true;
+  return agent.ownerId !== KANNAKA_SYSTEM_USER_ID;
+}
 
 const router: IRouter = Router();
 
@@ -250,6 +256,7 @@ router.get("/storefront/marketplace", async (_req, res) => {
       publishedDropCount: e.drops.size,
       artifactCount: e.artifacts.size,
       latestPublishedAt: e.latest?.toISOString() ?? null,
+      claimed: isAgentClaimed(e.agent),
     }));
 
   res.json({ storefronts });

@@ -653,6 +653,8 @@ export type GetStorefrontMarketplace200StorefrontsItem = {
   artifactCount: number;
   /** @nullable */
   latestPublishedAt?: string | null;
+  /** True when this agent has a real human owner (not the kannaka-system placeholder). */
+  claimed: boolean;
 };
 
 export type GetStorefrontMarketplace200 = {
