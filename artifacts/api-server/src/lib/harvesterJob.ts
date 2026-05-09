@@ -16,7 +16,7 @@ import {
   type PartnerArtifact,
 } from "./partnerClient";
 import { logger } from "./logger";
-import { dispatchPartnerEvent } from "./eventDispatcher";
+import { dispatchPartnerEvent, getRegisteredEventTypes } from "./eventDispatcher";
 
 export interface HarvestRunResult {
   harvested: number;
@@ -83,8 +83,9 @@ export async function runPartnerHarvestForAgent(opts: {
       limit: Math.min(50, targetLimit - harvested),
       type: opts.type,
       creator: opts.agent.slug,
+      fallbackDisplayName: opts.agent.displayName,
     });
-    if (page.artifacts.length === 0) break;
+    if (!page.artifacts || page.artifacts.length === 0) break;
 
     for (const pa of page.artifacts) {
       harvested++;
@@ -127,43 +128,50 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
     logger.info("Partner API key not set; skipping startup event replay");
     return;
   }
-  try {
-    const state = await getSyncState();
-    let cursor: string | null = state?.lastEventUuid ?? null;
-    let processed = 0;
-    let totalSeen = 0;
-    const maxPages = 100;
-
-    for (let pageIdx = 0; pageIdx < maxPages; pageIdx++) {
-      const page = await listPartnerEventsSince(cursor);
-      if (page.events.length === 0) break;
-      totalSeen += page.events.length;
-
-      for (const ev of page.events) {
-        try {
-          const result = await dispatchPartnerEvent({
-            eventType: ev.event_type,
-            eventUuid: ev.event_uuid,
-            data: ev.data,
-            log: logger,
-            source: "replay",
-          });
-          cursor = ev.event_uuid;
-          await recordEventCursor(cursor);
-          if (result.status === "handled" || result.status === "unhandled") processed++;
-        } catch (err) {
-          logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed; will retry on next startup");
-          return;
-        }
-      }
-
-      if (!page.next_cursor) break;
-      cursor = page.next_cursor;
-      await recordEventCursor(cursor);
-    }
-
-    logger.info({ processed, totalSeen, finalCursor: cursor }, "Replayed missed partner events");
-  } catch (err) {
-    logger.error({ err }, "Startup event replay failed");
+  const eventTypes = getRegisteredEventTypes();
+  if (eventTypes.length === 0) {
+    logger.info("No event handlers registered; skipping replay");
+    return;
   }
+  const state = await getSyncState();
+  let cursor: string | null = state?.lastEventUuid ?? null;
+  let processed = 0;
+  let totalSeen = 0;
+  const maxPagesPerType = 100;
+
+  for (const eventType of eventTypes) {
+    try {
+      for (let pageIdx = 0; pageIdx < maxPagesPerType; pageIdx++) {
+        const page = await listPartnerEventsSince(cursor, eventType);
+        if (page.events.length === 0) break;
+        totalSeen += page.events.length;
+
+        for (const ev of page.events) {
+          try {
+            const result = await dispatchPartnerEvent({
+              eventType: ev.event_type,
+              eventUuid: ev.event_uuid,
+              data: ev.data,
+              log: logger,
+              source: "replay",
+            });
+            cursor = ev.event_uuid;
+            await recordEventCursor(cursor);
+            if (result.status === "handled" || result.status === "unhandled") processed++;
+          } catch (err) {
+            logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed; will retry on next startup");
+            return;
+          }
+        }
+
+        if (!page.next_cursor) break;
+        cursor = page.next_cursor;
+        await recordEventCursor(cursor);
+      }
+    } catch (err) {
+      logger.warn({ err, eventType }, "Skipping event type during startup replay");
+    }
+  }
+
+  logger.info({ processed, totalSeen, finalCursor: cursor, eventTypes }, "Replayed missed partner events");
 }

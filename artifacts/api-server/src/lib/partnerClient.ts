@@ -34,6 +34,65 @@ export interface PartnerArtifactsPage {
   next_cursor: string | null;
 }
 
+interface RawPartnerArtifact {
+  id: string;
+  creator_bot_id?: string;
+  type: string;
+  title: string | null;
+  description?: string | null;
+  public_url: string;
+  thumbnail_url?: string | null;
+  created_at: string;
+  reaction_count?: number;
+  creator?: {
+    id?: string;
+    display_name?: string;
+    avatar_url?: string | null;
+  };
+  edition?: {
+    type?: EditionType;
+    total?: number | null;
+    serial?: number | null;
+  };
+}
+
+interface RawPartnerArtifactsResponse {
+  success: boolean;
+  data: RawPartnerArtifact[];
+  cursor?: { since: string | null; limit: number; returned: number };
+  next_cursor?: string | null;
+}
+
+function normalizeArtifact(
+  raw: RawPartnerArtifact,
+  fallback?: { creatorBotId?: string; displayName?: string },
+): PartnerArtifact {
+  return {
+    uuid: raw.id,
+    title: raw.title ?? "Untitled",
+    artifact_type: (raw.type as PartnerArtifact["artifact_type"]) ?? "image",
+    public_url: raw.public_url,
+    thumbnail_url: raw.thumbnail_url ?? null,
+    created_at: raw.created_at,
+    reaction_count: raw.reaction_count ?? 0,
+    creator: {
+      id: raw.creator?.id ?? raw.creator_bot_id ?? fallback?.creatorBotId ?? "",
+      display_name:
+        raw.creator?.display_name ?? fallback?.displayName ?? "Unknown",
+      avatar_url: raw.creator?.avatar_url ?? null,
+    },
+    ...(raw.edition
+      ? {
+          edition: {
+            type: (raw.edition.type ?? "open") as EditionType,
+            total: raw.edition.total ?? null,
+            serial: raw.edition.serial ?? null,
+          },
+        }
+      : {}),
+  };
+}
+
 export interface PartnerEvent<T = unknown> {
   event_uuid: string;
   event_type: string;
@@ -153,6 +212,7 @@ export async function listPartnerArtifacts(opts: {
   limit?: number;
   type?: string;
   creator?: string;
+  fallbackDisplayName?: string;
 }): Promise<PartnerArtifactsPage> {
   const params = new URLSearchParams();
   if (opts.since) params.set("since", opts.since);
@@ -161,7 +221,19 @@ export async function listPartnerArtifacts(opts: {
   if (opts.creator) params.set("creator", opts.creator);
   const qs = params.toString();
   const res = await partnerFetch(`/artifacts${qs ? `?${qs}` : ""}`);
-  return (await res.json()) as PartnerArtifactsPage;
+  const json = (await res.json()) as RawPartnerArtifactsResponse;
+  const raw = Array.isArray(json.data) ? json.data : [];
+  const artifacts = raw.map((r) =>
+    normalizeArtifact(r, { displayName: opts.fallbackDisplayName }),
+  );
+  // The partner API does not expose a `next_cursor` field; pagination is
+  // continued by passing the last item's id as `since`. Treat a short page
+  // (returned < requested) as the end.
+  const requested = opts.limit ?? raw.length;
+  const reachedEnd = raw.length < requested;
+  const last = raw[raw.length - 1];
+  const next_cursor = reachedEnd || !last ? null : last.id;
+  return { artifacts, next_cursor };
 }
 
 export interface PartnerAgentProfile {
@@ -183,7 +255,13 @@ export async function getPartnerAgent(slug: string): Promise<PartnerAgentProfile
   const safeSlug = encodeURIComponent(slug);
   try {
     const res = await partnerFetch(`/agents/${safeSlug}`);
-    return (await res.json()) as PartnerAgentProfile;
+    const json = (await res.json()) as { success?: boolean; data?: PartnerAgentProfile } | PartnerAgentProfile;
+    const profile = (json as { data?: PartnerAgentProfile }).data ?? (json as PartnerAgentProfile);
+    if (!profile || !(profile as PartnerAgentProfile).slug) {
+      // Unexpected shape — fall through to the artifact-based fallback.
+    } else {
+      return profile as PartnerAgentProfile;
+    }
   } catch (err) {
     if (!(err instanceof PartnerApiError) || err.status !== 404) {
       throw err;
@@ -199,12 +277,25 @@ export async function getPartnerAgent(slug: string): Promise<PartnerAgentProfile
   };
 }
 
-export async function listPartnerEventsSince(eventUuid: string | null): Promise<PartnerEventsPage> {
+export async function listPartnerEventsSince(
+  eventUuid: string | null,
+  eventType: string,
+): Promise<PartnerEventsPage> {
   const params = new URLSearchParams();
+  params.set("event_type", eventType);
   if (eventUuid) params.set("since", eventUuid);
-  const qs = params.toString();
-  const res = await partnerFetch(`/events/recent${qs ? `?${qs}` : ""}`);
-  return (await res.json()) as PartnerEventsPage;
+  const res = await partnerFetch(`/events/recent?${params.toString()}`);
+  const json = (await res.json()) as
+    | { success?: boolean; data?: PartnerEvent[]; cursor?: { returned?: number; limit?: number }; next_cursor?: string | null }
+    | PartnerEventsPage;
+  if ("events" in json && Array.isArray((json as PartnerEventsPage).events)) {
+    return json as PartnerEventsPage;
+  }
+  const events = Array.isArray((json as { data?: PartnerEvent[] }).data)
+    ? ((json as { data: PartnerEvent[] }).data)
+    : [];
+  const last = events[events.length - 1];
+  return { events, next_cursor: last?.event_uuid ?? null };
 }
 
 export async function recordPollSuccess(cursor: string | null): Promise<void> {
