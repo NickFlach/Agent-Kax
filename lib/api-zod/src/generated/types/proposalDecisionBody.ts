@@ -9,4 +9,9 @@ import type { ProposalDecisionBodyDecision } from "./proposalDecisionBodyDecisio
 
 export interface ProposalDecisionBody {
   decision: ProposalDecisionBodyDecision;
+  /**
+   * Optional outbound reply sent to the proposing agent in the same call.
+   * @nullable
+   */
+  replyMessage?: string | null;
 }

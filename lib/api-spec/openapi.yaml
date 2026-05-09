@@ -862,11 +862,55 @@ paths:
               $ref: "#/components/schemas/ProposalDecisionBody"
       responses:
         "200":
-          description: Updated proposal
+          description: Updated proposal (with optional outbound reply)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Proposal"
+                $ref: "#/components/schemas/ProposalDecisionResponse"
+
+  /proposals/{id}/reply:
+    post:
+      operationId: replyProposal
+      tags: [inbox]
+      summary: Send a reply to a proposal via the partner API
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyMessageBody"
+      responses:
+        "200":
+          description: Outbound message that was sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboundMessage"
+
+  /proposals/{id}/thread:
+    get:
+      operationId: getProposalThread
+      tags: [inbox]
+      summary: Inbound proposal plus all outbound replies, ordered by sent time
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Proposal thread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalThread"
 
   /dms:
     get:
@@ -908,6 +952,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Dm"
+
+  /dms/{id}/reply:
+    post:
+      operationId: replyDm
+      tags: [inbox]
+      summary: Send a DM reply via the partner API
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyMessageBody"
+      responses:
+        "200":
+          description: Outbound message that was sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboundMessage"
+
+  /dms/{id}/thread:
+    get:
+      operationId: getDmThread
+      tags: [inbox]
+      summary: Inbound DM plus all outbound replies, ordered by sent time
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: DM thread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DmThread"
 
   /matches:
     get:
@@ -1896,6 +1984,78 @@ components:
         decision:
           type: string
           enum: [accepted, declined]
+        replyMessage:
+          type: [string, "null"]
+          description: Optional outbound reply sent to the proposing agent in the same call.
+
+    ProposalDecisionResponse:
+      allOf:
+        - $ref: "#/components/schemas/Proposal"
+        - type: object
+          properties:
+            outbound:
+              oneOf:
+                - $ref: "#/components/schemas/OutboundMessage"
+                - type: "null"
+
+    ReplyMessageBody:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+
+    OutboundMessage:
+      type: object
+      required: [id, kind, body, sentAt]
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum: [dm_reply, proposal_reply]
+        dmId:
+          type: [integer, "null"]
+        proposalId:
+          type: [integer, "null"]
+        agentId:
+          type: [integer, "null"]
+        ownerId:
+          type: [string, "null"]
+        sentByUserId:
+          type: [string, "null"]
+        toAgentSlug:
+          type: [string, "null"]
+        body:
+          type: string
+        partnerMessageUuid:
+          type: [string, "null"]
+        sentAt:
+          type: string
+          format: date-time
+
+    DmThread:
+      type: object
+      required: [dm, outbound]
+      properties:
+        dm:
+          $ref: "#/components/schemas/Dm"
+        outbound:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboundMessage"
+
+    ProposalThread:
+      type: object
+      required: [proposal, outbound]
+      properties:
+        proposal:
+          $ref: "#/components/schemas/Proposal"
+        outbound:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboundMessage"
 
     Dm:
       type: object

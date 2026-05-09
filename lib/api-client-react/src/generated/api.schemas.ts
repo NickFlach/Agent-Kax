@@ -605,6 +605,49 @@ export const ProposalDecisionBodyDecision = {
 
 export interface ProposalDecisionBody {
   decision: ProposalDecisionBodyDecision;
+  /**
+   * Optional outbound reply sent to the proposing agent in the same call.
+   * @nullable
+   */
+  replyMessage?: string | null;
+}
+
+export type OutboundMessageKind =
+  (typeof OutboundMessageKind)[keyof typeof OutboundMessageKind];
+
+export const OutboundMessageKind = {
+  dm_reply: "dm_reply",
+  proposal_reply: "proposal_reply",
+} as const;
+
+export interface OutboundMessage {
+  id: number;
+  kind: OutboundMessageKind;
+  /** @nullable */
+  dmId?: number | null;
+  /** @nullable */
+  proposalId?: number | null;
+  /** @nullable */
+  agentId?: number | null;
+  /** @nullable */
+  ownerId?: string | null;
+  /** @nullable */
+  sentByUserId?: string | null;
+  /** @nullable */
+  toAgentSlug?: string | null;
+  body: string;
+  /** @nullable */
+  partnerMessageUuid?: string | null;
+  sentAt: string;
+}
+
+export type ProposalDecisionResponse = Proposal & {
+  outbound?: OutboundMessage | null;
+};
+
+export interface ReplyMessageBody {
+  /** @minLength 1 */
+  body: string;
 }
 
 export interface Dm {
@@ -623,6 +666,16 @@ export interface Dm {
   /** @nullable */
   readAt?: string | null;
   createdAt: string;
+}
+
+export interface DmThread {
+  dm: Dm;
+  outbound: OutboundMessage[];
+}
+
+export interface ProposalThread {
+  proposal: Proposal;
+  outbound: OutboundMessage[];
 }
 
 export interface DmListResponse {

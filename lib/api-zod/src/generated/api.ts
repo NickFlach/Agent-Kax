@@ -1627,22 +1627,116 @@ export const DecideProposalParams = zod.object({
 
 export const DecideProposalBody = zod.object({
   decision: zod.enum(["accepted", "declined"]),
+  replyMessage: zod
+    .string()
+    .nullish()
+    .describe(
+      "Optional outbound reply sent to the proposing agent in the same call.",
+    ),
 });
 
-export const DecideProposalResponse = zod.object({
+export const DecideProposalResponse = zod
+  .object({
+    id: zod.number(),
+    sourceUuid: zod.string(),
+    agentId: zod.number().nullish(),
+    ownerId: zod.string().nullish(),
+    fromAgentSlug: zod.string().nullish(),
+    fromDisplayName: zod.string().nullish(),
+    kind: zod.string(),
+    subject: zod.string().nullish(),
+    body: zod.string().nullish(),
+    status: zod.enum(["pending", "accepted", "declined"]),
+    occurredAt: zod.coerce.date(),
+    createdAt: zod.coerce.date(),
+    decidedAt: zod.coerce.date().nullish(),
+  })
+  .and(
+    zod.object({
+      outbound: zod
+        .union([
+          zod.object({
+            id: zod.number(),
+            kind: zod.enum(["dm_reply", "proposal_reply"]),
+            dmId: zod.number().nullish(),
+            proposalId: zod.number().nullish(),
+            agentId: zod.number().nullish(),
+            ownerId: zod.string().nullish(),
+            sentByUserId: zod.string().nullish(),
+            toAgentSlug: zod.string().nullish(),
+            body: zod.string(),
+            partnerMessageUuid: zod.string().nullish(),
+            sentAt: zod.coerce.date(),
+          }),
+          zod.null(),
+        ])
+        .optional(),
+    }),
+  );
+
+/**
+ * @summary Send a reply to a proposal via the partner API
+ */
+export const ReplyProposalParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ReplyProposalBody = zod.object({
+  body: zod.string().min(1),
+});
+
+export const ReplyProposalResponse = zod.object({
   id: zod.number(),
-  sourceUuid: zod.string(),
+  kind: zod.enum(["dm_reply", "proposal_reply"]),
+  dmId: zod.number().nullish(),
+  proposalId: zod.number().nullish(),
   agentId: zod.number().nullish(),
   ownerId: zod.string().nullish(),
-  fromAgentSlug: zod.string().nullish(),
-  fromDisplayName: zod.string().nullish(),
-  kind: zod.string(),
-  subject: zod.string().nullish(),
-  body: zod.string().nullish(),
-  status: zod.enum(["pending", "accepted", "declined"]),
-  occurredAt: zod.coerce.date(),
-  createdAt: zod.coerce.date(),
-  decidedAt: zod.coerce.date().nullish(),
+  sentByUserId: zod.string().nullish(),
+  toAgentSlug: zod.string().nullish(),
+  body: zod.string(),
+  partnerMessageUuid: zod.string().nullish(),
+  sentAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Inbound proposal plus all outbound replies, ordered by sent time
+ */
+export const GetProposalThreadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetProposalThreadResponse = zod.object({
+  proposal: zod.object({
+    id: zod.number(),
+    sourceUuid: zod.string(),
+    agentId: zod.number().nullish(),
+    ownerId: zod.string().nullish(),
+    fromAgentSlug: zod.string().nullish(),
+    fromDisplayName: zod.string().nullish(),
+    kind: zod.string(),
+    subject: zod.string().nullish(),
+    body: zod.string().nullish(),
+    status: zod.enum(["pending", "accepted", "declined"]),
+    occurredAt: zod.coerce.date(),
+    createdAt: zod.coerce.date(),
+    decidedAt: zod.coerce.date().nullish(),
+  }),
+  outbound: zod.array(
+    zod.object({
+      id: zod.number(),
+      kind: zod.enum(["dm_reply", "proposal_reply"]),
+      dmId: zod.number().nullish(),
+      proposalId: zod.number().nullish(),
+      agentId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      sentByUserId: zod.string().nullish(),
+      toAgentSlug: zod.string().nullish(),
+      body: zod.string(),
+      partnerMessageUuid: zod.string().nullish(),
+      sentAt: zod.coerce.date(),
+    }),
+  ),
 });
 
 /**
@@ -1688,6 +1782,68 @@ export const MarkDmReadResponse = zod.object({
   occurredAt: zod.coerce.date(),
   readAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Send a DM reply via the partner API
+ */
+export const ReplyDmParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ReplyDmBody = zod.object({
+  body: zod.string().min(1),
+});
+
+export const ReplyDmResponse = zod.object({
+  id: zod.number(),
+  kind: zod.enum(["dm_reply", "proposal_reply"]),
+  dmId: zod.number().nullish(),
+  proposalId: zod.number().nullish(),
+  agentId: zod.number().nullish(),
+  ownerId: zod.string().nullish(),
+  sentByUserId: zod.string().nullish(),
+  toAgentSlug: zod.string().nullish(),
+  body: zod.string(),
+  partnerMessageUuid: zod.string().nullish(),
+  sentAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Inbound DM plus all outbound replies, ordered by sent time
+ */
+export const GetDmThreadParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetDmThreadResponse = zod.object({
+  dm: zod.object({
+    id: zod.number(),
+    sourceUuid: zod.string(),
+    agentId: zod.number().nullish(),
+    ownerId: zod.string().nullish(),
+    fromAgentSlug: zod.string().nullish(),
+    fromDisplayName: zod.string().nullish(),
+    body: zod.string(),
+    occurredAt: zod.coerce.date(),
+    readAt: zod.coerce.date().nullish(),
+    createdAt: zod.coerce.date(),
+  }),
+  outbound: zod.array(
+    zod.object({
+      id: zod.number(),
+      kind: zod.enum(["dm_reply", "proposal_reply"]),
+      dmId: zod.number().nullish(),
+      proposalId: zod.number().nullish(),
+      agentId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      sentByUserId: zod.string().nullish(),
+      toAgentSlug: zod.string().nullish(),
+      body: zod.string(),
+      partnerMessageUuid: zod.string().nullish(),
+      sentAt: zod.coerce.date(),
+    }),
+  ),
 });
 
 /**

@@ -34,6 +34,7 @@ import type {
   DashboardSummary,
   Dm,
   DmListResponse,
+  DmThread,
   Drop,
   DropListResponse,
   DropSuggestionsResponse,
@@ -64,10 +65,13 @@ import type {
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
   NotificationPrefs,
+  OutboundMessage,
   PartnerSyncStatus,
-  Proposal,
   ProposalDecisionBody,
+  ProposalDecisionResponse,
   ProposalListResponse,
+  ProposalThread,
+  ReplyMessageBody,
   ScoreDistribution,
   UpdateAdminUserBody,
   UpdateAgentStorefrontSettingsBody,
@@ -3386,8 +3390,8 @@ export const decideProposal = async (
   id: number,
   proposalDecisionBody: ProposalDecisionBody,
   options?: RequestInit,
-): Promise<Proposal> => {
-  return customFetch<Proposal>(getDecideProposalUrl(id), {
+): Promise<ProposalDecisionResponse> => {
+  return customFetch<ProposalDecisionResponse>(getDecideProposalUrl(id), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -3461,6 +3465,180 @@ export const useDecideProposal = <
 > => {
   return useMutation(getDecideProposalMutationOptions(options));
 };
+
+/**
+ * @summary Send a reply to a proposal via the partner API
+ */
+export const getReplyProposalUrl = (id: number) => {
+  return `/api/proposals/${id}/reply`;
+};
+
+export const replyProposal = async (
+  id: number,
+  replyMessageBody: ReplyMessageBody,
+  options?: RequestInit,
+): Promise<OutboundMessage> => {
+  return customFetch<OutboundMessage>(getReplyProposalUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(replyMessageBody),
+  });
+};
+
+export const getReplyProposalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replyProposal>>,
+    TError,
+    { id: number; data: BodyType<ReplyMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replyProposal>>,
+  TError,
+  { id: number; data: BodyType<ReplyMessageBody> },
+  TContext
+> => {
+  const mutationKey = ["replyProposal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replyProposal>>,
+    { id: number; data: BodyType<ReplyMessageBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return replyProposal(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplyProposalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replyProposal>>
+>;
+export type ReplyProposalMutationBody = BodyType<ReplyMessageBody>;
+export type ReplyProposalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Send a reply to a proposal via the partner API
+ */
+export const useReplyProposal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replyProposal>>,
+    TError,
+    { id: number; data: BodyType<ReplyMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof replyProposal>>,
+  TError,
+  { id: number; data: BodyType<ReplyMessageBody> },
+  TContext
+> => {
+  return useMutation(getReplyProposalMutationOptions(options));
+};
+
+/**
+ * @summary Inbound proposal plus all outbound replies, ordered by sent time
+ */
+export const getGetProposalThreadUrl = (id: number) => {
+  return `/api/proposals/${id}/thread`;
+};
+
+export const getProposalThread = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ProposalThread> => {
+  return customFetch<ProposalThread>(getGetProposalThreadUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetProposalThreadQueryKey = (id: number) => {
+  return [`/api/proposals/${id}/thread`] as const;
+};
+
+export const getGetProposalThreadQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProposalThread>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProposalThread>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetProposalThreadQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProposalThread>>
+  > = ({ signal }) => getProposalThread(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProposalThread>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProposalThreadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProposalThread>>
+>;
+export type GetProposalThreadQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Inbound proposal plus all outbound replies, ordered by sent time
+ */
+
+export function useGetProposalThread<
+  TData = Awaited<ReturnType<typeof getProposalThread>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProposalThread>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProposalThreadQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List DMs delivered to the current user's agents
@@ -3631,6 +3809,180 @@ export const useMarkDmRead = <
 > => {
   return useMutation(getMarkDmReadMutationOptions(options));
 };
+
+/**
+ * @summary Send a DM reply via the partner API
+ */
+export const getReplyDmUrl = (id: number) => {
+  return `/api/dms/${id}/reply`;
+};
+
+export const replyDm = async (
+  id: number,
+  replyMessageBody: ReplyMessageBody,
+  options?: RequestInit,
+): Promise<OutboundMessage> => {
+  return customFetch<OutboundMessage>(getReplyDmUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(replyMessageBody),
+  });
+};
+
+export const getReplyDmMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replyDm>>,
+    TError,
+    { id: number; data: BodyType<ReplyMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replyDm>>,
+  TError,
+  { id: number; data: BodyType<ReplyMessageBody> },
+  TContext
+> => {
+  const mutationKey = ["replyDm"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replyDm>>,
+    { id: number; data: BodyType<ReplyMessageBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return replyDm(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplyDmMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replyDm>>
+>;
+export type ReplyDmMutationBody = BodyType<ReplyMessageBody>;
+export type ReplyDmMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Send a DM reply via the partner API
+ */
+export const useReplyDm = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replyDm>>,
+    TError,
+    { id: number; data: BodyType<ReplyMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof replyDm>>,
+  TError,
+  { id: number; data: BodyType<ReplyMessageBody> },
+  TContext
+> => {
+  return useMutation(getReplyDmMutationOptions(options));
+};
+
+/**
+ * @summary Inbound DM plus all outbound replies, ordered by sent time
+ */
+export const getGetDmThreadUrl = (id: number) => {
+  return `/api/dms/${id}/thread`;
+};
+
+export const getDmThread = async (
+  id: number,
+  options?: RequestInit,
+): Promise<DmThread> => {
+  return customFetch<DmThread>(getGetDmThreadUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDmThreadQueryKey = (id: number) => {
+  return [`/api/dms/${id}/thread`] as const;
+};
+
+export const getGetDmThreadQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDmThread>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDmThread>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDmThreadQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getDmThread>>> = ({
+    signal,
+  }) => getDmThread(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDmThread>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDmThreadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDmThread>>
+>;
+export type GetDmThreadQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Inbound DM plus all outbound replies, ordered by sent time
+ */
+
+export function useGetDmThread<
+  TData = Awaited<ReturnType<typeof getDmThread>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDmThread>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDmThreadQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List completed matches for the current user's agents

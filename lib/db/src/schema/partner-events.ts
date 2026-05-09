@@ -75,6 +75,35 @@ export const matchesTable = pgTable(
   ],
 );
 
+export const outboundMessageKindEnum = pgEnum("outbound_message_kind", [
+  "dm_reply",
+  "proposal_reply",
+]);
+
+export const outboundMessagesTable = pgTable(
+  "outbound_messages",
+  {
+    id: serial("id").primaryKey(),
+    kind: outboundMessageKindEnum("kind").notNull(),
+    dmId: integer("dm_id").references(() => dmsTable.id, { onDelete: "cascade" }),
+    proposalId: integer("proposal_id").references(() => proposalsTable.id, { onDelete: "cascade" }),
+    agentId: integer("agent_id").references(() => agentsTable.id, { onDelete: "set null" }),
+    ownerId: text("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
+    sentByUserId: text("sent_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
+    toAgentSlug: text("to_agent_slug"),
+    body: text("body").notNull(),
+    partnerMessageUuid: text("partner_message_uuid"),
+    payload: jsonb("payload").$type<Record<string, unknown> | null>(),
+    sentAt: timestamp("sent_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("outbound_messages_dm_idx").on(t.dmId),
+    index("outbound_messages_proposal_idx").on(t.proposalId),
+    index("outbound_messages_owner_idx").on(t.ownerId),
+  ],
+);
+
 export type Proposal = typeof proposalsTable.$inferSelect;
 export type Dm = typeof dmsTable.$inferSelect;
 export type Match = typeof matchesTable.$inferSelect;
+export type OutboundMessage = typeof outboundMessagesTable.$inferSelect;

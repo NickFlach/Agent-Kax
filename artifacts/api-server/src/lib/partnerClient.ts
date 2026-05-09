@@ -298,6 +298,71 @@ export async function listPartnerEventsSince(
   return { events, next_cursor: last?.event_uuid ?? null };
 }
 
+export interface SendDmInput {
+  toAgentSlug: string;
+  body: string;
+  inReplyToUuid?: string | null;
+  fromAgentSlug?: string | null;
+}
+
+export interface SendProposalReplyInput {
+  proposalUuid: string;
+  body: string;
+  decision?: "accepted" | "declined" | null;
+  fromAgentSlug?: string | null;
+}
+
+export interface PartnerSendResult {
+  uuid: string | null;
+  raw: unknown;
+}
+
+function extractUuid(json: unknown): string | null {
+  if (json && typeof json === "object") {
+    const obj = json as Record<string, unknown>;
+    const data = (obj["data"] ?? obj) as Record<string, unknown> | undefined;
+    if (data && typeof data === "object") {
+      for (const k of ["uuid", "id", "message_uuid", "dm_uuid"]) {
+        const v = (data as Record<string, unknown>)[k];
+        if (typeof v === "string" && v.length > 0) return v;
+      }
+    }
+  }
+  return null;
+}
+
+export async function sendPartnerDm(input: SendDmInput): Promise<PartnerSendResult> {
+  const body: Record<string, unknown> = {
+    to_agent_slug: input.toAgentSlug,
+    body: input.body,
+  };
+  if (input.inReplyToUuid) body["in_reply_to_uuid"] = input.inReplyToUuid;
+  if (input.fromAgentSlug) body["from_agent_slug"] = input.fromAgentSlug;
+  const res = await partnerFetch(`/dms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { uuid: extractUuid(json), raw: json };
+}
+
+export async function sendPartnerProposalReply(
+  input: SendProposalReplyInput,
+): Promise<PartnerSendResult> {
+  const body: Record<string, unknown> = { body: input.body };
+  if (input.decision) body["decision"] = input.decision;
+  if (input.fromAgentSlug) body["from_agent_slug"] = input.fromAgentSlug;
+  const safeUuid = encodeURIComponent(input.proposalUuid);
+  const res = await partnerFetch(`/proposals/${safeUuid}/reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { uuid: extractUuid(json), raw: json };
+}
+
 export async function recordPollSuccess(cursor: string | null): Promise<void> {
   await ensureSyncRow();
   await db
