@@ -35,6 +35,66 @@ export interface AuthUser {
   displayName?: string | null;
   role?: AuthUserRole;
   notificationPrefs?: NotificationPrefs;
+  /**
+   * Lowercased EVM address if user signed in via wallet
+   * @nullable
+   */
+  walletAddress?: string | null;
+  /**
+   * Auth provider for the active session (wallet, oidc, obc_agent)
+   * @nullable
+   */
+  provider?: string | null;
+}
+
+export interface WalletNonceRequest {
+  /** EVM address (any case) the wallet will sign with */
+  address: string;
+}
+
+export interface WalletNonceResponse {
+  nonce: string;
+  /** Human-readable SIWE-style message to sign with personal_sign */
+  message: string;
+  expiresAt: string;
+}
+
+export interface WalletVerifyRequest {
+  address: string;
+  signature: string;
+  message: string;
+}
+
+export interface AgentChallengeRequest {
+  obcBotId: string;
+}
+
+export interface AgentChallengeResponse {
+  phrase: string;
+  expiresAt: string;
+}
+
+export interface AgentVerifyRequest {
+  obcBotId: string;
+  artifactUuid: string;
+}
+
+export interface UserBot {
+  id: string;
+  obcBotId: string;
+  /** @nullable */
+  displayName: string | null;
+  attachedAt: string;
+}
+
+export interface UserBotsResponse {
+  bots: UserBot[];
+}
+
+export interface DetachUserBotResponse {
+  ok: boolean;
+  /** OBC bot UUID that was detached */
+  detached: string;
 }
 
 export type NftMetadataAttributesItem = {

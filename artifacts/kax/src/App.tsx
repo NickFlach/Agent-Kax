@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter, Link, Redirect, useLocation, useParams } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { useGetInboxCounts, getGetInboxCountsQueryKey } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
 import { toast } from "@/hooks/use-toast";
@@ -28,6 +28,8 @@ import Marketplace from "@/pages/marketplace";
 import Marketplace3D from "@/pages/marketplace-3d";
 import Inbox from "@/pages/inbox";
 import Proposals from "@/pages/proposals";
+import LoginPage from "@/pages/login";
+import BotsPage from "@/pages/bots";
 
 const queryClient = new QueryClient();
 
@@ -113,7 +115,10 @@ function AuthControls() {
       </Button>
     );
   }
-  const label = user.displayName || user.firstName || user.email || "Account";
+  const walletShort = user.walletAddress
+    ? `${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}`
+    : null;
+  const label = user.displayName || walletShort || user.firstName || user.email || "Account";
   return (
     <div className="flex items-center gap-2 ml-2">
       <span className="text-[10px] uppercase tracking-widest text-muted-foreground hidden sm:inline" data-testid="text-current-user">
@@ -147,6 +152,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
             <NavLink href="/agents">Agents</NavLink>
+            <NavLink href="/bots">Bots</NavLink>
             <NavLink href="/inbox" badge={dmsUnread}>Inbox</NavLink>
             <NavLink href="/proposals" badge={proposalsPending}>Proposals</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
@@ -168,6 +174,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 
 function RequireAuth({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { user, isLoading, login } = useAuth();
+  const [location] = useLocation();
   if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center text-xs uppercase tracking-widest text-muted-foreground">
@@ -178,8 +185,16 @@ function RequireAuth({ children, adminOnly = false }: { children: React.ReactNod
   if (!user) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
-        <p className="text-sm text-muted-foreground uppercase tracking-widest">Authentication required</p>
-        <Button onClick={login} data-testid="button-login-gate">Log in</Button>
+        <p className="text-sm text-muted-foreground uppercase tracking-widest">Wallet sign-in required</p>
+        <Button
+          onClick={() => {
+            const target = `/login?returnTo=${encodeURIComponent(location)}`;
+            window.location.href = `${import.meta.env.BASE_URL.replace(/\/+$/, "")}${target}` || target;
+          }}
+          data-testid="button-login-gate"
+        >
+          Connect Wallet
+        </Button>
       </div>
     );
   }
@@ -198,6 +213,12 @@ function Router() {
     <Switch>
       <Route path="/">
         <Marketplace3D />
+      </Route>
+      <Route path="/login">
+        <LoginPage />
+      </Route>
+      <Route path="/bots">
+        <AdminLayout><RequireAuth><BotsPage /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/dashboard">
         <AdminLayout><RequireAuth><Dashboard /></RequireAuth></AdminLayout>

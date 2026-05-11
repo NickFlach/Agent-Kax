@@ -21,10 +21,13 @@ import type {
   AddArtifactToDropBody,
   AdminUser,
   Agent,
+  AgentChallengeRequest,
+  AgentChallengeResponse,
   AgentDashboard,
   AgentListResponse,
   AgentStorefrontLanding,
   AgentStorefrontSettings,
+  AgentVerifyRequest,
   Artifact,
   ArtifactListResponse,
   ArtifactMintState,
@@ -33,6 +36,7 @@ import type {
   CreateAgentBody,
   CreateDropBody,
   DashboardSummary,
+  DetachUserBotResponse,
   Dm,
   DmListResponse,
   DmThread,
@@ -80,6 +84,10 @@ import type {
   UpdateAgentStorefrontSettingsBody,
   UpdateDropBody,
   UpdateNotificationPrefsBody,
+  UserBotsResponse,
+  WalletNonceRequest,
+  WalletNonceResponse,
+  WalletVerifyRequest,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -241,6 +249,512 @@ export function useGetCurrentAuthUser<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Mint a single-use SIWE-style nonce for wallet sign-in
+ */
+export const getCreateWalletNonceUrl = () => {
+  return `/api/auth/wallet/nonce`;
+};
+
+export const createWalletNonce = async (
+  walletNonceRequest: WalletNonceRequest,
+  options?: RequestInit,
+): Promise<WalletNonceResponse> => {
+  return customFetch<WalletNonceResponse>(getCreateWalletNonceUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(walletNonceRequest),
+  });
+};
+
+export const getCreateWalletNonceMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createWalletNonce>>,
+    TError,
+    { data: BodyType<WalletNonceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createWalletNonce>>,
+  TError,
+  { data: BodyType<WalletNonceRequest> },
+  TContext
+> => {
+  const mutationKey = ["createWalletNonce"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createWalletNonce>>,
+    { data: BodyType<WalletNonceRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createWalletNonce(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateWalletNonceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createWalletNonce>>
+>;
+export type CreateWalletNonceMutationBody = BodyType<WalletNonceRequest>;
+export type CreateWalletNonceMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mint a single-use SIWE-style nonce for wallet sign-in
+ */
+export const useCreateWalletNonce = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createWalletNonce>>,
+    TError,
+    { data: BodyType<WalletNonceRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createWalletNonce>>,
+  TError,
+  { data: BodyType<WalletNonceRequest> },
+  TContext
+> => {
+  return useMutation(getCreateWalletNonceMutationOptions(options));
+};
+
+/**
+ * @summary Verify a wallet signature and open a session
+ */
+export const getVerifyWalletSignatureUrl = () => {
+  return `/api/auth/wallet/verify`;
+};
+
+export const verifyWalletSignature = async (
+  walletVerifyRequest: WalletVerifyRequest,
+  options?: RequestInit,
+): Promise<AuthUserEnvelope> => {
+  return customFetch<AuthUserEnvelope>(getVerifyWalletSignatureUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(walletVerifyRequest),
+  });
+};
+
+export const getVerifyWalletSignatureMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyWalletSignature>>,
+    TError,
+    { data: BodyType<WalletVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyWalletSignature>>,
+  TError,
+  { data: BodyType<WalletVerifyRequest> },
+  TContext
+> => {
+  const mutationKey = ["verifyWalletSignature"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyWalletSignature>>,
+    { data: BodyType<WalletVerifyRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return verifyWalletSignature(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyWalletSignatureMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyWalletSignature>>
+>;
+export type VerifyWalletSignatureMutationBody = BodyType<WalletVerifyRequest>;
+export type VerifyWalletSignatureMutationError = ErrorType<void>;
+
+/**
+ * @summary Verify a wallet signature and open a session
+ */
+export const useVerifyWalletSignature = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyWalletSignature>>,
+    TError,
+    { data: BodyType<WalletVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyWalletSignature>>,
+  TError,
+  { data: BodyType<WalletVerifyRequest> },
+  TContext
+> => {
+  return useMutation(getVerifyWalletSignatureMutationOptions(options));
+};
+
+/**
+ * @summary Mint a verification phrase the user must publish from an OBC bot
+ */
+export const getCreateAgentChallengeUrl = () => {
+  return `/api/auth/agent/challenge`;
+};
+
+export const createAgentChallenge = async (
+  agentChallengeRequest: AgentChallengeRequest,
+  options?: RequestInit,
+): Promise<AgentChallengeResponse> => {
+  return customFetch<AgentChallengeResponse>(getCreateAgentChallengeUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(agentChallengeRequest),
+  });
+};
+
+export const getCreateAgentChallengeMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgentChallenge>>,
+    TError,
+    { data: BodyType<AgentChallengeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAgentChallenge>>,
+  TError,
+  { data: BodyType<AgentChallengeRequest> },
+  TContext
+> => {
+  const mutationKey = ["createAgentChallenge"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAgentChallenge>>,
+    { data: BodyType<AgentChallengeRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAgentChallenge(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAgentChallengeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAgentChallenge>>
+>;
+export type CreateAgentChallengeMutationBody = BodyType<AgentChallengeRequest>;
+export type CreateAgentChallengeMutationError = ErrorType<void>;
+
+/**
+ * @summary Mint a verification phrase the user must publish from an OBC bot
+ */
+export const useCreateAgentChallenge = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAgentChallenge>>,
+    TError,
+    { data: BodyType<AgentChallengeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAgentChallenge>>,
+  TError,
+  { data: BodyType<AgentChallengeRequest> },
+  TContext
+> => {
+  return useMutation(getCreateAgentChallengeMutationOptions(options));
+};
+
+/**
+ * @summary Confirm the verification artifact and attach the OBC bot
+ */
+export const getVerifyAgentChallengeUrl = () => {
+  return `/api/auth/agent/verify`;
+};
+
+export const verifyAgentChallenge = async (
+  agentVerifyRequest: AgentVerifyRequest,
+  options?: RequestInit,
+): Promise<UserBotsResponse> => {
+  return customFetch<UserBotsResponse>(getVerifyAgentChallengeUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(agentVerifyRequest),
+  });
+};
+
+export const getVerifyAgentChallengeMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyAgentChallenge>>,
+    TError,
+    { data: BodyType<AgentVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyAgentChallenge>>,
+  TError,
+  { data: BodyType<AgentVerifyRequest> },
+  TContext
+> => {
+  const mutationKey = ["verifyAgentChallenge"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyAgentChallenge>>,
+    { data: BodyType<AgentVerifyRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return verifyAgentChallenge(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyAgentChallengeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyAgentChallenge>>
+>;
+export type VerifyAgentChallengeMutationBody = BodyType<AgentVerifyRequest>;
+export type VerifyAgentChallengeMutationError = ErrorType<void>;
+
+/**
+ * @summary Confirm the verification artifact and attach the OBC bot
+ */
+export const useVerifyAgentChallenge = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyAgentChallenge>>,
+    TError,
+    { data: BodyType<AgentVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyAgentChallenge>>,
+  TError,
+  { data: BodyType<AgentVerifyRequest> },
+  TContext
+> => {
+  return useMutation(getVerifyAgentChallengeMutationOptions(options));
+};
+
+/**
+ * @summary List OBC bots attached to the current user
+ */
+export const getListUserBotsUrl = () => {
+  return `/api/auth/bots`;
+};
+
+export const listUserBots = async (
+  options?: RequestInit,
+): Promise<UserBotsResponse> => {
+  return customFetch<UserBotsResponse>(getListUserBotsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListUserBotsQueryKey = () => {
+  return [`/api/auth/bots`] as const;
+};
+
+export const getListUserBotsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listUserBots>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listUserBots>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListUserBotsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listUserBots>>> = ({
+    signal,
+  }) => listUserBots({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listUserBots>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListUserBotsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listUserBots>>
+>;
+export type ListUserBotsQueryError = ErrorType<void>;
+
+/**
+ * @summary List OBC bots attached to the current user
+ */
+
+export function useListUserBots<
+  TData = Awaited<ReturnType<typeof listUserBots>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listUserBots>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListUserBotsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * `botId` is the OBC bot UUID (the same value returned as `obcBotId` from
+`GET /auth/bots`), not the internal `user_bots.id` row id.
+
+ * @summary Detach an OBC bot from the current user
+ */
+export const getDetachUserBotUrl = (botId: string) => {
+  return `/api/auth/bots/${botId}`;
+};
+
+export const detachUserBot = async (
+  botId: string,
+  options?: RequestInit,
+): Promise<DetachUserBotResponse> => {
+  return customFetch<DetachUserBotResponse>(getDetachUserBotUrl(botId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDetachUserBotMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof detachUserBot>>,
+    TError,
+    { botId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof detachUserBot>>,
+  TError,
+  { botId: string },
+  TContext
+> => {
+  const mutationKey = ["detachUserBot"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof detachUserBot>>,
+    { botId: string }
+  > = (props) => {
+    const { botId } = props ?? {};
+
+    return detachUserBot(botId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DetachUserBotMutationResult = NonNullable<
+  Awaited<ReturnType<typeof detachUserBot>>
+>;
+
+export type DetachUserBotMutationError = ErrorType<void>;
+
+/**
+ * @summary Detach an OBC bot from the current user
+ */
+export const useDetachUserBot = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof detachUserBot>>,
+    TError,
+    { botId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof detachUserBot>>,
+  TError,
+  { botId: string },
+  TContext
+> => {
+  return useMutation(getDetachUserBotMutationOptions(options));
+};
 
 /**
  * @summary Update the current user's notification preferences

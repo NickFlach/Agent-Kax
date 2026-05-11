@@ -4,7 +4,7 @@ import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-thr
 import * as THREE from "three";
 import { Link, useLocation, Redirect } from "wouter";
 import { useGetStorefrontMarketplace, getGetStorefrontMarketplaceQueryKey } from "@workspace/api-client-react";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import "./marketplace-3d.css";
@@ -20,7 +20,8 @@ type SceneAgent = {
 };
 
 function startClaim() {
-  window.location.href = `/api/login?returnTo=${encodeURIComponent("/agents")}`;
+  const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
+  window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}` || "/login";
 }
 
 function detectWebGL(): boolean {

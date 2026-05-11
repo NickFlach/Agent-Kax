@@ -60,6 +60,130 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthUserEnvelope'
+  /auth/wallet/nonce:
+    post:
+      tags: [Auth]
+      operationId: createWalletNonce
+      summary: Mint a single-use SIWE-style nonce for wallet sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletNonceRequest'
+      responses:
+        '200':
+          description: Nonce minted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletNonceResponse'
+  /auth/wallet/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyWalletSignature
+      summary: Verify a wallet signature and open a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletVerifyRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+        '401':
+          description: Bad signature, expired nonce, or address mismatch
+  /auth/agent/challenge:
+    post:
+      tags: [Auth]
+      operationId: createAgentChallenge
+      summary: Mint a verification phrase the user must publish from an OBC bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentChallengeRequest'
+      responses:
+        '200':
+          description: Challenge minted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentChallengeResponse'
+        '401':
+          description: Auth required
+        '409':
+          description: Bot already attached to another account
+  /auth/agent/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyAgentChallenge
+      summary: Confirm the verification artifact and attach the OBC bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentVerifyRequest'
+      responses:
+        '200':
+          description: Bot attached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserBotsResponse'
+        '400':
+          description: Verification failed (creator mismatch, missing phrase, pre-dated artifact, expired challenge)
+        '401':
+          description: Auth required
+  /auth/bots:
+    get:
+      tags: [Auth]
+      operationId: listUserBots
+      summary: List OBC bots attached to the current user
+      responses:
+        '200':
+          description: Bot list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserBotsResponse'
+        '401':
+          description: Auth required
+  /auth/bots/{botId}:
+    delete:
+      tags: [Auth]
+      operationId: detachUserBot
+      summary: Detach an OBC bot from the current user
+      description: |
+        `botId` is the OBC bot UUID (the same value returned as `obcBotId` from
+        `GET /auth/bots`), not the internal `user_bots.id` row id.
+      parameters:
+        - name: botId
+          in: path
+          required: true
+          schema:
+            type: string
+            description: OBC bot UUID
+      responses:
+        '200':
+          description: Detached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetachUserBotResponse'
+        '400':
+          description: Invalid bot UUID
+        '401':
+          description: Auth required
+        '404':
+          description: Bot not attached to this user
   /me/notification-prefs:
     patch:
       tags: [Auth]
@@ -1287,6 +1411,94 @@ components:
           enum: [user, admin]
         notificationPrefs:
           $ref: '#/components/schemas/NotificationPrefs'
+        walletAddress:
+          type: [string, 'null']
+          description: Lowercased EVM address if user signed in via wallet
+        provider:
+          type: [string, 'null']
+          description: Auth provider for the active session (wallet, oidc, obc_agent)
+    WalletNonceRequest:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          description: EVM address (any case) the wallet will sign with
+    WalletNonceResponse:
+      type: object
+      required: [nonce, message, expiresAt]
+      properties:
+        nonce:
+          type: string
+        message:
+          type: string
+          description: Human-readable SIWE-style message to sign with personal_sign
+        expiresAt:
+          type: string
+          format: date-time
+    WalletVerifyRequest:
+      type: object
+      required: [address, signature, message]
+      properties:
+        address:
+          type: string
+        signature:
+          type: string
+        message:
+          type: string
+    AgentChallengeRequest:
+      type: object
+      required: [obcBotId]
+      properties:
+        obcBotId:
+          type: string
+    AgentChallengeResponse:
+      type: object
+      required: [phrase, expiresAt]
+      properties:
+        phrase:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    AgentVerifyRequest:
+      type: object
+      required: [obcBotId, artifactUuid]
+      properties:
+        obcBotId:
+          type: string
+        artifactUuid:
+          type: string
+    UserBot:
+      type: object
+      required: [id, obcBotId, displayName, attachedAt]
+      properties:
+        id:
+          type: string
+        obcBotId:
+          type: string
+        displayName:
+          type: [string, 'null']
+        attachedAt:
+          type: string
+          format: date-time
+    UserBotsResponse:
+      type: object
+      required: [bots]
+      properties:
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserBot'
+    DetachUserBotResponse:
+      type: object
+      required: [ok, detached]
+      properties:
+        ok:
+          type: boolean
+        detached:
+          type: string
+          description: OBC bot UUID that was detached
     NftMetadata:
       type: object
       required: [name, description, image, attributes]

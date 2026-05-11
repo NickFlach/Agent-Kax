@@ -22,4 +22,14 @@ export interface AuthUser {
   displayName?: string | null;
   role?: AuthUserRole;
   notificationPrefs?: NotificationPrefs;
+  /**
+   * Lowercased EVM address if user signed in via wallet
+   * @nullable
+   */
+  walletAddress?: string | null;
+  /**
+   * Auth provider for the active session (wallet, oidc, obc_agent)
+   * @nullable
+   */
+  provider?: string | null;
 }

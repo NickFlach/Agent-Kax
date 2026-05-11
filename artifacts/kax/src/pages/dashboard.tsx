@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 import { NotificationPrefsCard } from "@/components/notification-prefs-card";
+import { BotsManager } from "@/components/bots-manager";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TrendingDown } from "lucide-react";
 
@@ -229,6 +230,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <BotsManager />
         <NotificationPrefsCard />
       </div>
 

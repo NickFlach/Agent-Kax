@@ -41,9 +41,136 @@ export const GetCurrentAuthUserResponse = zod.object({
           emailOnDm: zod.boolean(),
         })
         .optional(),
+      walletAddress: zod
+        .string()
+        .nullish()
+        .describe("Lowercased EVM address if user signed in via wallet"),
+      provider: zod
+        .string()
+        .nullish()
+        .describe(
+          "Auth provider for the active session (wallet, oidc, obc_agent)",
+        ),
     }),
     zod.null(),
   ]),
+});
+
+/**
+ * @summary Mint a single-use SIWE-style nonce for wallet sign-in
+ */
+export const CreateWalletNonceBody = zod.object({
+  address: zod
+    .string()
+    .describe("EVM address (any case) the wallet will sign with"),
+});
+
+export const CreateWalletNonceResponse = zod.object({
+  nonce: zod.string(),
+  message: zod
+    .string()
+    .describe("Human-readable SIWE-style message to sign with personal_sign"),
+  expiresAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Verify a wallet signature and open a session
+ */
+export const VerifyWalletSignatureBody = zod.object({
+  address: zod.string(),
+  signature: zod.string(),
+  message: zod.string(),
+});
+
+export const VerifyWalletSignatureResponse = zod.object({
+  user: zod.union([
+    zod.object({
+      id: zod.string(),
+      email: zod.string().email().nullable(),
+      firstName: zod.string().nullable(),
+      lastName: zod.string().nullable(),
+      profileImageUrl: zod.string().nullable(),
+      displayName: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]).optional(),
+      notificationPrefs: zod
+        .object({
+          emailOnProposal: zod.boolean(),
+          emailOnDm: zod.boolean(),
+        })
+        .optional(),
+      walletAddress: zod
+        .string()
+        .nullish()
+        .describe("Lowercased EVM address if user signed in via wallet"),
+      provider: zod
+        .string()
+        .nullish()
+        .describe(
+          "Auth provider for the active session (wallet, oidc, obc_agent)",
+        ),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
+ * @summary Mint a verification phrase the user must publish from an OBC bot
+ */
+export const CreateAgentChallengeBody = zod.object({
+  obcBotId: zod.string(),
+});
+
+export const CreateAgentChallengeResponse = zod.object({
+  phrase: zod.string(),
+  expiresAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Confirm the verification artifact and attach the OBC bot
+ */
+export const VerifyAgentChallengeBody = zod.object({
+  obcBotId: zod.string(),
+  artifactUuid: zod.string(),
+});
+
+export const VerifyAgentChallengeResponse = zod.object({
+  bots: zod.array(
+    zod.object({
+      id: zod.string(),
+      obcBotId: zod.string(),
+      displayName: zod.string().nullable(),
+      attachedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary List OBC bots attached to the current user
+ */
+export const ListUserBotsResponse = zod.object({
+  bots: zod.array(
+    zod.object({
+      id: zod.string(),
+      obcBotId: zod.string(),
+      displayName: zod.string().nullable(),
+      attachedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * `botId` is the OBC bot UUID (the same value returned as `obcBotId` from
+`GET /auth/bots`), not the internal `user_bots.id` row id.
+
+ * @summary Detach an OBC bot from the current user
+ */
+export const DetachUserBotParams = zod.object({
+  botId: zod.coerce.string(),
+});
+
+export const DetachUserBotResponse = zod.object({
+  ok: zod.boolean(),
+  detached: zod.string().describe("OBC bot UUID that was detached"),
 });
 
 /**

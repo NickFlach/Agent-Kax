@@ -1,9 +1,10 @@
 import { Link } from "wouter";
 import { useGetStorefrontMarketplace, getGetStorefrontMarketplaceQueryKey } from "@workspace/api-client-react";
-import { useAuth } from "@workspace/replit-auth-web";
+import { useAuth } from "@/hooks/use-auth";
 
 function startClaim() {
-  window.location.href = `/api/login?returnTo=${encodeURIComponent("/agents")}`;
+  const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
+  window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}` || "/login";
 }
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
