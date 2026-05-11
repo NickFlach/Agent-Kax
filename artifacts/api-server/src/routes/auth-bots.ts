@@ -2,7 +2,6 @@ import { Router } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, userBotsTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
-import { requireWalletAuth } from "../middlewares/requireWalletAuth";
 
 const router: Router = Router();
 
@@ -29,7 +28,7 @@ router.get("/auth/bots", requireAuth, async (req, res) => {
  * 404 if the user doesn't own that attachment (no information leak —
  * we don't say whether the bot is attached to someone else).
  */
-router.delete("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
+router.delete("/auth/bots/:botId", requireAuth, async (req, res) => {
   const botIdRaw = req.params.botId;
   const botId = (typeof botIdRaw === "string" ? botIdRaw : "").toLowerCase();
   if (!BOT_ID_RE.test(botId)) {

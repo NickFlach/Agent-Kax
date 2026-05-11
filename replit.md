@@ -173,6 +173,7 @@ curl -s -b cookies.txt -X POST localhost:80/api/auth/agent/challenge \
 # ... publish artifact on OBC containing the phrase ...
 curl -s -b cookies.txt -X POST localhost:80/api/auth/agent/verify \
   -H 'Content-Type: application/json' -d '{"obcBotId":"<uuid>","artifactUuid":"<uuid>"}'
+curl -s -b cookies.txt -X DELETE localhost:80/api/auth/bots/<uuid>      # detach
 ```
 
 ## Commands
