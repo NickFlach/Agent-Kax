@@ -101,17 +101,21 @@ function useInboxNotifications(enabled: boolean): InboxCountSnapshot {
 
 function AuthControls() {
   const { user, isLoading, login, logout } = useAuth();
+  const [location] = useLocation();
   if (isLoading) return null;
   if (!user) {
+    // Suppress on /login itself, and on protected pages where RequireAuth
+    // already renders the Connect Wallet CTA — avoid duplicate entry points.
+    if (location === "/login") return null;
     return (
       <Button
         size="sm"
         variant="outline"
         className="ml-2 h-7 text-xs uppercase tracking-wider"
         onClick={login}
-        data-testid="button-login"
+        data-testid="button-connect-wallet-header"
       >
-        Log in
+        Connect Wallet
       </Button>
     );
   }
