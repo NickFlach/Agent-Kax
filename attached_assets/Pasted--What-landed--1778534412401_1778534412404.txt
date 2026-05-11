@@ -1,0 +1,36 @@
+ What landed                                                                                                                                                                                        
+  ┌────────────┬──────────────────────────────────────────────────────┬─────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────┐      │    Flow    │                        Routes                        │                       Storage                       │                           Verification                            │
+  ├────────────┼──────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+  │ Wallet     │ POST /api/auth/wallet/nonce, POST                    │ nonce in auth_challenges; user row keyed by         │ ethers.verifyMessage(message, signature) recovers address; atomic │
+  │ (SIWE)     │ /api/auth/wallet/verify                              │ wallet_address                                      │  consume of nonce                                                 │
+  ├────────────┼──────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+  │ OBC Agent  │ POST /api/auth/agent/challenge, POST                 │ challenge phrase in auth_challenges; user row keyed │ Fetches artifact via partner API, checks creator_bot_id match +   │
+  │            │ /api/auth/agent/verify                               │  by obc_bot_id                                      │ phrase present + created_at after challenge issued                │
+  ├────────────┼──────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+  │ Sessions   │ unchanged cookie shape (sid), DB-backed              │ access_token carries wallet:<id> or obc_agent:<id>  │ wallet/agent sessions hit SESSION_TTL and expire — user re-signs  │
+  │            │                                                      │ so authMiddleware can detect & skip OIDC refresh    │                                                                   │
+  ├────────────┼──────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+  │ Migration  │ lib/db/migrations/0001_wallet_and_agent_auth.sql     │ adds wallet_address, obc_bot_id, auth_provider to   │ additive, idempotent                                              │
+  │            │                                                      │ users + new auth_challenges table                   │                                                                   │
+  └────────────┴──────────────────────────────────────────────────────┴─────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────┘
+
+  The verification math for the agent flow, end to end:
+
+  1. User claims bot X. Server issues KAX-VERIFY-A3F7B2, stores {challenge, claim_subject=X, expires_at=now+30m}.
+  2. User publishes an OBC artifact whose description includes KAX-VERIFY-A3F7B2.
+  3. User POSTs {obcBotId: X, artifactUuid: Y} to verify.
+  4. Server fetches artifact Y via partner API → checks creator_bot_id == X (proves ownership), description contains KAX-VERIFY-A3F7B2 (proves the user knows the challenge), artifact.created_at >=
+  challenge.created_at (prevents replay of pre-existing artifacts), challenge unconsumed, challenge unexpired.
+  5. All five checks pass → consume challenge atomically, upsert user, issue session.
+
+  Deferred — separate session each:
+  - SPA UI for Connect Wallet + Agent Verify (currently the SPA still shows the Replit login)
+  - Strip the OIDC code paths + lib/replit-auth-web once new auth is exercised in prod
+
+  Deploy steps for you when pulling:
+  1. pnpm install (adds ethers@^6)
+  2. Apply migration: psql $DATABASE_URL -f lib/db/migrations/0001_wallet_and_agent_auth.sql
+  3. Set KAX_CORS_ALLOWLIST env (the CORS fix from the earlier commit) to include your wallet UI origin
+  4. Restart api-server
+
+  The flows are testable via curl / Postman today — no UI required for verification. Once you confirm wallet + agent both produce session cookies, I'll write the SPA login page in the next pass.
