@@ -41,7 +41,7 @@ export interface AuthUser {
    */
   walletAddress?: string | null;
   /**
-   * Auth provider for the active session (wallet, oidc, obc_agent)
+   * Auth provider for the active session (wallet, obc_agent)
    * @nullable
    */
   provider?: string | null;
@@ -162,23 +162,6 @@ export interface UpdateNotificationPrefsBody {
 
 export interface AuthUserEnvelope {
   user: AuthUser | null;
-}
-
-export interface MobileTokenExchangeRequest {
-  /** @minLength 1 */
-  code: string;
-  /** @minLength 1 */
-  code_verifier: string;
-  /** @minLength 1 */
-  redirect_uri: string;
-  /** @minLength 1 */
-  state: string;
-  /** @minLength 1 */
-  nonce?: string;
-}
-
-export interface MobileTokenExchangeSuccess {
-  token: string;
 }
 
 export const LogoutSuccessValue = {
@@ -843,16 +826,6 @@ export interface ScoreDistribution {
  * Opaque session token — `Bearer <sid>`.
  */
 export type AuthorizationSessionHeaderParameter = string;
-
-export type BeginBrowserLoginParams = {
-  returnTo?: string;
-};
-
-export type HandleBrowserLoginCallbackParams = {
-  code?: string;
-  state?: string;
-  iss?: string;
-};
 
 export type ListArtifactsParams = {
   status?: ListArtifactsStatus;

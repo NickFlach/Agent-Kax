@@ -119,7 +119,7 @@ All routes under `/api`:
 
 ## Authentication
 
-Three coexisting login paths, all minted into the same `users` row + same `sid` session cookie. Wallet is the canonical identity going forward; OIDC is grandfathered until task #24.
+Wallet is the canonical (and only) login path as of task #24. OIDC (Replit Auth + Space Child Auth) was removed entirely — `/api/login`, `/api/callback`, and `/api/mobile-auth/*` are gone, the `openid-client` dependency is dropped, and the `replit` variant of `auth_provider` is dropped from the enum (migration 0003). Logout is now a one-shot `POST /api/logout` that deletes the session row and clears the cookie. Legacy `obc_agent:<userId>` sessions issued before the wallet-primary refactor (task #21) are grandfathered until they expire on their own; their bot is lazily backfilled into `user_bots` on first authenticated request.
 
 ### Wallet (primary, EIP-191 SIWE-style)
 
@@ -143,16 +143,6 @@ Bot management:
 
 - `GET  /api/auth/bots` (auth) → `{ bots: [{ id, obcBotId, displayName, attachedAt }] }`
 - `DELETE /api/auth/bots/:botId` (auth) → detaches; 404 if the user doesn't own that attachment (no info-leak about other users' bots)
-
-### OIDC (legacy, env-driven, scheduled for removal in task #24)
-
-Single `openid-client` codepath, no per-issuer branching beyond config selection:
-
-- **Default**: Replit Auth — `ISSUER_URL` (defaults to `https://replit.com/oidc`), `REPL_ID` as client_id, no client_secret.
-- **Space Child Auth** (https://spacechild.love): set BOTH `SPACECHILD_CLIENT_ID` and `SPACECHILD_CLIENT_SECRET`. App auto-switches issuer + uses the secret. Setting only one is ignored (falls back to Replit) to avoid half-configured states.
-- **Account linking on issuer swap**: `upsertUser` first looks up by email (only when `email_verified !== false`) and updates that row in place, preserving the existing `users.id`. Keeps FK references like `agents.ownerId` stable across an issuer change.
-
-To register KAX in Space Child: confidential client, grants `authorization_code` + `refresh_token`, response type `code`, scopes `openid profile email offline_access`, redirect URI `https://<your-kax-domain>/api/callback`.
 
 ### curl recipe (wallet flow end-to-end)
 

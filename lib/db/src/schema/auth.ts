@@ -15,9 +15,11 @@ export const sessionsTable = pgTable(
 export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
 
 // Auth provider — which credential issued this user's identity.
-// `replit` = legacy OIDC (Replit/SpaceChild). `wallet` = SIWE EIP-4361.
-// `obc_agent` = OBC artifact-as-proof flow (post 2026-05-11).
-export const authProviderEnum = pgEnum("auth_provider", ["replit", "wallet", "obc_agent"]);
+// `wallet` = SIWE EIP-4361 (canonical, post task #24). `obc_agent` =
+// OBC artifact-as-proof flow, retained for grandfathered rows whose
+// session was minted before the wallet-primary refactor (task #21).
+// The legacy `replit` OIDC variant was dropped in migration 0003.
+export const authProviderEnum = pgEnum("auth_provider", ["wallet", "obc_agent"]);
 
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 // Extended 2026-05-11 with walletAddress + obcBotId for the new auth
@@ -40,7 +42,7 @@ export const usersTable = pgTable("users", {
   // obcBotId.
   walletAddress: varchar("wallet_address").unique(),
   obcBotId: varchar("obc_bot_id").unique(),
-  authProvider: authProviderEnum("auth_provider").notNull().default("replit"),
+  authProvider: authProviderEnum("auth_provider").notNull().default("wallet"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

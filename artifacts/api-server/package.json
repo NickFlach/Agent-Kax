@@ -18,7 +18,6 @@
     "drizzle-orm": "catalog:",
     "ethers": "^6.13.4",
     "express": "^5",
-    "openid-client": "^6.8.4",
     "pino": "^9",
     "pino-http": "^10"
   },

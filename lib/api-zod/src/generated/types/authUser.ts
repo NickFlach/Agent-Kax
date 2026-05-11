@@ -28,7 +28,7 @@ export interface AuthUser {
    */
   walletAddress?: string | null;
   /**
-   * Auth provider for the active session (wallet, oidc, obc_agent)
+   * Auth provider for the active session (wallet, obc_agent)
    * @nullable
    */
   provider?: string | null;

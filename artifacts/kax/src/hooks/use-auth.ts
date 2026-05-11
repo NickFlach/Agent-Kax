@@ -61,7 +61,7 @@ export function useAuth(): AuthState {
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/logout", { method: "GET", credentials: "include", redirect: "manual" }).catch(
+      await fetch("/api/logout", { method: "POST", credentials: "include" }).catch(
         () => undefined,
       );
     } finally {
