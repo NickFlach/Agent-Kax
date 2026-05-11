@@ -236,6 +236,37 @@ export async function listPartnerArtifacts(opts: {
   return { artifacts, next_cursor };
 }
 
+/**
+ * Look up a single artifact by its OBC UUID. Used by the agent-auth
+ * verification flow to confirm a challenge phrase landed in an
+ * artifact owned by the claimed agent. Returns null on 404; throws on
+ * any other error (network, partner API down, malformed response) so
+ * callers can distinguish "artifact doesn't exist" from "we couldn't
+ * check".
+ */
+export interface PartnerArtifactDetail {
+  id: string;
+  creator_bot_id?: string | null;
+  title?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+  [k: string]: unknown;
+}
+
+export async function getPartnerArtifact(artifactUuid: string): Promise<PartnerArtifactDetail | null> {
+  const safe = encodeURIComponent(artifactUuid);
+  try {
+    const res = await partnerFetch(`/artifacts/${safe}`);
+    const json = (await res.json()) as { success?: boolean; data?: Record<string, unknown> } | Record<string, unknown>;
+    const data = (json as { data?: Record<string, unknown> }).data ?? json;
+    if (!data || typeof data !== "object") return null;
+    return data as PartnerArtifactDetail;
+  } catch (err) {
+    if (err instanceof PartnerApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 export interface PartnerAgentProfile {
   slug: string;
   display_name: string;

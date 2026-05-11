@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import authRouter from "./auth";
+import authWalletRouter from "./auth-wallet";
+import authAgentRouter from "./auth-agent";
 import adminRouter from "./admin";
 import artifactsRouter from "./artifacts";
 import dropsRouter from "./drops";
@@ -18,6 +20,8 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+router.use(authWalletRouter);
+router.use(authAgentRouter);
 router.use(adminRouter);
 router.use(artifactsRouter);
 router.use(dropsRouter);

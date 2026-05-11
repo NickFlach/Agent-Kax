@@ -33,6 +33,17 @@ async function refreshIfExpired(
   const now = Math.floor(Date.now() / 1000);
   if (!session.expires_at || now <= session.expires_at) return session;
 
+  // Non-OIDC sessions (wallet, OBC agent) carry a synthetic access_token
+  // of the shape "wallet:<userId>" or "obc_agent:<userId>" with no
+  // refresh_token — they can't be refreshed against an issuer. When
+  // they hit their expires_at, surface as null so authMiddleware
+  // clears the cookie and the user re-signs / re-verifies.
+  const isOidcSession =
+    typeof session.access_token === "string" &&
+    !session.access_token.startsWith("wallet:") &&
+    !session.access_token.startsWith("obc_agent:");
+  if (!isOidcSession) return null;
+
   if (!session.refresh_token) return null;
 
   try {
