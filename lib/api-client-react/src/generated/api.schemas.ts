@@ -70,8 +70,11 @@ export interface AgentChallengeRequest {
 }
 
 export interface AgentChallengeResponse {
-  phrase: string;
+  /** Verification phrase the user must publish from their OBC bot */
+  challenge: string;
   expiresAt: string;
+  /** Human-readable instructions for completing the challenge */
+  instruction: string;
 }
 
 export interface AgentVerifyRequest {
@@ -88,6 +91,11 @@ export interface UserBot {
 }
 
 export interface UserBotsResponse {
+  bots: UserBot[];
+}
+
+export interface AgentVerifyResponse {
+  ok: boolean;
   bots: UserBot[];
 }
 

@@ -28,6 +28,7 @@ import type {
   AgentStorefrontLanding,
   AgentStorefrontSettings,
   AgentVerifyRequest,
+  AgentVerifyResponse,
   Artifact,
   ArtifactListResponse,
   ArtifactMintState,
@@ -518,8 +519,8 @@ export const getVerifyAgentChallengeUrl = () => {
 export const verifyAgentChallenge = async (
   agentVerifyRequest: AgentVerifyRequest,
   options?: RequestInit,
-): Promise<UserBotsResponse> => {
-  return customFetch<UserBotsResponse>(getVerifyAgentChallengeUrl(), {
+): Promise<AgentVerifyResponse> => {
+  return customFetch<AgentVerifyResponse>(getVerifyAgentChallengeUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },

@@ -137,11 +137,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserBotsResponse'
+                $ref: '#/components/schemas/AgentVerifyResponse'
         '400':
-          description: Verification failed (creator mismatch, missing phrase, pre-dated artifact, expired challenge)
+          description: Verification failed (bad UUID format)
         '401':
-          description: Auth required
+          description: No active challenge or auth required
+        '403':
+          description: Creator mismatch, missing phrase, or pre-dated artifact
+        '404':
+          description: Artifact not found on partner API
+        '409':
+          description: Bot already attached to a different account
+        '502':
+          description: Partner API error
   /auth/bots:
     get:
       tags: [Auth]
@@ -1454,13 +1462,17 @@ components:
           type: string
     AgentChallengeResponse:
       type: object
-      required: [phrase, expiresAt]
+      required: [challenge, expiresAt, instruction]
       properties:
-        phrase:
+        challenge:
           type: string
+          description: Verification phrase the user must publish from their OBC bot
         expiresAt:
           type: string
           format: date-time
+        instruction:
+          type: string
+          description: Human-readable instructions for completing the challenge
     AgentVerifyRequest:
       type: object
       required: [obcBotId, artifactUuid]
@@ -1486,6 +1498,16 @@ components:
       type: object
       required: [bots]
       properties:
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserBot'
+    AgentVerifyResponse:
+      type: object
+      required: [ok, bots]
+      properties:
+        ok:
+          type: boolean
         bots:
           type: array
           items:

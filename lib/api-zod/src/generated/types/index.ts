@@ -26,6 +26,7 @@ export * from "./agentStorefrontSettingsCustomCssVars";
 export * from "./agentStorefrontSettingsSocialLinks";
 export * from "./agentStorefrontSettingsThemeVariant";
 export * from "./agentVerifyRequest";
+export * from "./agentVerifyResponse";
 export * from "./artifact";
 export * from "./artifactArtifactType";
 export * from "./artifactEditionType";

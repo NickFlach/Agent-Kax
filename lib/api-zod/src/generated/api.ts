@@ -121,8 +121,13 @@ export const CreateAgentChallengeBody = zod.object({
 });
 
 export const CreateAgentChallengeResponse = zod.object({
-  phrase: zod.string(),
+  challenge: zod
+    .string()
+    .describe("Verification phrase the user must publish from their OBC bot"),
   expiresAt: zod.coerce.date(),
+  instruction: zod
+    .string()
+    .describe("Human-readable instructions for completing the challenge"),
 });
 
 /**
@@ -134,6 +139,7 @@ export const VerifyAgentChallengeBody = zod.object({
 });
 
 export const VerifyAgentChallengeResponse = zod.object({
+  ok: zod.boolean(),
   bots: zod.array(
     zod.object({
       id: zod.string(),

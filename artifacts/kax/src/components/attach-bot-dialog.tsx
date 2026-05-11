@@ -31,7 +31,7 @@ export function AttachBotDialog({ open, onOpenChange }: Props) {
   const challengeMut = useCreateAgentChallenge({
     mutation: {
       onSuccess: (data) => {
-        setPhrase(data.phrase);
+        setPhrase(data.challenge);
         setExpiresAt(data.expiresAt);
         setStep(2);
       },

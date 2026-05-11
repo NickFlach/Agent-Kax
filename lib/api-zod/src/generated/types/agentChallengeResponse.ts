@@ -7,6 +7,9 @@
  */
 
 export interface AgentChallengeResponse {
-  phrase: string;
+  /** Verification phrase the user must publish from their OBC bot */
+  challenge: string;
   expiresAt: Date;
+  /** Human-readable instructions for completing the challenge */
+  instruction: string;
 }
