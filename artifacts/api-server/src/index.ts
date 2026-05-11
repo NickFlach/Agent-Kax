@@ -8,6 +8,27 @@ import { registerAllEventHandlers } from "./lib/eventHandlers";
 
 registerAllEventHandlers();
 
+// Fail-fast on missing/blank critical secrets. Previously these were
+// read inside routes and an empty string just made webhooks silently
+// fail signature verification — which looks identical to a normal 401
+// in logs and is impossible to debug. Validate at boot instead.
+const requiredSecrets = ["OBC_WEBHOOK_SECRET", "OBC_PARTNER_API_KEY"];
+const missingSecrets = requiredSecrets.filter((k) => {
+  const v = process.env[k];
+  return v == null || String(v).trim() === "";
+});
+if (missingSecrets.length > 0) {
+  // In production this is fatal. In dev (NODE_ENV != production) we
+  // warn so a developer running locally without OBC credentials can
+  // still boot the API for non-webhook work.
+  if (process.env["NODE_ENV"] === "production") {
+    logger.error({ missing: missingSecrets }, "Missing required secrets — refusing to start");
+    process.exit(1);
+  } else {
+    logger.warn({ missing: missingSecrets }, "Missing secrets (non-production — continuing)");
+  }
+}
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {

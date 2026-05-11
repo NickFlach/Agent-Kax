@@ -24,6 +24,12 @@ function parseRecordMintBody(body: unknown): { ok: true; data: RecordMintInput }
   if (!Number.isInteger(chainId) || chainId <= 0) {
     return { ok: false, error: "chainId must be a positive integer" };
   }
+  // EVM chainIds are in EIP-155 spec a uint256 on chain but in practice
+  // never exceed ~2^31. Cap at JS safe-int / a sane upper bound so a
+  // typo doesn't write 9999999999 into the DB.
+  if (chainId > 2_147_483_647) {
+    return { ok: false, error: "chainId out of range (>2147483647)" };
+  }
   const contractAddress = typeof b["contractAddress"] === "string" ? (b["contractAddress"] as string) : "";
   if (!HEX_ADDR.test(contractAddress)) {
     return { ok: false, error: "contractAddress must be 0x + 40 hex" };
@@ -31,6 +37,14 @@ function parseRecordMintBody(body: unknown): { ok: true; data: RecordMintInput }
   const tokenId = typeof b["tokenId"] === "string" ? (b["tokenId"] as string).trim() : "";
   if (tokenId.length === 0 || tokenId.length > 78) {
     return { ok: false, error: "tokenId must be a non-empty string (<=78 chars)" };
+  }
+  // tokenId is on-chain a uint256 — must be a decimal integer string.
+  // Anything else (e.g. "0xabc", "1e10", "1.5") is the wrong shape and
+  // will not match the on-chain token. Previously we accepted any 78-char
+  // string, so a "1e10"-shaped typo silently stored garbage and the
+  // metadata URI pointed nowhere.
+  if (!/^[0-9]+$/.test(tokenId)) {
+    return { ok: false, error: "tokenId must be a decimal integer string" };
   }
   const txHash = typeof b["txHash"] === "string" ? (b["txHash"] as string) : "";
   if (!HEX_TX.test(txHash)) {
@@ -80,7 +94,13 @@ router.get("/nft/metadata/:artifactId.json", async (req, res) => {
       { trait_type: "Edition", value: a.editionType },
       { trait_type: "Type", value: a.artifactType },
       { trait_type: "OpenBotCity UUID", value: a.obcArtifactUuid ?? a.externalId },
-      ...(a.kannakaScore !== null
+      // Kannaka Score trait — guard against null, undefined, NaN, and
+      // ±Infinity. Previously only `!== null` was checked, so a NaN
+      // kannakaScore (which can sneak in if a future computeScore
+      // returns NaN from a divide-by-zero) silently shipped a trait
+      // with value: NaN that JSON-stringifies to `null` and confuses
+      // NFT marketplaces that expect a number.
+      ...(typeof a.kannakaScore === "number" && Number.isFinite(a.kannakaScore)
         ? [{ trait_type: "Kannaka Score", value: Math.round(a.kannakaScore * 100), display_type: "number" as const }]
         : []),
       ...(a.transmissionId

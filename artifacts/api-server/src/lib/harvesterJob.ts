@@ -154,6 +154,7 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
         if (page.events.length === 0) break;
         totalSeen += page.events.length;
 
+        let consecutiveFailures = 0;
         for (const ev of page.events) {
           try {
             const result = await dispatchPartnerEvent({
@@ -166,9 +167,24 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
             cursor = ev.event_uuid;
             await recordEventCursor(cursor);
             if (result.status === "handled" || result.status === "unhandled") processed++;
+            consecutiveFailures = 0;
           } catch (err) {
-            logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed; will retry on next startup");
-            return;
+            // Single-event failure during replay shouldn't kill the
+            // entire startup replay — previously a `return` here
+            // abandoned every remaining event type, which silently
+            // dropped data for hours until the next restart. Skip the
+            // bad event, advance the cursor so we don't reprocess it,
+            // and continue. Only bail (break to outer loop) after 5
+            // consecutive failures in this type — that's a real
+            // upstream problem, not a one-off bad event.
+            logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed — skipping event");
+            cursor = ev.event_uuid;
+            await recordEventCursor(cursor).catch(() => {});
+            consecutiveFailures++;
+            if (consecutiveFailures >= 5) {
+              logger.warn({ eventType, consecutiveFailures }, "5 consecutive replay failures — skipping rest of this event type");
+              throw err; // breaks to outer catch, continues to next type
+            }
           }
         }
 

@@ -140,8 +140,12 @@ router.post("/artifacts/:id/narrate", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Not authorized to modify this artifact" });
     return;
   }
-  const transmissionNum = Math.floor(Math.random() * 999) + 1;
-  const transmissionId = `TX-${String(transmissionNum).padStart(3, "0")}`;
+  // Transmission id: previously `TX-NNN` with N in 1..999 chosen at
+  // random — collides with surprising regularity once you have a few
+  // hundred artifacts. Use the artifact id itself (monotonic, unique by
+  // construction) padded to at least 3 digits. Cosmetic: keep the
+  // TX- prefix so the rest of the UI doesn't need to know.
+  const transmissionId = `TX-${String(a.id).padStart(3, "0")}`;
 
   const narrativePrefixes = [
     "A synthetic memory fragment from a city that no longer exists",

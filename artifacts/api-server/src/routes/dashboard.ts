@@ -117,17 +117,22 @@ router.get("/dashboard/recent-activity", requireAuth, async (req, res) => {
 
 router.get("/dashboard/score-distribution", requireAuth, async (req, res) => {
   const ownerScope = await getOwnerScope(req);
+  // Buckets are half-open [min, max) except the top bucket which is the
+  // closed [0.8, 1.0] so an artifact scoring exactly 1.0 lands in it
+  // (previously a hacky 1.01 max with strict < meant 1.0 ended up
+  // outside any bucket on some PG numeric types).
   const buckets = [
-    { range: "0.0-0.2", min: 0, max: 0.2 },
-    { range: "0.2-0.4", min: 0.2, max: 0.4 },
-    { range: "0.4-0.6", min: 0.4, max: 0.6 },
-    { range: "0.6-0.8", min: 0.6, max: 0.8 },
-    { range: "0.8-1.0", min: 0.8, max: 1.01 },
+    { range: "0.0-0.2", min: 0, max: 0.2, inclusive: false },
+    { range: "0.2-0.4", min: 0.2, max: 0.4, inclusive: false },
+    { range: "0.4-0.6", min: 0.4, max: 0.6, inclusive: false },
+    { range: "0.6-0.8", min: 0.6, max: 0.8, inclusive: false },
+    { range: "0.8-1.0", min: 0.8, max: 1.0, inclusive: true },
   ];
 
   const results = await Promise.all(
     buckets.map(async (bucket) => {
-      const baseCond = sql`${artifactsTable.kannakaScore} >= ${bucket.min} AND ${artifactsTable.kannakaScore} < ${bucket.max}`;
+      const upperOp = bucket.inclusive ? sql`<=` : sql`<`;
+      const baseCond = sql`${artifactsTable.kannakaScore} >= ${bucket.min} AND ${artifactsTable.kannakaScore} ${upperOp} ${bucket.max}`;
       const where = ownerScope !== null ? and(baseCond, eq(artifactsTable.ownerId, ownerScope)) : baseCond;
       const result = await db
         .select({ count: count() })

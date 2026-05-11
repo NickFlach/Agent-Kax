@@ -46,12 +46,44 @@ export function decayedHeatSignal(input: {
   return Math.tanh(decayed / 10);
 }
 
+// FNV-1a 32-bit hash of a string. Cheap, deterministic, no crypto needed
+// for what is effectively a per-artifact seed. Same string in → same
+// number out, every time.
+function fnv1a32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h >>> 0;
+}
+
+// Linear-congruential PRNG seeded from a 32-bit integer. Returns a
+// stream of floats in [0, 1). Drift-free determinism: same seed →
+// same sequence, forever. Replaces Math.random() so an artifact's
+// score is reproducible from its (id, createdAt) tuple.
+function lcgFloats(seed: number): () => number {
+  let s = seed >>> 0;
+  if (s === 0) s = 0x9e3779b9;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
 export function computeScore(input: {
   reactionCount: number;
   editionType: string;
   heat?: number;
   lastReactionAt?: Date | null;
   now?: Date;
+  /** Artifact id (or uuid). Required for deterministic scoring; if
+   *  omitted, scoring falls back to non-deterministic Math.random for
+   *  one-off / test paths that don't have a stable id yet. */
+  id?: number | string | null;
+  /** Stable creation time. Folded into the seed so the same id at
+   *  different creation moments doesn't accidentally collide. */
+  createdAt?: Date | string | null;
 }): { kannakaScore: number; rarityScore: number; breakdown: ScoreBreakdown } {
   const reactionSignal = Math.min(input.reactionCount / 100, 1);
   const heatSignal = decayedHeatSignal({
@@ -59,14 +91,26 @@ export function computeScore(input: {
     lastReactionAt: input.lastReactionAt ?? null,
     now: input.now,
   });
-  const novelty = Math.random() * 0.3;
-  const exploration = Math.random() * 0.1;
+  // Deterministic PRNG. The "novelty" and "exploration" are score
+  // jitter, but each artifact deserves a FIXED jitter that doesn't
+  // change between calls — otherwise rescoring the same artifact two
+  // ticks apart produces different finalScores and breaks auditing.
+  let rand: () => number;
+  if (input.id != null) {
+    const seedSrc =
+      `${input.id}|${input.createdAt instanceof Date ? input.createdAt.toISOString() : (input.createdAt ?? "")}`;
+    rand = lcgFloats(fnv1a32(seedSrc));
+  } else {
+    rand = Math.random;
+  }
+  const novelty = rand() * 0.3;
+  const exploration = rand() * 0.1;
   // Reactions and heat together carry the social weight, then novelty/exploration on top.
   const baseScore = reactionSignal * 0.35 + heatSignal * 0.25 + novelty + exploration + 0.1;
   const scarcityMultiplier = SCARCITY_MULTIPLIERS[input.editionType] ?? 1.0;
   const finalScore = Math.min(baseScore * scarcityMultiplier, 1);
   const rarityScore = Math.min(
-    (Math.random() * 0.4 + 0.3) * scarcityMultiplier,
+    (rand() * 0.4 + 0.3) * scarcityMultiplier,
     1,
   );
   return {
@@ -93,6 +137,8 @@ export async function runTasteEngineFor(id: number): Promise<void> {
     editionType: a.editionType,
     heat: a.heat,
     lastReactionAt: a.lastReactionAt,
+    id: a.id,
+    createdAt: a.createdAt,
   });
 
   await db
