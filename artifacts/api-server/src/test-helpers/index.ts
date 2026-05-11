@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import pino, { type Logger } from "pino";
 import { db } from "@workspace/db";
 import {
@@ -8,8 +8,12 @@ import {
   dmsTable,
   matchesTable,
   activitiesTable,
+  authChallengesTable,
+  userBotsTable,
+  sessionsTable,
 } from "@workspace/db/schema";
 import { inArray, like, or } from "drizzle-orm";
+import { createSession } from "../lib/auth";
 
 const TEST_PREFIX = "kax-test-";
 
@@ -94,4 +98,74 @@ export async function cleanupTestData(): Promise<void> {
 export async function deleteUsersByIds(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   await db.delete(usersTable).where(inArray(usersTable.id, ids));
+}
+
+/** Generate a deterministic-looking 0x + 40 hex test wallet address. */
+export function makeTestAddress(): string {
+  return `0x${randomBytes(20).toString("hex")}`;
+}
+
+/** Generate a v4-shaped UUID (the format OBC uses for bot/artifact ids). */
+export function makeBotUuid(): string {
+  return randomUUID();
+}
+
+/**
+ * Create a wallet-provider user row + an open `wallet:<userId>` session, ready
+ * to be sent as a Cookie header through the real authMiddleware →
+ * requireWalletAuth chain. The user's id is test-prefixed so cleanupTestData()
+ * collects it (which also cascades user_bots).
+ */
+export async function createWalletUser(): Promise<{
+  id: string;
+  address: string;
+  sid: string;
+}> {
+  const id = makeTestId("wallet-user");
+  const address = makeTestAddress();
+  await db.insert(usersTable).values({
+    id,
+    walletAddress: address.toLowerCase(),
+    authProvider: "wallet",
+    displayName: `0x…${address.slice(-4)}`,
+  });
+  const sid = await createSession({
+    user: { id, email: null, firstName: null, lastName: null, profileImageUrl: null },
+    access_token: `wallet:${id}`,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  return { id, address: address.toLowerCase(), sid };
+}
+
+/** Best-effort cleanup of every auth-flow row that may have been touched. */
+export async function cleanupAuthTestData(opts: {
+  addresses?: string[];
+  userIds?: string[];
+  sids?: string[];
+} = {}): Promise<void> {
+  const addrs = (opts.addresses ?? []).map((a) => a.toLowerCase());
+  const userIds = opts.userIds ?? [];
+  const sids = opts.sids ?? [];
+  if (sids.length > 0) {
+    await db.delete(sessionsTable).where(inArray(sessionsTable.sid, sids));
+  }
+  if (userIds.length > 0) {
+    // user_bots cascades from users; clear authChallenges keyed on userId
+    // (subject = `<userId>:<botId>`) by LIKE-prefix sweep.
+    for (const uid of userIds) {
+      await db
+        .delete(authChallengesTable)
+        .where(like(authChallengesTable.claimSubject, `${uid}:%`));
+    }
+  }
+  if (addrs.length > 0) {
+    await db
+      .delete(authChallengesTable)
+      .where(inArray(authChallengesTable.claimSubject, addrs));
+    await db.delete(userBotsTable).where(inArray(userBotsTable.obcBotId, addrs));
+    await db.delete(usersTable).where(inArray(usersTable.walletAddress, addrs));
+  }
+  if (userIds.length > 0) {
+    await db.delete(usersTable).where(inArray(usersTable.id, userIds));
+  }
 }
