@@ -54,9 +54,12 @@ router.post("/auth/agent/challenge", requireWalletAuth, async (req, res) => {
     res.status(409).json({ error: "this bot is already attached to a different account" });
     return;
   }
-  // Sweep expired rows for this subject. Bounded, cheap.
+  // Sweep expired rows for this user+bot subject. Bounded, cheap.
+  // Subject format is `${userId}:${obcBotId}` (composite) — matches
+  // what we write below in `claimSubject`.
   await db.delete(authChallengesTable).where(and(
     eq(authChallengesTable.kind, "agent_challenge"),
+    eq(authChallengesTable.claimSubject, `${req.user!.id}:${obcBotId.toLowerCase()}`),
     lt(authChallengesTable.expiresAt, new Date()),
   ));
   const challenge = generateChallenge();
@@ -222,7 +225,8 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
       })
       .onConflictDoNothing({ target: userBotsTable.obcBotId });
   } catch (err) {
-    res.status(500).json({ error: `failed to attach bot: ${(err as Error).message ?? err}` });
+    req.log.error({ err, userId, obcBotId }, "user_bots insert failed");
+    res.status(500).json({ error: "failed to attach bot" });
     return;
   }
   const [stored] = await db
@@ -235,7 +239,7 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
     return;
   }
 
-  // Return the user's full attached-bot list.
+  // Return the user's full attached-bot list, ordered for stable UX.
   const bots = await db
     .select({
       id: userBotsTable.id,
@@ -244,7 +248,8 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
       attachedAt: userBotsTable.attachedAt,
     })
     .from(userBotsTable)
-    .where(eq(userBotsTable.userId, userId));
+    .where(eq(userBotsTable.userId, userId))
+    .orderBy(userBotsTable.attachedAt);
   res.json({ ok: true, bots });
 });
 

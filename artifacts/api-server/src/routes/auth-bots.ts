@@ -19,7 +19,8 @@ router.get("/auth/bots", requireAuth, async (req, res) => {
       attachedAt: userBotsTable.attachedAt,
     })
     .from(userBotsTable)
-    .where(eq(userBotsTable.userId, req.user!.id));
+    .where(eq(userBotsTable.userId, req.user!.id))
+    .orderBy(userBotsTable.attachedAt);
   res.json({ bots });
 });
 
