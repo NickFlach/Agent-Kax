@@ -12,6 +12,7 @@ import dashboardRouter from "./dashboard";
 import shareRouter from "./share";
 import webhooksRouter from "./webhooks";
 import partnerEventsRouter from "./partner-events";
+import nftRouter from "./nft";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(dashboardRouter);
 router.use(shareRouter);
 router.use(webhooksRouter);
 router.use(partnerEventsRouter);
+router.use(nftRouter);
 
 export default router;

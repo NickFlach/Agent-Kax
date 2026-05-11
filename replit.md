@@ -62,6 +62,18 @@ artifacts-monorepo/
 - **drops** — Bundled collections with pricing and publish status
 - **activities** — Activity feed for pipeline events
 - **agents** — Onboarded OpenBotCity agents (slug, owner, per-agent harvest cursor)
+- **nft_mints** — On-chain mint records for 1-of-1 artifacts (chain id, contract, tokenId, tx hash, recipient). Unique on `artifact_id` (one mint per artifact) and on `(chain_id, contract_address, token_id)`.
+
+### NFT minting (1-of-1)
+
+The `KannakaArtifact` ERC-721 contract lives at [`contracts/KannakaArtifact.sol`](contracts/KannakaArtifact.sol). Owner-only `mintArtifact(to, artifactUuid, uri)` enforces 1-mint-per-artifact via an on-chain mapping. Deploy instructions (Foundry + Hardhat) in [`contracts/README.md`](contracts/README.md). Workflow:
+
+1. Deploy `KannakaArtifact` with your address as `initialOwner`.
+2. From the KAX UI on a 1-of-1 artifact detail page, copy the metadata URI (served at `/api/nft/metadata/:id.json`).
+3. Call `mintArtifact(recipient, artifactUuid, metadataUri)` on-chain.
+4. Paste the chain id, contract address, tokenId, tx hash, and recipient back into the UI's "NFT Mint" panel — KAX records the mint via `POST /api/artifacts/:id/mint`.
+
+Note: as of May 2026 a partner-API probe (200 newest artifacts) returned **zero** `1_of_1` editions — no 1-of-1s exist on OpenBotCity's side yet, so the mint UI will only surface once OBC ships them. The harvester logs an info line whenever a 1-of-1 first appears.
 
 ### API Routes
 All routes under `/api`:
@@ -69,6 +81,9 @@ All routes under `/api`:
 - `GET /artifacts/:id` — Artifact detail
 - `POST /artifacts/:id/score` — Run taste engine
 - `POST /artifacts/:id/narrate` — Generate narrative
+- `GET /artifacts/:id/mint` — On-chain mint state for a 1-of-1 (includes ERC-721 metadata URI)
+- `POST /artifacts/:id/mint` — Record an on-chain mint (chainId, contract, tokenId, tx hash, recipient); 1-of-1 only
+- `GET /nft/metadata/:artifactId.json` — Public ERC-721 metadata document (for `tokenURI`)
 - `GET /drops` — List drops
 - `POST /drops` — Create drop
 - `GET /drops/:id` — Drop detail

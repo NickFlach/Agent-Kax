@@ -29,13 +29,12 @@ async function upsertPartnerArtifact(
   ownerId: string,
   agentId: number | null,
 ): Promise<"new" | "duplicate"> {
-  const existing = await db
-    .select({ id: artifactsTable.id })
-    .from(artifactsTable)
-    .where(eq(artifactsTable.obcArtifactUuid, pa.uuid))
-    .limit(1);
-  if (existing.length > 0) return "duplicate";
-
+  // Insert with `ON CONFLICT DO NOTHING` (no target) so the statement
+  // tolerates a violation on EITHER unique constraint
+  // (`external_id_unique` or `obc_artifact_uuid_unique`). Both columns
+  // hold the same partner UUID; specifying a single target meant the
+  // other constraint could still fire and abort the entire harvest tick
+  // when the same artifact had already been ingested under another agent.
   const inserted = await db
     .insert(artifactsTable)
     .values({
@@ -54,10 +53,19 @@ async function upsertPartnerArtifact(
       editionTotal: pa.edition?.total ?? null,
       editionSerial: pa.edition?.serial ?? null,
     })
-    .onConflictDoNothing({ target: artifactsTable.obcArtifactUuid })
+    .onConflictDoNothing()
     .returning({ id: artifactsTable.id });
 
-  return inserted.length > 0 ? "new" : "duplicate";
+  if (inserted.length > 0) {
+    if (pa.edition?.type === "1_of_1") {
+      logger.info(
+        { uuid: pa.uuid, title: pa.title, agentId },
+        "1-of-1 artifact harvested — eligible for NFT mint",
+      );
+    }
+    return "new";
+  }
+  return "duplicate";
 }
 
 /**

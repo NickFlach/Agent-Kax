@@ -27,6 +27,8 @@ tags:
     description: OpenBotCity agent onboarding and per-agent dashboards
   - name: inbox
     description: Partner-driven proposals, DMs, and matches
+  - name: nft
+    description: 1-of-1 NFT minting + token metadata
 
 paths:
   /healthz:
@@ -76,6 +78,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationPrefs'
+  /nft/metadata/{artifactId}.json:
+    get:
+      tags: [nft]
+      operationId: getNftMetadata
+      summary: ERC-721 metadata document for an artifact
+      description: Public JSON metadata served at the URL embedded in the on-chain `tokenURI`.
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ERC-721 metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NftMetadata'
+        '404':
+          description: Artifact not found
+  /artifacts/{id}/mint:
+    get:
+      tags: [nft]
+      operationId: getArtifactMint
+      summary: Get the recorded on-chain mint for a 1-of-1 artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Mint state (mint may be null if not yet minted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactMintState'
+    post:
+      tags: [nft]
+      operationId: recordArtifactMint
+      summary: Record an on-chain mint for a 1-of-1 artifact
+      description: |
+        Call this after deploying the `KannakaArtifact` contract and
+        successfully calling its `mintArtifact(...)` function. Stores
+        the chain id, contract address, tokenId, tx hash, and recipient
+        so the storefront can surface the live NFT.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordMintBody'
+      responses:
+        '201':
+          description: Mint recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactMintState'
+        '409':
+          description: Artifact is not a 1-of-1, or already minted
   /login:
     get:
       tags: [Auth]
@@ -1216,6 +1287,85 @@ components:
           enum: [user, admin]
         notificationPrefs:
           $ref: '#/components/schemas/NotificationPrefs'
+    NftMetadata:
+      type: object
+      required: [name, description, image, attributes]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        image:
+          type: string
+        external_url:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: object
+            required: [trait_type, value]
+            properties:
+              trait_type:
+                type: string
+              value:
+                oneOf:
+                  - type: string
+                  - type: number
+              display_type:
+                type: string
+    NftMint:
+      type: object
+      required: [id, artifactId, chainId, contractAddress, tokenId, txHash, mintedToAddress, mintedAt]
+      properties:
+        id:
+          type: integer
+        artifactId:
+          type: integer
+        chainId:
+          type: integer
+        contractAddress:
+          type: string
+        tokenId:
+          type: string
+        txHash:
+          type: string
+        mintedToAddress:
+          type: string
+        metadataUri:
+          type: string
+          nullable: true
+        mintedAt:
+          type: string
+          format: date-time
+    ArtifactMintState:
+      type: object
+      required: [artifactId, editionType, metadataUri]
+      properties:
+        artifactId:
+          type: integer
+        editionType:
+          type: string
+          enum: [open, limited, "1_of_1"]
+        metadataUri:
+          type: string
+        mint:
+          allOf:
+            - $ref: '#/components/schemas/NftMint'
+          nullable: true
+    RecordMintBody:
+      type: object
+      required: [chainId, contractAddress, tokenId, txHash, mintedToAddress]
+      properties:
+        chainId:
+          type: integer
+        contractAddress:
+          type: string
+        tokenId:
+          type: string
+        txHash:
+          type: string
+        mintedToAddress:
+          type: string
     NotificationPrefs:
       type: object
       required: [emailOnProposal, emailOnDm]

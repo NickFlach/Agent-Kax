@@ -13,16 +13,6 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
     return;
   }
 
-  const existing = await db
-    .select({ id: artifactsTable.id })
-    .from(artifactsTable)
-    .where(eq(artifactsTable.obcArtifactUuid, pa.uuid))
-    .limit(1);
-  if (existing.length > 0) {
-    log.info({ uuid: pa.uuid }, "artifact.created already ingested, skipping");
-    return;
-  }
-
   const editionType = pa.edition?.type ?? "open";
 
   const creatorSlug = pa.creator?.id ?? null;
@@ -58,10 +48,19 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
       editionTotal: pa.edition?.total ?? null,
       editionSerial: pa.edition?.serial ?? null,
     })
-    .onConflictDoNothing({ target: artifactsTable.obcArtifactUuid })
+    .onConflictDoNothing()
     .returning({ id: artifactsTable.id, title: artifactsTable.title });
 
-  if (!inserted[0]) return;
+  if (!inserted[0]) {
+    log.info({ uuid: pa.uuid }, "artifact.created already ingested, skipping");
+    return;
+  }
+  if (editionType === "1_of_1") {
+    log.info(
+      { uuid: pa.uuid, title: inserted[0].title },
+      "1-of-1 artifact webhook ingested — eligible for NFT mint",
+    );
+  }
 
   if (agentId !== null) {
     await db

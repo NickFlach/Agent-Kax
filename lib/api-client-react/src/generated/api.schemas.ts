@@ -37,6 +37,56 @@ export interface AuthUser {
   notificationPrefs?: NotificationPrefs;
 }
 
+export type NftMetadataAttributesItem = {
+  trait_type: string;
+  value: string | number;
+  display_type?: string;
+};
+
+export interface NftMetadata {
+  name: string;
+  description: string;
+  image: string;
+  external_url?: string;
+  attributes: NftMetadataAttributesItem[];
+}
+
+export interface NftMint {
+  id: number;
+  artifactId: number;
+  chainId: number;
+  contractAddress: string;
+  tokenId: string;
+  txHash: string;
+  mintedToAddress: string;
+  metadataUri?: string | null;
+  mintedAt: string;
+}
+
+export type ArtifactMintStateEditionType =
+  (typeof ArtifactMintStateEditionType)[keyof typeof ArtifactMintStateEditionType];
+
+export const ArtifactMintStateEditionType = {
+  open: "open",
+  limited: "limited",
+  "1_of_1": "1_of_1",
+} as const;
+
+export interface ArtifactMintState {
+  artifactId: number;
+  editionType: ArtifactMintStateEditionType;
+  metadataUri: string;
+  mint?: NftMint | null;
+}
+
+export interface RecordMintBody {
+  chainId: number;
+  contractAddress: string;
+  tokenId: string;
+  txHash: string;
+  mintedToAddress: string;
+}
+
 export interface UpdateNotificationPrefsBody {
   emailOnProposal?: boolean;
   emailOnDm?: boolean;

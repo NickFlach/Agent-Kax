@@ -60,6 +60,74 @@ export const UpdateNotificationPrefsResponse = zod.object({
 });
 
 /**
+ * Public JSON metadata served at the URL embedded in the on-chain `tokenURI`.
+ * @summary ERC-721 metadata document for an artifact
+ */
+export const GetNftMetadataParams = zod.object({
+  artifactId: zod.coerce.number(),
+});
+
+export const GetNftMetadataResponse = zod.object({
+  name: zod.string(),
+  description: zod.string(),
+  image: zod.string(),
+  external_url: zod.string().optional(),
+  attributes: zod.array(
+    zod.object({
+      trait_type: zod.string(),
+      value: zod.union([zod.string(), zod.number()]),
+      display_type: zod.string().optional(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get the recorded on-chain mint for a 1-of-1 artifact
+ */
+export const GetArtifactMintParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetArtifactMintResponse = zod.object({
+  artifactId: zod.number(),
+  editionType: zod.enum(["open", "limited", "1_of_1"]),
+  metadataUri: zod.string(),
+  mint: zod
+    .object({
+      id: zod.number(),
+      artifactId: zod.number(),
+      chainId: zod.number(),
+      contractAddress: zod.string(),
+      tokenId: zod.string(),
+      txHash: zod.string(),
+      mintedToAddress: zod.string(),
+      metadataUri: zod.string().nullish(),
+      mintedAt: zod.coerce.date(),
+    })
+    .nullish(),
+});
+
+/**
+ * Call this after deploying the `KannakaArtifact` contract and
+successfully calling its `mintArtifact(...)` function. Stores
+the chain id, contract address, tokenId, tx hash, and recipient
+so the storefront can surface the live NFT.
+
+ * @summary Record an on-chain mint for a 1-of-1 artifact
+ */
+export const RecordArtifactMintParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RecordArtifactMintBody = zod.object({
+  chainId: zod.number(),
+  contractAddress: zod.string(),
+  tokenId: zod.string(),
+  txHash: zod.string(),
+  mintedToAddress: zod.string(),
+});
+
+/**
  * @summary Start the browser OIDC login flow
  */
 export const BeginBrowserLoginQueryParams = zod.object({

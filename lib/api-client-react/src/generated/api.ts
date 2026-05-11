@@ -27,6 +27,7 @@ import type {
   AgentStorefrontSettings,
   Artifact,
   ArtifactListResponse,
+  ArtifactMintState,
   AuthUserEnvelope,
   BeginBrowserLoginParams,
   CreateAgentBody,
@@ -64,6 +65,7 @@ import type {
   MatchListResponse,
   MobileTokenExchangeRequest,
   MobileTokenExchangeSuccess,
+  NftMetadata,
   NotificationPrefs,
   OutboundMessage,
   PartnerSyncStatus,
@@ -71,6 +73,7 @@ import type {
   ProposalDecisionResponse,
   ProposalListResponse,
   ProposalThread,
+  RecordMintBody,
   ReplyMessageBody,
   ScoreDistribution,
   UpdateAdminUserBody,
@@ -324,6 +327,274 @@ export const useUpdateNotificationPrefs = <
   TContext
 > => {
   return useMutation(getUpdateNotificationPrefsMutationOptions(options));
+};
+
+/**
+ * Public JSON metadata served at the URL embedded in the on-chain `tokenURI`.
+ * @summary ERC-721 metadata document for an artifact
+ */
+export const getGetNftMetadataUrl = (artifactId: number) => {
+  return `/api/nft/metadata/${artifactId}.json`;
+};
+
+export const getNftMetadata = async (
+  artifactId: number,
+  options?: RequestInit,
+): Promise<NftMetadata> => {
+  return customFetch<NftMetadata>(getGetNftMetadataUrl(artifactId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetNftMetadataQueryKey = (artifactId: number) => {
+  return [`/api/nft/metadata/${artifactId}.json`] as const;
+};
+
+export const getGetNftMetadataQueryOptions = <
+  TData = Awaited<ReturnType<typeof getNftMetadata>>,
+  TError = ErrorType<void>,
+>(
+  artifactId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getNftMetadata>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetNftMetadataQueryKey(artifactId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getNftMetadata>>> = ({
+    signal,
+  }) => getNftMetadata(artifactId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!artifactId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getNftMetadata>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetNftMetadataQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getNftMetadata>>
+>;
+export type GetNftMetadataQueryError = ErrorType<void>;
+
+/**
+ * @summary ERC-721 metadata document for an artifact
+ */
+
+export function useGetNftMetadata<
+  TData = Awaited<ReturnType<typeof getNftMetadata>>,
+  TError = ErrorType<void>,
+>(
+  artifactId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getNftMetadata>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetNftMetadataQueryOptions(artifactId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get the recorded on-chain mint for a 1-of-1 artifact
+ */
+export const getGetArtifactMintUrl = (id: number) => {
+  return `/api/artifacts/${id}/mint`;
+};
+
+export const getArtifactMint = async (
+  id: number,
+  options?: RequestInit,
+): Promise<ArtifactMintState> => {
+  return customFetch<ArtifactMintState>(getGetArtifactMintUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetArtifactMintQueryKey = (id: number) => {
+  return [`/api/artifacts/${id}/mint`] as const;
+};
+
+export const getGetArtifactMintQueryOptions = <
+  TData = Awaited<ReturnType<typeof getArtifactMint>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getArtifactMint>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetArtifactMintQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getArtifactMint>>> = ({
+    signal,
+  }) => getArtifactMint(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getArtifactMint>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetArtifactMintQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getArtifactMint>>
+>;
+export type GetArtifactMintQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get the recorded on-chain mint for a 1-of-1 artifact
+ */
+
+export function useGetArtifactMint<
+  TData = Awaited<ReturnType<typeof getArtifactMint>>,
+  TError = ErrorType<unknown>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getArtifactMint>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetArtifactMintQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Call this after deploying the `KannakaArtifact` contract and
+successfully calling its `mintArtifact(...)` function. Stores
+the chain id, contract address, tokenId, tx hash, and recipient
+so the storefront can surface the live NFT.
+
+ * @summary Record an on-chain mint for a 1-of-1 artifact
+ */
+export const getRecordArtifactMintUrl = (id: number) => {
+  return `/api/artifacts/${id}/mint`;
+};
+
+export const recordArtifactMint = async (
+  id: number,
+  recordMintBody: RecordMintBody,
+  options?: RequestInit,
+): Promise<ArtifactMintState> => {
+  return customFetch<ArtifactMintState>(getRecordArtifactMintUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(recordMintBody),
+  });
+};
+
+export const getRecordArtifactMintMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordArtifactMint>>,
+    TError,
+    { id: number; data: BodyType<RecordMintBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordArtifactMint>>,
+  TError,
+  { id: number; data: BodyType<RecordMintBody> },
+  TContext
+> => {
+  const mutationKey = ["recordArtifactMint"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordArtifactMint>>,
+    { id: number; data: BodyType<RecordMintBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return recordArtifactMint(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordArtifactMintMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordArtifactMint>>
+>;
+export type RecordArtifactMintMutationBody = BodyType<RecordMintBody>;
+export type RecordArtifactMintMutationError = ErrorType<void>;
+
+/**
+ * @summary Record an on-chain mint for a 1-of-1 artifact
+ */
+export const useRecordArtifactMint = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordArtifactMint>>,
+    TError,
+    { id: number; data: BodyType<RecordMintBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordArtifactMint>>,
+  TError,
+  { id: number; data: BodyType<RecordMintBody> },
+  TContext
+> => {
+  return useMutation(getRecordArtifactMintMutationOptions(options));
 };
 
 /**

@@ -8,6 +8,7 @@ import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
+import { NftMintPanel } from "@/components/nft-mint-panel";
 
 export default function ArtifactDetail() {
   const params = useParams<{ id: string }>();
@@ -214,6 +215,10 @@ export default function ArtifactDetail() {
               </button>
             )}
           </div>
+
+          {artifact.editionType === "1_of_1" && (
+            <NftMintPanel artifactId={artifact.id} />
+          )}
 
           <ShareButtons
             url={`${window.location.origin}/api/share/artifact/${artifact.id}`}
