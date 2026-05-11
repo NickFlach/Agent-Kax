@@ -1,5 +1,3 @@
-import { BrowserProvider } from "ethers";
-
 export interface EthereumProvider {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   isMetaMask?: boolean;
@@ -41,6 +39,3 @@ export function shortAddress(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export function getBrowserProvider(provider: EthereumProvider): BrowserProvider {
-  return new BrowserProvider(provider as unknown as ConstructorParameters<typeof BrowserProvider>[0]);
-}
