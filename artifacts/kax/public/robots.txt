@@ -1,0 +1,9 @@
+# KAX — Kannaka Artifact Exchange
+# Public storefront pages are open to all crawlers; admin pages are
+# behind auth and noindex'd at the app layer, so we don't need to list
+# them here.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://kax.ninja-portal.com/sitemap.xml
