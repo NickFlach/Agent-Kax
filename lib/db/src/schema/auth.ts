@@ -76,3 +76,28 @@ export const authChallengesTable = pgTable(
 );
 
 export type AuthChallenge = typeof authChallengesTable.$inferSelect;
+
+// user_bots — join table mapping a wallet user to one or more OBC bots
+// they've proven ownership of via the agent-verify flow. One bot can
+// only be attached to one wallet (UNIQUE on obcBotId). A wallet can
+// attach many bots.
+//
+// (`users.obcBotId` is preserved for now to grandfather any legacy
+// `obc_agent`-keyed sessions issued before this refactor; it is not
+// used for new attachments. Cleanup happens in the OIDC strip task.)
+export const userBotsTable = pgTable(
+  "user_bots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    obcBotId: varchar("obc_bot_id").notNull().unique(),
+    displayName: varchar("display_name"),
+    attachedAt: timestamp("attached_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_user_bots_user").on(table.userId)],
+);
+
+export type UserBot = typeof userBotsTable.$inferSelect;
+export type InsertUserBot = typeof userBotsTable.$inferInsert;

@@ -119,13 +119,61 @@ All routes under `/api`:
 
 ## Authentication
 
-OIDC is env-driven (single `openid-client` codepath, no per-issuer branching beyond config selection):
+Three coexisting login paths, all minted into the same `users` row + same `sid` session cookie. Wallet is the canonical identity going forward; OIDC is grandfathered until task #24.
+
+### Wallet (primary, EIP-191 SIWE-style)
+
+1. `POST /api/auth/wallet/nonce { address }` → `{ nonce, message, expiresAt }`. The server stores the nonce in `auth_challenges` (kind `wallet_nonce`, subject = lowercased address, single-use, 10 min TTL).
+2. Client signs `message` with `personal_sign` (any EVM wallet — MetaMask, Rabby, WalletConnect, an `ethers.Wallet`).
+3. `POST /api/auth/wallet/verify { address, signature, message }` → atomically marks the nonce consumed (so any failure path — bad sig, wrong address, replay — collapses to a single 401), recovers the signer with `ethers.verifyMessage`, upserts the `users` row keyed on lowercase `wallet_address`, opens a Passport session with `provider: "wallet"`. The wallet user gets `displayName` `0x…last4` by default.
+
+Re-login is wallet-only. The user does NOT have to re-publish a verification artifact — they just sign a fresh nonce.
+
+### OBC bot attachment (secondary — proves bot ownership and links it to a wallet user)
+
+OBC bots no longer log in on their own. A signed-in wallet user attaches one or more bots:
+
+1. `POST /api/auth/agent/challenge { obcBotId }` (auth required) → mints a phrase like `KAX-VERIFY-AB12CD`, valid 30 min. Subject is `${userId}:${obcBotId}` so user A can't redeem user B's challenge. 409s up-front if that bot is already attached to a different account.
+2. User publishes any artifact on OBC from that bot whose title or description contains the phrase.
+3. `POST /api/auth/agent/verify { obcBotId, artifactUuid }` (auth required) → fetches the artifact via the partner API, asserts `creator_bot_id`, phrase substring, `created_at >= challenge.createdAt` (no replay of pre-existing artifacts), atomically consumes the challenge, then `INSERT … ON CONFLICT DO NOTHING` into `user_bots`. Returns the user's full attached-bot list — does NOT issue a new session.
+
+Schema: `user_bots(id, user_id FK→users CASCADE, obc_bot_id UNIQUE, display_name, attached_at)`. The `UNIQUE` on `obc_bot_id` enforces "one bot → at most one wallet". `users.obc_bot_id` is preserved (not dropped) to grandfather any legacy `obc_agent`-keyed sessions issued before this refactor; cleanup is task #24.
+
+Bot management:
+
+- `GET  /api/auth/bots` (auth) → `{ bots: [{ id, obcBotId, displayName, attachedAt }] }`
+- `DELETE /api/auth/bots/:botId` (auth) → detaches; 404 if the user doesn't own that attachment (no info-leak about other users' bots)
+
+### OIDC (legacy, env-driven, scheduled for removal in task #24)
+
+Single `openid-client` codepath, no per-issuer branching beyond config selection:
 
 - **Default**: Replit Auth — `ISSUER_URL` (defaults to `https://replit.com/oidc`), `REPL_ID` as client_id, no client_secret.
-- **Space Child Auth** (https://spacechild.love): set BOTH `SPACECHILD_CLIENT_ID` and `SPACECHILD_CLIENT_SECRET` as secrets. The app auto-switches issuer + uses the secret. Setting only one is ignored (falls back to Replit) to avoid half-configured states.
-- **Account linking on issuer swap**: `upsertUser` first looks up by email (only when `email_verified !== false`) and updates that row in place, preserving the existing `users.id`. This keeps FK references like `agents.ownerId` stable across an issuer change. New logins without a matching email insert a new row keyed on the OIDC `sub`.
+- **Space Child Auth** (https://spacechild.love): set BOTH `SPACECHILD_CLIENT_ID` and `SPACECHILD_CLIENT_SECRET`. App auto-switches issuer + uses the secret. Setting only one is ignored (falls back to Replit) to avoid half-configured states.
+- **Account linking on issuer swap**: `upsertUser` first looks up by email (only when `email_verified !== false`) and updates that row in place, preserving the existing `users.id`. Keeps FK references like `agents.ownerId` stable across an issuer change.
 
-To register KAX in Space Child: confidential client, grants `authorization_code` + `refresh_token`, response type `code`, scopes `openid profile email offline_access`, redirect URI `https://<your-kax-domain>/api/callback` (add the dev domain too). Then drop the credentials into Replit secrets and the swap is live.
+To register KAX in Space Child: confidential client, grants `authorization_code` + `refresh_token`, response type `code`, scopes `openid profile email offline_access`, redirect URI `https://<your-kax-domain>/api/callback`.
+
+### curl recipe (wallet flow end-to-end)
+
+```bash
+ADDR=0x...                                                   # wallet address
+NONCE_RES=$(curl -s -X POST localhost:80/api/auth/wallet/nonce \
+  -H 'Content-Type: application/json' -d "{\"address\":\"$ADDR\"}")
+MESSAGE=$(echo "$NONCE_RES" | jq -r .message)
+SIG=$(node -e "(async()=>{const {ethers}=await import('ethers');\
+  const w=new ethers.Wallet(process.env.PK);\
+  console.log(await w.signMessage(process.argv[1]))})()" "$MESSAGE")
+curl -s -c cookies.txt -X POST localhost:80/api/auth/wallet/verify \
+  -H 'Content-Type: application/json' \
+  -d "{\"address\":\"$ADDR\",\"signature\":\"$SIG\",\"message\":$(jq -Rs . <<<"$MESSAGE")}"
+curl -s -b cookies.txt localhost:80/api/auth/bots                 # attached bots
+curl -s -b cookies.txt -X POST localhost:80/api/auth/agent/challenge \
+  -H 'Content-Type: application/json' -d '{"obcBotId":"<uuid>"}'  # mint phrase
+# ... publish artifact on OBC containing the phrase ...
+curl -s -b cookies.txt -X POST localhost:80/api/auth/agent/verify \
+  -H 'Content-Type: application/json' -d '{"obcBotId":"<uuid>","artifactUuid":"<uuid>"}'
+```
 
 ## Commands
 
