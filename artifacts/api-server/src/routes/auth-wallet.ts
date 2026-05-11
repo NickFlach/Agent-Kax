@@ -67,17 +67,21 @@ router.post("/auth/wallet/nonce", async (req, res) => {
   const nonce = crypto.randomBytes(12).toString("hex");
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + NONCE_TTL_MS);
-  await db.insert(authChallengesTable).values({
-    kind: "wallet_nonce",
-    challenge: nonce,
-    claimSubject: address,
-    consumed: false,
-    expiresAt,
-  });
   const domain = publicDomain(req);
   const uri = `https://${domain}`;
   const message = buildSiweMessage({
     domain, address, nonce, issuedAt: issuedAt.toISOString(), uri,
+  });
+  // Persist the canonical message text alongside the nonce. /verify
+  // reads `payload` and ignores any client-supplied message — that's
+  // the SIWE phishing fix (see migration 0004).
+  await db.insert(authChallengesTable).values({
+    kind: "wallet_nonce",
+    challenge: nonce,
+    payload: message,
+    claimSubject: address,
+    consumed: false,
+    expiresAt,
   });
   res.json({ nonce, message, expiresAt: expiresAt.toISOString() });
 });
@@ -93,23 +97,18 @@ router.post("/auth/wallet/verify", async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const addressRaw = typeof body.address === "string" ? body.address : "";
   const signature = typeof body.signature === "string" ? body.signature : "";
-  const message = typeof body.message === "string" ? body.message : "";
-  if (!ADDRESS_RE.test(addressRaw) || !SIGNATURE_RE.test(signature) || message.length < 50) {
-    res.status(400).json({ error: "address, signature, and message are required" });
+  const nonce = typeof body.nonce === "string" ? body.nonce.toLowerCase() : "";
+  if (!ADDRESS_RE.test(addressRaw) || !SIGNATURE_RE.test(signature) || !/^[0-9a-f]+$/.test(nonce)) {
+    res.status(400).json({ error: "address, signature, and nonce are required" });
     return;
   }
   const address = addressRaw.toLowerCase();
-  // Extract the nonce from the message (single source of truth — same
-  // line we put in via buildSiweMessage). Defensive parsing: any
-  // tampering with the message text would also break the signature
-  // recovery below, so this is fine.
-  const nonceMatch = message.match(/^Nonce:\s*([0-9a-f]+)$/m);
-  if (!nonceMatch) {
-    res.status(400).json({ error: "message missing Nonce line" });
-    return;
-  }
-  const nonce = nonceMatch[1]!;
   // Look up the nonce — must exist, match address, be unconsumed + unexpired.
+  // We ignore any client-supplied `message` field and use the canonical
+  // payload stored at /nonce time. Without this, an attacker who got
+  // a victim to sign ANY message containing a valid nonce (via phishing
+  // wallet popups) could replay that signature here to mint a session
+  // in the victim's name. See migration 0004.
   const [challenge] = await db
     .select()
     .from(authChallengesTable)
@@ -122,11 +121,19 @@ router.post("/auth/wallet/verify", async (req, res) => {
     res.status(401).json({ error: "nonce invalid, expired, or already used" });
     return;
   }
-  // Recover the signer. ethers handles the "personal_sign" prefix
-  // automatically when given the raw message + signature.
+  const canonicalMessage = challenge.payload;
+  if (!canonicalMessage || canonicalMessage.length < 50) {
+    // Pre-0004 row without stored payload — refuse rather than fall
+    // through to the unsafe path. Client must request a fresh nonce.
+    res.status(409).json({ error: "stale nonce — please request a new one" });
+    return;
+  }
+  // Recover the signer from the canonical SIWE message. ethers handles
+  // the "personal_sign" \x19Ethereum Signed Message:\n<len> prefix
+  // when given the raw message + signature.
   let recovered: string;
   try {
-    recovered = ethers.verifyMessage(message, signature).toLowerCase();
+    recovered = ethers.verifyMessage(canonicalMessage, signature).toLowerCase();
   } catch (err) {
     res.status(401).json({ error: "signature verification failed" });
     return;

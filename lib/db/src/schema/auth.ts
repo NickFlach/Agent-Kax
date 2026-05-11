@@ -66,6 +66,12 @@ export const authChallengesTable = pgTable(
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     kind: authChallengeKindEnum("kind").notNull(),
     challenge: text("challenge").notNull(),
+    // Server-side canonical payload for the challenge. For wallet_nonce
+    // this is the full SIWE message text the server issued; /verify
+    // must verify the signature against THIS bytes (not against any
+    // client-supplied message). Nullable for backward-compat with
+    // pre-2026-05-11 rows.
+    payload: text("payload"),
     claimSubject: varchar("claim_subject").notNull(),
     consumed: boolean("consumed").notNull().default(false),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

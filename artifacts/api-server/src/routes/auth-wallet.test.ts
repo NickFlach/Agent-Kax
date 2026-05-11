@@ -85,12 +85,12 @@ describe("auth-wallet (SIWE)", () => {
       const wallet = ethers.Wallet.createRandom();
       trackedAddresses.push(wallet.address.toLowerCase());
 
-      const { message } = await fetchNonce(app, wallet.address);
+      const { message, nonce } = await fetchNonce(app, wallet.address);
       const signature = await wallet.signMessage(message);
 
       const res = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature, message });
+        .send({ address: wallet.address, signature, nonce });
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
       expect(res.body.user.walletAddress).toBe(wallet.address.toLowerCase());
@@ -136,7 +136,7 @@ describe("auth-wallet (SIWE)", () => {
       const sig1 = await wallet.signMessage(n1.message);
       const r1 = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig1, message: n1.message });
+        .send({ address: wallet.address, signature: sig1, nonce: n1.nonce });
       expect(r1.status).toBe(200);
       const id1 = r1.body.user.id;
 
@@ -145,7 +145,7 @@ describe("auth-wallet (SIWE)", () => {
       const sig2 = await wallet.signMessage(n2.message);
       const r2 = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig2, message: n2.message });
+        .send({ address: wallet.address, signature: sig2, nonce: n2.nonce });
       expect(r2.status).toBe(200);
       expect(r2.body.user.id).toBe(id1);
 
@@ -164,24 +164,44 @@ describe("auth-wallet (SIWE)", () => {
       const attacker = ethers.Wallet.createRandom();
       trackedAddresses.push(userWallet.address.toLowerCase(), attacker.address.toLowerCase());
 
-      const { message } = await fetchNonce(app, userWallet.address);
+      const { message, nonce } = await fetchNonce(app, userWallet.address);
       // Attacker signs the message issued for userWallet
       const badSig = await attacker.signMessage(message);
       const res = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: userWallet.address, signature: badSig, message });
+        .send({ address: userWallet.address, signature: badSig, nonce });
       expect(res.status).toBe(401);
     });
 
-    it("rejects malformed messages (missing Nonce line)", async () => {
+    // (Replaces the old "rejects malformed messages" test — the API no
+    // longer accepts a client-supplied message, so the only shape that
+    // can fail this way is a malformed nonce string.)
+    it("rejects malformed nonce", async () => {
       const wallet = ethers.Wallet.createRandom();
       trackedAddresses.push(wallet.address.toLowerCase());
-      const message = "this message has no Nonce line at all but is plenty long enough to pass the length check";
-      const sig = await wallet.signMessage(message);
+      const sig = await wallet.signMessage("anything");
       const res = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig, message });
+        .send({ address: wallet.address, signature: sig, nonce: "not-hex!!!" });
       expect(res.status).toBe(400);
+    });
+
+    // Phishing-via-tampered-message regression: even if an attacker
+    // gets a victim to sign an arbitrary message containing a real
+    // nonce, /verify must reject because the canonical message text
+    // is stored server-side and the signature won't recover the
+    // claimed address against it.
+    it("rejects signature over a tampered message", async () => {
+      const wallet = ethers.Wallet.createRandom();
+      trackedAddresses.push(wallet.address.toLowerCase());
+      const { nonce } = await fetchNonce(app, wallet.address);
+      // Wallet signs a DIFFERENT message that still contains the nonce.
+      const phishedMessage = `EVIL.com would love your signature here.\n\nNonce: ${nonce}\n`;
+      const sig = await wallet.signMessage(phishedMessage);
+      const res = await request(app)
+        .post("/auth/wallet/verify")
+        .send({ address: wallet.address, signature: sig, nonce });
+      expect(res.status).toBe(401);
     });
 
     it("rejects expired nonce", async () => {
@@ -198,7 +218,7 @@ describe("auth-wallet (SIWE)", () => {
       const sig = await wallet.signMessage(message);
       const res = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig, message });
+        .send({ address: wallet.address, signature: sig, nonce });
       expect(res.status).toBe(401);
     });
 
@@ -206,12 +226,12 @@ describe("auth-wallet (SIWE)", () => {
       const wallet = ethers.Wallet.createRandom();
       trackedAddresses.push(wallet.address.toLowerCase());
 
-      const { message } = await fetchNonce(app, wallet.address);
+      const { message, nonce } = await fetchNonce(app, wallet.address);
       const sig = await wallet.signMessage(message);
 
       const r1 = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig, message });
+        .send({ address: wallet.address, signature: sig, nonce });
       expect(r1.status).toBe(200);
       const sc = (r1.headers["set-cookie"] as unknown as string[] | undefined) ?? [];
       const c = sc.find((x) => x.startsWith("sid="));
@@ -220,7 +240,7 @@ describe("auth-wallet (SIWE)", () => {
       // Second attempt with the exact same payload must fail.
       const r2 = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: wallet.address, signature: sig, message });
+        .send({ address: wallet.address, signature: sig, nonce });
       expect(r2.status).toBe(401);
     });
 
@@ -230,11 +250,11 @@ describe("auth-wallet (SIWE)", () => {
       trackedAddresses.push(userA.address.toLowerCase(), userB.address.toLowerCase());
 
       // Issue nonce for B; A tries to redeem the same SIWE message.
-      const { message } = await fetchNonce(app, userB.address);
+      const { message, nonce } = await fetchNonce(app, userB.address);
       const sigA = await userA.signMessage(message);
       const res = await request(app)
         .post("/auth/wallet/verify")
-        .send({ address: userA.address, signature: sigA, message });
+        .send({ address: userA.address, signature: sigA, nonce });
       expect(res.status).toBe(401);
     });
   });
@@ -249,11 +269,11 @@ describe("auth-wallet (SIWE)", () => {
       displayName: "disabled",
       disabledAt: new Date(),
     });
-    const { message } = await fetchNonce(app, wallet.address);
+    const { message, nonce } = await fetchNonce(app, wallet.address);
     const sig = await wallet.signMessage(message);
     const res = await request(app)
       .post("/auth/wallet/verify")
-      .send({ address: wallet.address, signature: sig, message });
+      .send({ address: wallet.address, signature: sig, nonce });
     expect(res.status).toBe(403);
   });
 });
