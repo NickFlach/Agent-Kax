@@ -35,6 +35,11 @@ contract KannakaArtifact is ERC721, ERC721URIStorage, ERC2981, Pausable, Ownable
     /// pathological calldata unattractive.
     uint256 public constant MAX_URI_BYTES = 512;
 
+    /// Hard cap on the OBC artifact UUID length. OBC UUIDs are 36
+    /// ASCII chars (canonical 8-4-4-4-12 form); 64 is generous for
+    /// any future scheme while still keeping mapping-key hashing cheap.
+    uint256 public constant MAX_ARTIFACT_UUID_BYTES = 64;
+
     /// Hard cap on batch size. Protects against a single tx running
     /// out of gas mid-mint; pick the next batch up the next block.
     uint256 public constant MAX_BATCH_SIZE = 64;
@@ -57,6 +62,7 @@ contract KannakaArtifact is ERC721, ERC721URIStorage, ERC2981, Pausable, Ownable
     );
 
     error EmptyArtifactUuid();
+    error ArtifactUuidTooLong(uint256 length, uint256 max);
     error AlreadyMinted(string artifactUuid);
     error EmptyUri();
     error UriTooLong(uint256 length, uint256 max);
@@ -128,7 +134,11 @@ contract KannakaArtifact is ERC721, ERC721URIStorage, ERC2981, Pausable, Ownable
         string calldata artifactUuid,
         string calldata uri
     ) internal returns (uint256) {
-        if (bytes(artifactUuid).length == 0) revert EmptyArtifactUuid();
+        uint256 uuidLen = bytes(artifactUuid).length;
+        if (uuidLen == 0) revert EmptyArtifactUuid();
+        if (uuidLen > MAX_ARTIFACT_UUID_BYTES) {
+            revert ArtifactUuidTooLong(uuidLen, MAX_ARTIFACT_UUID_BYTES);
+        }
         if (mintedArtifact[artifactUuid]) revert AlreadyMinted(artifactUuid);
 
         uint256 uriLen = bytes(uri).length;
@@ -187,6 +197,11 @@ contract KannakaArtifact is ERC721, ERC721URIStorage, ERC2981, Pausable, Ownable
 
     // --- views ---
 
+    /// @notice The id the next mint *would* return if called immediately
+    ///         after. NOT a reservation — concurrent mints (or an owner
+    ///         queueing several txs in the same block) invalidate the
+    ///         prediction. The authoritative tokenId is the return
+    ///         value of `mintArtifact` / the `ArtifactMinted` event.
     function nextTokenId() external view returns (uint256) {
         return _nextTokenId;
     }

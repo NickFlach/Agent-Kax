@@ -8,6 +8,8 @@
 
 export interface WalletVerifyRequest {
   address: string;
+  /** 65-byte hex signature (0x + 130 chars) over the canonical SIWE message the server issued at /auth/wallet/nonce */
   signature: string;
-  message: string;
+  /** The nonce returned by /auth/wallet/nonce. The server rebuilds the canonical message from this and ignores any client-supplied message text. */
+  nonce: string;
 }

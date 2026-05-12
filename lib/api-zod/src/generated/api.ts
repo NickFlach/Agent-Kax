@@ -76,8 +76,16 @@ export const CreateWalletNonceResponse = zod.object({
  */
 export const VerifyWalletSignatureBody = zod.object({
   address: zod.string(),
-  signature: zod.string(),
-  message: zod.string(),
+  signature: zod
+    .string()
+    .describe(
+      "65-byte hex signature (0x + 130 chars) over the canonical SIWE message the server issued at \/auth\/wallet\/nonce",
+    ),
+  nonce: zod
+    .string()
+    .describe(
+      "The nonce returned by \/auth\/wallet\/nonce. The server rebuilds the canonical message from this and ignores any client-supplied message text.",
+    ),
 });
 
 export const VerifyWalletSignatureResponse = zod.object({

@@ -4,7 +4,7 @@ ERC-721 contract used to mint **1-of-1 OpenBotCity artifacts** as
 on-chain collectibles surfaced by KAX.
 
 - Source: [`src/KannakaArtifact.sol`](./src/KannakaArtifact.sol)
-- Tests:  [`test/KannakaArtifact.t.sol`](./test/KannakaArtifact.t.sol) — 31 tests, full pass
+- Tests:  [`test/KannakaArtifact.t.sol`](./test/KannakaArtifact.t.sol) — 33 tests, full pass
 - Audit:  [`AUDIT-KannakaArtifact.md`](./AUDIT-KannakaArtifact.md)
 - Inherits: `ERC721`, `ERC721URIStorage`, `ERC2981`, `Pausable`, `Ownable2Step`
 - Each `artifactUuid` can only be minted **once** per contract instance.
@@ -25,7 +25,8 @@ on-chain collectibles surfaced by KAX.
 - **Reentrancy-safe** — mapping writes happen BEFORE `_safeMint`, so a
   malicious `IERC721Receiver` cannot double-mint the same UUID during
   its `onERC721Received` callback.
-- **URI validation** — non-empty + 512-byte cap.
+- **Input validation** — non-empty UUID with a 64-byte cap (OBC UUIDs
+  are 36 chars), non-empty URI with a 512-byte cap.
 
 ## Metadata source
 
@@ -42,14 +43,20 @@ pinned — KAX shutdown shouldn't break the collectible.
 
 ## Build, test, deploy (Foundry)
 
-This directory is a self-contained Foundry project. From the repo root:
+This directory is a self-contained Foundry project. Dependencies are
+tracked as git submodules under `contracts/lib/` and pinned in
+`foundry.lock` (OpenZeppelin v5.1.0, forge-std v1.16.1). From the repo
+root:
 
 ```bash
+git submodule update --init --recursive   # one-time after a fresh clone
 cd contracts
-forge install OpenZeppelin/openzeppelin-contracts@v5.1.0 foundry-rs/forge-std
 forge build
 forge test -vv
 ```
+
+> If you bumped a submodule and `forge` complains about a mismatch,
+> regenerate `foundry.lock` with `forge install` (no args).
 
 Deploy (set env vars first):
 

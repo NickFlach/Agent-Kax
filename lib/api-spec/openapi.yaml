@@ -1361,14 +1361,16 @@ components:
           format: date-time
     WalletVerifyRequest:
       type: object
-      required: [address, signature, message]
+      required: [address, signature, nonce]
       properties:
         address:
           type: string
         signature:
           type: string
-        message:
+          description: 65-byte hex signature (0x + 130 chars) over the canonical SIWE message the server issued at /auth/wallet/nonce
+        nonce:
           type: string
+          description: The nonce returned by /auth/wallet/nonce. The server rebuilds the canonical message from this and ignores any client-supplied message text.
     AgentChallengeRequest:
       type: object
       required: [obcBotId]

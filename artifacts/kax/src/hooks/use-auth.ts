@@ -90,15 +90,18 @@ export function useAuth(): AuthState {
       body: JSON.stringify({ address }),
     });
     if (!nonceRes.ok) throw new Error(`Could not start sign-in (HTTP ${nonceRes.status}).`);
-    const { message } = (await nonceRes.json()) as { message: string };
+    const { message, nonce } = (await nonceRes.json()) as { message: string; nonce: string };
 
     const signature = await personalSign(provider, address, message);
 
+    // POST `nonce` (not `message`) — the server rebuilds the canonical
+    // SIWE text from its stored payload and ignores any client-supplied
+    // message. See migration 0004 / commit 0c0e567 (SIWE phishing fix).
     const verifyRes = await fetch("/api/auth/wallet/verify", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, signature, message }),
+      body: JSON.stringify({ address, signature, nonce }),
     });
     if (!verifyRes.ok) {
       const text = await verifyRes.text().catch(() => "");

@@ -156,6 +156,33 @@ contract KannakaArtifactTest is Test {
         nft.mintArtifact(alice, UUID_1, "");
     }
 
+    function test_RevertWhen_UuidTooLong() public {
+        // Build a 65-byte UUID (one over the cap).
+        bytes memory big = new bytes(65);
+        for (uint256 i = 0; i < big.length; i++) big[i] = "u";
+        string memory bigUuid = string(big);
+        uint256 maxBytes = nft.MAX_ARTIFACT_UUID_BYTES();
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(KannakaArtifact.ArtifactUuidTooLong.selector, 65, maxBytes)
+        );
+        nft.mintArtifact(alice, bigUuid, URI_1);
+    }
+
+    function test_UuidAtMaxLength_Succeeds() public {
+        // A UUID exactly at the cap (64 bytes) must mint successfully —
+        // the cap is inclusive.
+        bytes memory atMax = new bytes(64);
+        for (uint256 i = 0; i < atMax.length; i++) atMax[i] = "u";
+        string memory uuid = string(atMax);
+
+        vm.prank(owner);
+        uint256 tokenId = nft.mintArtifact(alice, uuid, URI_1);
+        assertEq(tokenId, 1);
+        assertTrue(nft.mintedArtifact(uuid));
+    }
+
     function test_RevertWhen_UriTooLong() public {
         // Build a 513-byte URI (one over the cap).
         bytes memory big = new bytes(513);
