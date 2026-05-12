@@ -22,27 +22,37 @@ Pass that URL as the `uri` argument when minting. The JSON conforms to
 the standard ERC-721 metadata schema (`name`, `description`, `image`,
 `external_url`, `attributes`).
 
-## Deploy quickstart (Foundry)
+## Build, test, deploy (Foundry)
+
+This directory is a self-contained Foundry project. From the repo root:
 
 ```bash
-mkdir kax-nft && cd kax-nft
-forge init --no-git
-forge install OpenZeppelin/openzeppelin-contracts
-cp ../KannakaArtifact.sol src/KannakaArtifact.sol
-
-# Compile
+cd contracts
+forge install OpenZeppelin/openzeppelin-contracts foundry-rs/forge-std --no-commit
 forge build
+forge test -vvv
+```
 
-# Deploy (set env vars first)
+Deploy (set env vars first):
+
+```bash
 export PRIVATE_KEY=0x...
 export RPC_URL=https://...      # e.g. Base, Optimism, Arbitrum, Sepolia
 export OWNER=0xYourAddress
 
-forge create src/KannakaArtifact.sol:KannakaArtifact \
+forge create KannakaArtifact.sol:KannakaArtifact \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --constructor-args $OWNER
 ```
+
+The test suite in `test/KannakaArtifact.t.sol` covers happy-path mint,
+Ownable2Step propose/accept (and reverts on non-owner mint / wrong
+acceptor), input validation, `AlreadyMinted` re-mint guard,
+`supportsInterface` for ERC-165 / ERC-721 / ERC-721 Metadata / ERC-4906,
+and a reentrancy regression where an `IERC721Receiver` tries to
+re-enter `mintArtifact` with the same UUID during its `_safeMint`
+callback (must revert with `AlreadyMinted`).
 
 ## Deploy quickstart (Hardhat)
 
