@@ -6,6 +6,7 @@ import { RunHarvesterBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
 import { partnerApiAvailable } from "../lib/partnerClient";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 import { agentsTable } from "@workspace/db/schema";
 import { canMutate } from "../middlewares/requireAuth";
 
@@ -180,6 +181,20 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
   }
 
   const paired = await pairAudioToArt(req.log);
+
+  // Outbound constellation announce — other subscribers (radio DJ, observatory)
+  // can react to KAX harvest milestones. No-op when the bridge isn't connected.
+  if (newArtifacts > 0) {
+    await publishConstellation("KAX.events.harvest.completed", {
+      type,
+      harvested,
+      newArtifacts,
+      duplicates,
+      paired,
+      mode: partnerApiAvailable() ? "partner" : "public",
+    });
+  }
+
   res.json({ harvested, newArtifacts, duplicates, paired });
 });
 

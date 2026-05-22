@@ -5,6 +5,7 @@ import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
+import { start as startConstellationBridge } from "./lib/constellationBridge";
 
 registerAllEventHandlers();
 
@@ -47,8 +48,9 @@ ensureKannakaOwnerAndBackfill()
   .then(() => replayMissedEventsOnStartup())
   .then(() => startAgentHarvestScheduler())
   .then(() => startHeatDecayScheduler())
+  .then(() => startConstellationBridge())
   .catch((err) => {
-    logger.error({ err }, "Failed to seed/backfill or replay events on startup");
+    logger.error({ err }, "Failed to seed/backfill, replay events, or start constellation bridge");
   });
 
 app.listen(port, (err) => {
