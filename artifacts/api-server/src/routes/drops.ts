@@ -15,7 +15,8 @@ import {
   AddArtifactToDropBody,
   RemoveArtifactFromDropParams,
 } from "@workspace/api-zod";
-import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
+import { canMutate, requireAuth, getOwnerScope, getOptionalAuth } from "../middlewares/requireAuth";
+import { isPublishableStatus } from "../lib/visibility";
 
 const router: IRouter = Router();
 
@@ -32,7 +33,7 @@ async function checkDropOwnership(req: Request, res: Response, dropId: number): 
   return true;
 }
 
-async function getDropWithArtifacts(dropId: number) {
+async function getDropWithArtifacts(dropId: number, opts: { publicOnly: boolean } = { publicOnly: false }) {
   const drop = await db.select().from(dropsTable).where(eq(dropsTable.id, dropId)).limit(1);
   if (drop.length === 0) return null;
 
@@ -42,9 +43,18 @@ async function getDropWithArtifacts(dropId: number) {
     .where(eq(artifactsTable.dropId, dropId))
     .orderBy(desc(artifactsTable.ingestedAt));
 
+  // For public callers we keep only artifacts in a publishable status,
+  // even when the drop itself is published. The private drop-mgmt route
+  // can attach any owned artifact + stamps status='dropped'; without
+  // this floor the public surface would expose raw / scored back-doors
+  // (#9).
+  const visibleArtifacts = opts.publicOnly
+    ? artifacts.filter((a) => isPublishableStatus(a.status))
+    : artifacts;
+
   return {
     ...drop[0],
-    artifacts: artifacts.map(formatArtifact),
+    artifacts: visibleArtifacts.map(formatArtifact),
     createdAt: drop[0].createdAt.toISOString(),
     publishedAt: drop[0].publishedAt?.toISOString() ?? null,
   };
@@ -173,11 +183,21 @@ router.post("/drops", requireAuth, async (req, res) => {
 
 router.get("/drops/:id", async (req, res) => {
   const { id } = GetDropParams.parse(req.params);
-  const result = await getDropWithArtifacts(id);
-  if (!result) {
+  // First fetch the drop alone to inspect status. Owners + admins can
+  // see drafts; everyone else only sees published drops, and even then
+  // only the publishable artifacts inside (#7, #9).
+  const [draft] = await db.select().from(dropsTable).where(eq(dropsTable.id, id)).limit(1);
+  if (!draft) {
     res.status(404).json({ error: "Drop not found" });
     return;
   }
+  const auth = await getOptionalAuth(req);
+  const isOwnerView = !!(auth && (auth.role === "admin" || draft.ownerId === auth.id));
+  if (!isOwnerView && draft.status !== "published") {
+    res.status(404).json({ error: "Drop not found" });
+    return;
+  }
+  const result = await getDropWithArtifacts(id, { publicOnly: !isOwnerView });
   res.json(result);
 });
 

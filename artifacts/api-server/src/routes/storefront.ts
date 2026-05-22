@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { dropsTable, artifactsTable } from "@workspace/db/schema";
-import { eq, desc, count, isNotNull } from "drizzle-orm";
+import { eq, desc, count, isNotNull, and } from "drizzle-orm";
 import { formatArtifact } from "./artifacts";
 import {
   GetStorefrontDropsQueryParams,
   GetStorefrontDropParams,
 } from "@workspace/api-zod";
+import { publicArtifactWhere, isPublishableStatus } from "../lib/visibility";
 
 const router: IRouter = Router();
 
@@ -33,9 +34,14 @@ router.get("/storefront/drops", async (req, res) => {
         .select()
         .from(artifactsTable)
         .where(eq(artifactsTable.dropId, drop.id));
+      // Publishable-status floor — see #9. The drop itself is already
+      // published (filtered above), but its inner artifacts could
+      // include raw/scored back-doors stamped by the private
+      // drop-management route.
+      const publishable = artifacts.filter((a) => isPublishableStatus(a.status));
       return {
         ...drop,
-        artifacts: artifacts.map(formatArtifact),
+        artifacts: publishable.map(formatArtifact),
         createdAt: drop.createdAt.toISOString(),
         publishedAt: drop.publishedAt?.toISOString() ?? null,
       };
@@ -63,20 +69,26 @@ router.get("/storefront/drops/:id", async (req, res) => {
     .select()
     .from(artifactsTable)
     .where(eq(artifactsTable.dropId, id));
+  // Publishable-status floor — see #9.
+  const publishable = artifacts.filter((a) => isPublishableStatus(a.status));
 
   res.json({
     ...drop[0],
-    artifacts: artifacts.map(formatArtifact),
+    artifacts: publishable.map(formatArtifact),
     createdAt: drop[0].createdAt.toISOString(),
     publishedAt: drop[0].publishedAt?.toISOString() ?? null,
   });
 });
 
 router.get("/storefront/featured", async (req, res) => {
+  // Featured is a public hero — must only return publishable artifacts
+  // attached to a published drop. The old query merely required a
+  // non-null kannakaScore, which silently included scored-but-unpublished
+  // artifacts (#3).
   const featured = await db
     .select()
     .from(artifactsTable)
-    .where(isNotNull(artifactsTable.kannakaScore))
+    .where(and(isNotNull(artifactsTable.kannakaScore), publicArtifactWhere()))
     .orderBy(desc(artifactsTable.kannakaScore))
     .limit(6);
 
@@ -93,9 +105,11 @@ router.get("/storefront/featured", async (req, res) => {
       .select()
       .from(artifactsTable)
       .where(eq(artifactsTable.dropId, latestDrop[0].id));
+    // Same publishable-status floor as /storefront/drops/:id (#9).
+    const publishable = dropArtifacts.filter((a) => isPublishableStatus(a.status));
     latestDropWithArtifacts = {
       ...latestDrop[0],
-      artifacts: dropArtifacts.map(formatArtifact),
+      artifacts: publishable.map(formatArtifact),
       createdAt: latestDrop[0].createdAt.toISOString(),
       publishedAt: latestDrop[0].publishedAt?.toISOString() ?? null,
     };

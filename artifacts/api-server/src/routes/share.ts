@@ -1,16 +1,39 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, agentsTable, agentStorefrontSettingsTable } from "@workspace/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
+import { publicArtifactWhere } from "../lib/visibility";
 
 const router: IRouter = Router();
 
-function getBaseUrl(reqHost?: string): string {
-  const domain = process.env["REPLIT_DEV_DOMAIN"]
-    || (process.env["REPLIT_DOMAINS"] || "").split(",")[0]
-    || reqHost
-    || "kax.replit.app";
-  return `https://${domain.trim()}`;
+/**
+ * Build the absolute base URL for share-surface assets. The previous
+ * implementation forced `https://` even when the request was plainly
+ * HTTP, producing broken OpenGraph URLs in local/staging (#11).
+ *
+ * Precedence:
+ *   1. `KAX_PUBLIC_URL` — explicit override
+ *   2. `REPLIT_DEV_DOMAIN` / `REPLIT_DOMAINS` — Replit always https
+ *   3. `X-Forwarded-Proto` + `X-Forwarded-Host` — behind nginx / proxy
+ *   4. request host + socket TLS guess — local dev
+ *   5. `https://kax.replit.app` — last resort
+ */
+function getBaseUrl(req: Request): string {
+  const override = (process.env["KAX_PUBLIC_URL"] || "").trim();
+  if (override) return override.replace(/\/+$/, "");
+
+  const replitDomain = process.env["REPLIT_DEV_DOMAIN"]
+    || (process.env["REPLIT_DOMAINS"] || "").split(",")[0];
+  if (replitDomain) return `https://${replitDomain.trim()}`;
+
+  const fwdHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const fwdProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const host = fwdHost || req.get("host");
+  if (host) {
+    const proto = fwdProto || ((req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
+    return `${proto}://${host}`;
+  }
+  return "https://kax.replit.app";
 }
 
 function generateAudioCoverSvg(title: string): string {
@@ -78,7 +101,14 @@ router.get("/share/audio-cover/:id.svg", async (req, res) => {
     return;
   }
 
-  const [artifact] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, id)).limit(1);
+  // Constrain to publishable artifacts only — without this filter the
+  // route leaks unpublished artifact titles (#5). The title flows
+  // directly into the SVG label.
+  const [artifact] = await db
+    .select()
+    .from(artifactsTable)
+    .where(and(eq(artifactsTable.id, id), publicArtifactWhere()))
+    .limit(1);
   if (!artifact) {
     res.status(404).send("Not found");
     return;
@@ -127,7 +157,7 @@ router.get("/share/artifact/:id", async (req, res) => {
     settings?.displayName || agent?.displayName || "Space Child by Kannaka";
   const accentColor = settings?.accentColor ?? "#7C3AED";
   const isAudio = artifact.artifactType === "audio" || artifact.artifactType === "music";
-  const baseUrl = getBaseUrl(req.get("host"));
+  const baseUrl = getBaseUrl(req);
 
   const hasImageThumb = artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai');
   const ogImage: string = isAudio

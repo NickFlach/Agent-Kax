@@ -60,3 +60,19 @@ export async function getOwnerScope(req: Request): Promise<string | null> {
   if (user?.role === "admin") return null;
   return userId;
 }
+
+/**
+ * Return the authenticated user when one exists and is in good standing —
+ * otherwise null. Lets routes serve both public visitors and signed-in
+ * owners from a single handler (owner sees more; public sees the
+ * publishable subset).
+ *
+ * Unlike `requireAuth` this never short-circuits the response: callers
+ * apply their own visibility logic against the returned user.
+ */
+export async function getOptionalAuth(req: Request): Promise<{ id: string; role: string } | null> {
+  if (!req.isAuthenticated()) return null;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user.id)).limit(1);
+  if (!user || user.disabledAt) return null;
+  return { id: user.id, role: user.role };
+}

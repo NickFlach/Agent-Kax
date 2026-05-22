@@ -8,8 +8,10 @@ import {
   ScoreArtifactParams,
   NarrateArtifactParams,
 } from "@workspace/api-zod";
-import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
+import { canMutate, requireAuth, getOwnerScope, getOptionalAuth } from "../middlewares/requireAuth";
 import { computeScore } from "../lib/tasteEngine";
+import { isArtifactPublic } from "../lib/visibility";
+import { dropsTable } from "@workspace/db/schema";
 
 const router: IRouter = Router();
 
@@ -72,14 +74,36 @@ router.get("/artifacts", requireAuth, async (req, res) => {
 
 router.get("/artifacts/:id", async (req, res) => {
   const { id } = GetArtifactParams.parse(req.params);
-  const artifact = await db.select().from(artifactsTable).where(eq(artifactsTable.id, id)).limit(1);
+  const [artifact] = await db.select().from(artifactsTable).where(eq(artifactsTable.id, id)).limit(1);
 
-  if (artifact.length === 0) {
+  if (!artifact) {
     res.status(404).json({ error: "Artifact not found" });
     return;
   }
 
-  res.json(formatArtifact(artifact[0]));
+  // Owners and admins see their own artifacts unconditionally. Everyone
+  // else only sees artifacts attached to a published drop AND in a
+  // publishable status. Without this filter the route was leaking raw /
+  // scored / private artifact metadata by enumerable numeric id (#6).
+  const auth = await getOptionalAuth(req);
+  if (auth && (auth.role === "admin" || artifact.ownerId === auth.id)) {
+    res.json(formatArtifact(artifact));
+    return;
+  }
+  // Fetch the drop only when we need to check visibility (not for owners).
+  let drop = null;
+  if (artifact.dropId != null) {
+    [drop] = await db
+      .select()
+      .from(dropsTable)
+      .where(eq(dropsTable.id, artifact.dropId))
+      .limit(1);
+  }
+  if (!isArtifactPublic(artifact, drop ?? null)) {
+    res.status(404).json({ error: "Artifact not found" });
+    return;
+  }
+  res.json(formatArtifact(artifact));
 });
 
 router.post("/artifacts/:id/score", requireAuth, async (req, res) => {

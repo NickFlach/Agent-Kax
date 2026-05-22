@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, nftMintsTable, activitiesTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
+import { publicArtifactWhere } from "../lib/visibility";
 
 const router: IRouter = Router();
 
@@ -57,11 +58,29 @@ function parseRecordMintBody(body: unknown): { ok: true; data: RecordMintInput }
   return { ok: true, data: { chainId, contractAddress, tokenId, txHash, mintedToAddress } };
 }
 
-function publicBaseUrl(req: { protocol: string; get: (h: string) => string | undefined }): string {
-  const envBase = process.env["PUBLIC_BASE_URL"];
-  if (envBase && envBase.length > 0) return envBase.replace(/\/$/, "");
-  const host = req.get("host") ?? "localhost";
-  return `${req.protocol}://${host}`;
+/**
+ * Resolve the canonical origin for NFT-side URLs.
+ *
+ * NFT routes persist the result into nft_mints.metadataUri AND emit it
+ * in the public metadata response. Both are durably attached to a token
+ * on-chain — once a poisoned origin lands in nft_mints it stays there.
+ *
+ * To avoid attacker-controlled-Host poisoning (#15) this is now
+ * configuration-only: `PUBLIC_BASE_URL` must be set, or we throw on the
+ * call. Operators who used to rely on the implicit "use req.host"
+ * fallback need to set PUBLIC_BASE_URL to their canonical origin
+ * (typically the same value as the SPA serves under). Allowlist
+ * mode (multi-tenant) is intentionally deferred — when we need it,
+ * extend this helper rather than re-introducing Host trust.
+ */
+function publicBaseUrl(_req: unknown): string {
+  const envBase = (process.env["PUBLIC_BASE_URL"] || "").trim();
+  if (!envBase) {
+    throw new Error(
+      "PUBLIC_BASE_URL must be set for NFT routes — Host-header origins are not trusted (security: #15).",
+    );
+  }
+  return envBase.replace(/\/$/, "");
 }
 
 /**
@@ -74,13 +93,26 @@ router.get("/nft/metadata/:artifactId.json", async (req, res) => {
     res.status(400).json({ error: "invalid artifactId" });
     return;
   }
+  // The public ERC-721 metadata route may only return artifacts that
+  // are (a) publicly visible AND (b) have an actual on-chain mint
+  // recorded. Without these filters we leaked unpublished artifact
+  // titles, narratives, image URLs, and OBC IDs by enumerable id (#12).
   const [a] = await db
     .select()
     .from(artifactsTable)
-    .where(eq(artifactsTable.id, id))
+    .where(and(eq(artifactsTable.id, id), publicArtifactWhere()))
     .limit(1);
   if (!a) {
     res.status(404).json({ error: "artifact not found" });
+    return;
+  }
+  const [mint] = await db
+    .select({ id: nftMintsTable.id })
+    .from(nftMintsTable)
+    .where(eq(nftMintsTable.artifactId, id))
+    .limit(1);
+  if (!mint) {
+    res.status(404).json({ error: "artifact has not been minted" });
     return;
   }
   const base = publicBaseUrl(req);

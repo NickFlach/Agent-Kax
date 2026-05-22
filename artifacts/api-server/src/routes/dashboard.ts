@@ -9,7 +9,12 @@ import { requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
-router.get("/dashboard/partner-sync", async (_req, res) => {
+// Operational state — when KAX last polled OBC, whether webhook delivery
+// looks stale, request-budget usage. Auth-required: a public endpoint
+// here let anyone enumerate webhook posture / partner integration
+// health and was a free reconnaissance surface for credential
+// guessing (#8).
+router.get("/dashboard/partner-sync", requireAuth, async (_req, res) => {
   const state = await getSyncState();
   const today = new Date().toISOString().slice(0, 10);
   const requestsToday = state && state.requestsDayKey === today ? state.requestsToday : 0;

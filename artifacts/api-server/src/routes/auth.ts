@@ -7,6 +7,7 @@ import {
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { clearSession, getSessionId } from "../lib/auth";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -46,11 +47,7 @@ const getCurrentUser = async (req: Request, res: Response) => {
 router.get("/auth/user", getCurrentUser);
 router.get("/me", getCurrentUser);
 
-router.patch("/me/notification-prefs", async (req: Request, res: Response) => {
-  if (!req.isAuthenticated()) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
+router.patch("/me/notification-prefs", requireAuth, async (req: Request, res: Response) => {
   const parsed = UpdateNotificationPrefsBody.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid body", details: parsed.error.issues });
@@ -59,8 +56,11 @@ router.patch("/me/notification-prefs", async (req: Request, res: Response) => {
   const updates: { emailOnProposal?: boolean; emailOnDm?: boolean } = {};
   if (parsed.data.emailOnProposal !== undefined) updates.emailOnProposal = parsed.data.emailOnProposal;
   if (parsed.data.emailOnDm !== undefined) updates.emailOnDm = parsed.data.emailOnDm;
+  // requireAuth guarantees req.user is set + the user row is in good
+  // standing. Use `!` to assert that to the type checker.
+  const userId = req.user!.id;
   if (Object.keys(updates).length === 0) {
-    const [u] = await db.select().from(usersTable).where(eq(usersTable.id, req.user.id)).limit(1);
+    const [u] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     res.json(
       UpdateNotificationPrefsResponse.parse({
         emailOnProposal: u?.emailOnProposal ?? false,
@@ -72,7 +72,7 @@ router.patch("/me/notification-prefs", async (req: Request, res: Response) => {
   const [updated] = await db
     .update(usersTable)
     .set(updates)
-    .where(eq(usersTable.id, req.user.id))
+    .where(eq(usersTable.id, userId))
     .returning();
   res.json(
     UpdateNotificationPrefsResponse.parse({
