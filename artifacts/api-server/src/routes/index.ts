@@ -17,6 +17,7 @@ import webhooksRouter from "./webhooks";
 import partnerEventsRouter from "./partner-events";
 import nftRouter from "./nft";
 import constellationRouter from "./constellation";
+import connectorsRouter from "./connectors";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(webhooksRouter);
 router.use(partnerEventsRouter);
 router.use(nftRouter);
 router.use(constellationRouter);
+router.use(connectorsRouter);
 
 export default router;
