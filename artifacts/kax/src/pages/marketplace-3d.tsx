@@ -68,8 +68,33 @@ function Storefront({
 
   const initials = (agent.name || agent.slug).substring(0, 2).toUpperCase();
 
+  // Lift the click handler to the group level and wrap with an invisible
+  // bounding collider so clicks anywhere on the storefront body — not just
+  // the small sign slab — register as a selection. Without this, users see
+  // a storefront in the scene but most of the visible volume swallows
+  // pointer events into onPointerMissed and the storefront feels dead.
+  const select = (e: { stopPropagation?: () => void }) => {
+    e.stopPropagation?.();
+    onClick(agent);
+  };
+
   return (
-    <group position={position} rotation={rotation}>
+    <group
+      position={position}
+      rotation={rotation}
+      onClick={select}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Invisible click-collider that covers the whole storefront volume.
+          Sits behind everything else; geometry is sized to envelope the
+          body + roof + sign + glyph. visible=false keeps the scene clean
+          but pointer events still hit it. */}
+      <mesh position={[0, 3, 0.3]} visible={false}>
+        <boxGeometry args={[3.4, 6.5, 3.6]} />
+        <meshBasicMaterial />
+      </mesh>
+
       <mesh position={[0, 2, 0]}>
         <boxGeometry args={[3, 4, 3]} />
         <meshStandardMaterial color="#05000a" roughness={0.7} metalness={0.2} />
@@ -93,15 +118,7 @@ function Storefront({
         <meshBasicMaterial color={mainColor} transparent opacity={0} />
       </mesh>
 
-      <mesh
-        position={[0, 3, 1.6]}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick(agent);
-        }}
-        onPointerOver={() => (document.body.style.cursor = "pointer")}
-        onPointerOut={() => (document.body.style.cursor = "auto")}
-      >
+      <mesh position={[0, 3, 1.6]}>
         <boxGeometry args={[2.8, 1, 0.1]} />
         <meshStandardMaterial color={mainColor} emissive={mainColor} emissiveIntensity={1.4} transparent opacity={0.9} />
       </mesh>
