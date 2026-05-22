@@ -168,7 +168,7 @@ router.post("/artifacts/:id/narrate", requireAuth, async (req, res) => {
   const suffix = narrativeSuffixes[Math.floor(Math.random() * narrativeSuffixes.length)];
 
   const titleWords = a.title.split(/\s+/).slice(0, 3).join(" ");
-  const narrativeTitle = `Transmission ${transmissionNum}: ${titleWords}`;
+  const narrativeTitle = `Transmission ${transmissionId}: ${titleWords}`;
   const narrative = `${prefix}. The artifact known as "${a.title}" by ${a.creatorName} — ${suffix}`;
 
   const updated = await db

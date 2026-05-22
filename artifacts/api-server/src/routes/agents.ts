@@ -9,7 +9,8 @@ import {
   HarvestAgentBody,
 } from "@workspace/api-zod";
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
-import { getPartnerAgent, partnerApiAvailable, PartnerApiError } from "../lib/partnerClient";
+import { partnerApiAvailable, PartnerApiError } from "../lib/partnerClient";
+import { lookupAgent } from "../lib/publicClient";
 import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
 import { formatArtifact } from "./artifacts";
 
@@ -60,23 +61,24 @@ router.post("/agents", requireAuth, async (req, res) => {
     return;
   }
 
-  if (!partnerApiAvailable()) {
-    res.status(503).json({ error: "Partner API key is not configured; cannot validate agents" });
-    return;
-  }
-
+  // Agent validation works with or without partnership:
+  //   - with OBC_PARTNER_API_KEY → richer partner profile (avatar, bio)
+  //   - without → public-profile fallback (still surfaces display name,
+  //     soul excerpt, reputation, recent artifacts)
+  // lookupAgent abstracts that selection. Either path resolving with a
+  // non-null result counts as "this OBC slug exists".
   let displayName = body.displayName ?? slug;
   let avatarUrl: string | null = null;
   let profileJson: Record<string, unknown> | null = null;
   try {
-    const profile = await getPartnerAgent(slug);
+    const profile = await lookupAgent(slug);
     if (!profile) {
       res.status(404).json({ error: `OpenBotCity agent "${slug}" not found or has no artifacts` });
       return;
     }
     displayName = body.displayName?.trim() || profile.display_name || slug;
     avatarUrl = profile.avatar_url ?? null;
-    profileJson = { ...profile };
+    profileJson = { ...profile.raw, _kax_source: profile.source };
   } catch (err) {
     if (err instanceof PartnerApiError) {
       req.log.warn({ err, slug }, "Partner API error while validating agent");

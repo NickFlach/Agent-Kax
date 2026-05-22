@@ -138,7 +138,7 @@ export async function runTasteEngineFor(id: number): Promise<void> {
     heat: a.heat,
     lastReactionAt: a.lastReactionAt,
     id: a.id,
-    createdAt: a.createdAt,
+    createdAt: a.ingestedAt,
   });
 
   await db
