@@ -382,6 +382,48 @@ function LegacyStorefrontDropRedirect() {
   return <Redirect to={`/s/kannaka/drops/${id}`} />;
 }
 
+function AppCrashFallback({ reset, error }: { reset: () => void; error: Error }) {
+  const goHome = () => {
+    reset();
+    const base = import.meta.env.BASE_URL.replace(/\/+$/, "");
+    window.location.href = `${base}/` || "/";
+  };
+  return (
+    <div
+      className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-center px-6"
+      data-testid="app-error-boundary"
+    >
+      <p className="text-xs uppercase tracking-[0.3em] text-primary">
+        &gt; Something went wrong
+      </p>
+      <p className="text-sm text-muted-foreground max-w-md">
+        This page hit an unexpected error. You can retry, or head back to the marketplace.
+      </p>
+      {error?.message ? (
+        <p className="text-[11px] font-mono text-muted-foreground/70 max-w-md break-words">
+          {error.message}
+        </p>
+      ) : null}
+      <div className="flex gap-2">
+        <button
+          onClick={reset}
+          className="px-4 py-2 text-xs uppercase tracking-wider border border-primary text-primary hover:bg-primary/10"
+          data-testid="button-app-error-retry"
+        >
+          Retry
+        </button>
+        <button
+          onClick={goHome}
+          className="px-4 py-2 text-xs uppercase tracking-wider border border-border text-foreground hover:bg-muted"
+          data-testid="button-app-error-home"
+        >
+          Go home
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -389,7 +431,14 @@ function App() {
         <PlayerProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <ConstellationBackdrop />
-            <Router />
+            <ErrorBoundary
+              fallback={(reset, error) => <AppCrashFallback reset={reset} error={error} />}
+              onError={(error, info) => {
+                console.error("[kax] uncaught render error", error, info.componentStack);
+              }}
+            >
+              <Router />
+            </ErrorBoundary>
           </WouterRouter>
           <PersistentPlayer />
         </PlayerProvider>
