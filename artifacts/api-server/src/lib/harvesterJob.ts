@@ -39,6 +39,11 @@ async function upsertPartnerArtifact(
     .insert(artifactsTable)
     .values({
       externalId: pa.uuid,
+      // Stamp the connector id so registry-tag queries see partner-harvested
+      // rows correctly (#16). The schema default ("obc_public") is wrong
+      // for partner harvests — partner is the authoritative source when
+      // available.
+      connectorId: "obc_partner",
       obcArtifactUuid: pa.uuid,
       title: pa.title || "Untitled",
       creatorName: pa.creator?.display_name || "Unknown",

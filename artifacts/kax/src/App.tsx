@@ -19,6 +19,7 @@ import DropDetail from "@/pages/drop-detail";
 import HarvesterPage from "@/pages/harvester";
 import Vault from "@/pages/vault";
 import AdminUsers from "@/pages/admin-users";
+import AdminIntegrations from "@/pages/admin-integrations";
 import AgentsList from "@/pages/agents-list";
 import AgentDetail from "@/pages/agent-detail";
 import StorefrontSettings from "@/pages/storefront-settings";
@@ -285,6 +286,9 @@ function Router() {
       </Route>
       <Route path="/admin/users">
         <AdminLayout><RequireAuth adminOnly><AdminUsers /></RequireAuth></AdminLayout>
+      </Route>
+      <Route path="/admin/integrations">
+        <AdminLayout><RequireAuth adminOnly><AdminIntegrations /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/storefront">
         <Redirect to="/s/kannaka" />

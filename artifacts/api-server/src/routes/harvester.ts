@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, desc } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
 import { partnerApiAvailable } from "../lib/partnerClient";
 import { publish as publishConstellation } from "../lib/constellationBridge";
+import { runRegistryHarvest } from "../lib/registryHarvest";
 import { agentsTable } from "@workspace/db/schema";
 import { canMutate } from "../middlewares/requireAuth";
 
@@ -152,29 +153,60 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
       newArtifacts = result.newArtifacts;
       duplicates = result.duplicates;
     } else {
+      // Registry path — fans out across every enabled AgenticConnector.
+      // OBC public + constellation today; HF Spaces / Civitai / Replicate
+      // when those land (#21). Adding a new platform never has to touch
+      // this route.
       const minReactions = body.minReactions ?? 0;
       const creatorFilter = body.creator?.toLowerCase();
       const keywordFilter = body.keyword?.toLowerCase();
-      const typesToHarvest = type === "all"
-        ? ["image", "audio", "text", "music", "furniture"]
-        : [type];
-      let remaining = requestedLimit;
-      for (const t of typesToHarvest) {
-        if (remaining <= 0) break;
-        const perTypeLimit = type === "all" ? Math.ceil(remaining / typesToHarvest.length) : remaining;
-        const result = await legacyHarvestType(t, perTypeLimit, minReactions, creatorFilter, keywordFilter, ownerId, req.log);
-        harvested += result.harvested;
-        newArtifacts += result.newArtifacts;
-        duplicates += result.duplicates;
-        remaining -= result.newArtifacts;
+      const result = await runRegistryHarvest({
+        ownerId,
+        ...(type !== "all" ? { type: type as never } : {}),
+        ...(body.creator ? { creator: body.creator } : {}),
+        limit: requestedLimit,
+      });
+      harvested = result.totalHarvested;
+      newArtifacts = result.totalNew;
+      duplicates = result.totalDuplicates;
+
+      // Post-fetch filters that pre-registry legacy supported but the
+      // connector contract doesn't yet model. Apply by deleting the
+      // already-inserted rows that don't match. Cheaper than threading
+      // filters through every connector, and these are rarely used.
+      if (minReactions > 0 || keywordFilter) {
+        const justInserted = await db
+          .select()
+          .from(artifactsTable)
+          .where(eq(artifactsTable.ownerId, ownerId))
+          .orderBy(desc(artifactsTable.ingestedAt))
+          .limit(newArtifacts);
+        const toDelete = justInserted.filter((row) => {
+          if (minReactions > 0 && row.reactionCount < minReactions) return true;
+          if (keywordFilter && !row.title.toLowerCase().includes(keywordFilter)) return true;
+          return false;
+        });
+        if (toDelete.length > 0) {
+          for (const row of toDelete) {
+            await db.delete(artifactsTable).where(eq(artifactsTable.id, row.id));
+          }
+          newArtifacts -= toDelete.length;
+        }
       }
+
       if (newArtifacts > 0) {
+        const summary = result.perConnector
+          .filter((p) => p.newArtifacts > 0)
+          .map((p) => `${p.connectorId}:${p.newArtifacts}`)
+          .join(" ");
         await db.insert(activitiesTable).values({
           type: "harvested",
-          message: `Legacy harvest: ${newArtifacts} new ${type} (${duplicates} duplicates)`,
+          message: `Registry harvest: ${newArtifacts} new ${type} across [${summary}] (${duplicates} duplicates)`,
           ownerId,
         });
       }
+      // Silence: unused references when no filter — kept as docs.
+      void creatorFilter;
     }
   } catch (err) {
     req.log.error({ err }, "Error running harvester");

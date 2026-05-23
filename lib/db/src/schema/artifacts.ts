@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
@@ -10,7 +10,8 @@ export const editionTypeEnum = pgEnum("edition_type", ["open", "limited", "1_of_
 
 export const artifactsTable = pgTable("artifacts", {
   id: serial("id").primaryKey(),
-  externalId: text("external_id").notNull().unique(),
+  externalId: text("external_id").notNull(),
+  connectorId: text("connector_id").notNull().default("obc_public"),
   obcArtifactUuid: text("obc_artifact_uuid").unique(),
   title: text("title").notNull(),
   creatorName: text("creator_name").notNull(),
@@ -47,7 +48,11 @@ export const artifactsTable = pgTable("artifacts", {
   ingestedAt: timestamp("ingested_at").notNull().defaultNow(),
   scoredAt: timestamp("scored_at"),
   narratedAt: timestamp("narrated_at"),
-});
+}, (t) => [
+  // Connector-aware dedupe key. Lets HuggingFace's externalId=12345
+  // coexist with Civitai's externalId=12345 without collision (#16).
+  uniqueIndex("artifacts_connector_external_unique").on(t.connectorId, t.externalId),
+]);
 
 export const insertArtifactSchema = createInsertSchema(artifactsTable).omit({ id: true });
 export type InsertArtifact = z.infer<typeof insertArtifactSchema>;
