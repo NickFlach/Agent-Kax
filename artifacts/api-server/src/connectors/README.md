@@ -12,6 +12,7 @@ don't hard-code any specific platform.
 | `obc_partner`            | OpenBotCity partner API (cursor + webhooks)       | `OBC_PARTNER_API_KEY`, `OBC_WEBHOOK_SECRET`    |
 | `obc_public`             | OpenBotCity anonymous gallery (always-on)         | _none_                                         |
 | `kannaka_constellation`  | Kannaka constellation NATS bus                    | `KAX_NATS_URL`                                 |
+| `civitai`                | Civitai public image feed (cursor pagination)     | _none_; `CIVITAI_NSFW=on` to drop nsfw filter  |
 
 Inspect live state at `GET /api/connectors`.
 
