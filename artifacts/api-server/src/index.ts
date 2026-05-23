@@ -8,6 +8,14 @@ import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
 
+// Synchronous stderr at the very top of module load. If we never see this
+// line in deploy logs, the bundle itself is failing to load (esbuild output
+// problem). This bypasses pino entirely, which has a bundled-worker code
+// path that can swallow output before SIGTERM.
+process.stderr.write(
+  `[boot] index.ts loaded — NODE_ENV=${process.env["NODE_ENV"] ?? "<unset>"} REPLIT_DEPLOYMENT=${process.env["REPLIT_DEPLOYMENT"] ?? "<unset>"}\n`,
+);
+
 registerAllEventHandlers();
 
 // Fail-fast on missing/blank critical secrets. Previously these were
@@ -24,9 +32,15 @@ if (missingSecrets.length > 0) {
   // warn so a developer running locally without OBC credentials can
   // still boot the API for non-webhook work.
   if (process.env["NODE_ENV"] === "production") {
+    process.stderr.write(
+      `[boot] missing required secrets in production: ${missingSecrets.join(",")} — exiting\n`,
+    );
     logger.error({ missing: missingSecrets }, "Missing required secrets — refusing to start");
     process.exit(1);
   } else {
+    process.stderr.write(
+      `[boot] missing secrets (non-production, continuing): ${missingSecrets.join(",")}\n`,
+    );
     logger.warn({ missing: missingSecrets }, "Missing secrets (non-production — continuing)");
   }
 }
@@ -59,10 +73,36 @@ function shouldAutoMigrate(): boolean {
   return process.env["REPLIT_DEPLOYMENT"] === "1";
 }
 
+// Hard deadline for the migration step. The autoscale runner SIGTERMs the
+// process if port 8080 doesn't open within ~60s, so we cannot let migrations
+// hang on a stuck DB connection (pg + bundled pino can swallow the only
+// signal we'd otherwise see). If we blow this budget, fail loudly to
+// stderr — which is guaranteed to surface in deploy logs — and exit.
+// Overridable via KAX_MIGRATION_DEADLINE_MS to leave headroom for cold-DB
+// wake-up scenarios where legitimate migrations may need 40–50s.
+const MIGRATION_DEADLINE_MS = (() => {
+  const raw = process.env["KAX_MIGRATION_DEADLINE_MS"];
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30_000;
+})();
+
 async function autoMigrateOrExit(): Promise<void> {
   if (!shouldAutoMigrate()) return;
+  // stderr is synchronous and guaranteed visible in deploy logs even if
+  // pino's bundled stdout path is buffered or wedged.
+  process.stderr.write(
+    `[boot] autoMigrate: starting (deadline=${MIGRATION_DEADLINE_MS}ms)\n`,
+  );
   try {
-    const result = await runMigrations({ log: (m) => logger.info(m) });
+    const result = await Promise.race([
+      runMigrations({ log: (m) => process.stderr.write(`[boot] migrate: ${m}\n`) }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`migration deadline exceeded (${MIGRATION_DEADLINE_MS}ms)`)),
+          MIGRATION_DEADLINE_MS,
+        ),
+      ),
+    ]);
     if (result.applied.length > 0) {
       logger.info(
         { applied: result.applied, skipped: result.skipped.length },
@@ -74,7 +114,12 @@ async function autoMigrateOrExit(): Promise<void> {
         "schema_migrations: up to date at boot",
       );
     }
+    process.stderr.write("[boot] autoMigrate: done\n");
   } catch (err) {
+    const e = err as NodeJS.ErrnoException & { cause?: unknown };
+    process.stderr.write(
+      `[boot] autoMigrate: FAILED — code=${e.code ?? "<none>"} cause=${String((e.cause as Error | undefined)?.message ?? "<none>")} message=${e.message}\n`,
+    );
     logger.error({ err }, "schema_migrations: auto-migrate failed — refusing to start");
     process.exit(1);
   }
@@ -87,7 +132,10 @@ async function autoMigrateOrExit(): Promise<void> {
 // the Replit runner waits for port 8080 to open. Pre-#40 these ran
 // after listen(); #40 (auto-migrate) accidentally awaited them too,
 // which is what bricked the publish.
-async function runStartupStep(name: string, fn: () => Promise<unknown>): Promise<void> {
+async function runStartupStep(
+  name: string,
+  fn: () => unknown | Promise<unknown>,
+): Promise<void> {
   try {
     await fn();
     logger.info({ step: name }, "startup step completed");
@@ -110,20 +158,31 @@ async function warmUpInBackground(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  process.stderr.write("[boot] boot() start\n");
   // Migrations MUST complete before we accept traffic — otherwise routes
   // 500 against a stale schema (see task #36). Everything else is
   // best-effort warm-up and runs after the port opens.
   await autoMigrateOrExit();
 
+  process.stderr.write(`[boot] calling app.listen(${port})\n`);
   app.listen(port, (err) => {
     if (err) {
+      process.stderr.write(`[boot] app.listen FAILED: ${String(err)}\n`);
       logger.error({ err }, "Error listening on port");
       process.exit(1);
     }
 
+    process.stderr.write(`[boot] app.listen OK on port ${port}\n`);
     logger.info({ port }, "Server listening");
     void warmUpInBackground();
   });
 }
+
+process.on("uncaughtException", (err) => {
+  process.stderr.write(`[boot] uncaughtException: ${String(err?.stack ?? err)}\n`);
+});
+process.on("unhandledRejection", (err) => {
+  process.stderr.write(`[boot] unhandledRejection: ${String((err as Error)?.stack ?? err)}\n`);
+});
 
 void boot();
