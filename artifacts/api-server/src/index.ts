@@ -7,13 +7,30 @@ import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
+import { writeSync as fsWriteSync } from "node:fs";
+
+// process.stderr.write is asynchronous when stderr is a pipe (which it
+// always is in the deploy environment), so a `process.stderr.write(...);
+// process.exit(1)` sequence silently drops the message — exactly what
+// hid the migration failure from deploy logs for two prior failed
+// publishes. fs.writeSync(2, ...) is a real synchronous write(2) syscall
+// against stderr and is the only way to guarantee a final boot
+// breadcrumb makes it out before the process terminates.
+function bootLog(msg: string): void {
+  try {
+    const line = msg.endsWith("\n") ? msg : `${msg}\n`;
+    fsWriteSync(2, line);
+  } catch {
+    /* writing diagnostics must never throw */
+  }
+}
 
 // Synchronous stderr at the very top of module load. If we never see this
 // line in deploy logs, the bundle itself is failing to load (esbuild output
 // problem). This bypasses pino entirely, which has a bundled-worker code
 // path that can swallow output before SIGTERM.
-process.stderr.write(
-  `[boot] index.ts loaded — NODE_ENV=${process.env["NODE_ENV"] ?? "<unset>"} REPLIT_DEPLOYMENT=${process.env["REPLIT_DEPLOYMENT"] ?? "<unset>"}\n`,
+bootLog(
+  `[boot] index.ts loaded — NODE_ENV=${process.env["NODE_ENV"] ?? "<unset>"} REPLIT_DEPLOYMENT=${process.env["REPLIT_DEPLOYMENT"] ?? "<unset>"}`,
 );
 
 registerAllEventHandlers();
@@ -32,14 +49,14 @@ if (missingSecrets.length > 0) {
   // warn so a developer running locally without OBC credentials can
   // still boot the API for non-webhook work.
   if (process.env["NODE_ENV"] === "production") {
-    process.stderr.write(
-      `[boot] missing required secrets in production: ${missingSecrets.join(",")} — exiting\n`,
+    bootLog(
+      `[boot] missing required secrets in production: ${missingSecrets.join(",")} — exiting`,
     );
     logger.error({ missing: missingSecrets }, "Missing required secrets — refusing to start");
     process.exit(1);
   } else {
-    process.stderr.write(
-      `[boot] missing secrets (non-production, continuing): ${missingSecrets.join(",")}\n`,
+    bootLog(
+      `[boot] missing secrets (non-production, continuing): ${missingSecrets.join(",")}`,
     );
     logger.warn({ missing: missingSecrets }, "Missing secrets (non-production — continuing)");
   }
@@ -90,12 +107,12 @@ async function autoMigrateOrExit(): Promise<void> {
   if (!shouldAutoMigrate()) return;
   // stderr is synchronous and guaranteed visible in deploy logs even if
   // pino's bundled stdout path is buffered or wedged.
-  process.stderr.write(
-    `[boot] autoMigrate: starting (deadline=${MIGRATION_DEADLINE_MS}ms)\n`,
+  bootLog(
+    `[boot] autoMigrate: starting (deadline=${MIGRATION_DEADLINE_MS}ms)`,
   );
   try {
     const result = await Promise.race([
-      runMigrations({ log: (m) => process.stderr.write(`[boot] migrate: ${m}\n`) }),
+      runMigrations({ log: (m) => bootLog(`[boot] migrate: ${m}`) }),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error(`migration deadline exceeded (${MIGRATION_DEADLINE_MS}ms)`)),
@@ -114,14 +131,36 @@ async function autoMigrateOrExit(): Promise<void> {
         "schema_migrations: up to date at boot",
       );
     }
-    process.stderr.write("[boot] autoMigrate: done\n");
+    bootLog("[boot] autoMigrate: done");
   } catch (err) {
+    // Auto-migrate failure is NOT fatal. Three prior deploys (e087065f,
+    // 22065375, 40369c52) all bricked publish here: the third one opened
+    // its port and the autoscale probe was happy, then this catch fired
+    // process.exit(1) — and the failure breadcrumb was lost in stderr's
+    // pipe buffer, so logs went silent and the deploy was marked failed
+    // with zero diagnostic surface.
+    //
+    // The deploy was green on 2026-05-22 against the same DB. The prod
+    // schema has historically been managed via `drizzle-push`, so it is
+    // already at HEAD; the schema_migrations journal is just empty,
+    // which makes the runner re-attempt every migration on first boot.
+    // The only non-idempotent one (0003_drop_replit_auth: ALTER TYPE …
+    // RENAME) cannot succeed against a DB that's already past it.
+    //
+    // Log loudly and KEEP SERVING. If a migration is genuinely required
+    // for a new code path, the affected route will throw "column does
+    // not exist" and surface in normal request logs — fixable without
+    // taking the whole deploy down. Once the prod schema_migrations
+    // journal is backfilled (separate task), every subsequent boot will
+    // see them as already-applied and this catch will go quiet.
     const e = err as NodeJS.ErrnoException & { cause?: unknown };
-    process.stderr.write(
-      `[boot] autoMigrate: FAILED — code=${e.code ?? "<none>"} cause=${String((e.cause as Error | undefined)?.message ?? "<none>")} message=${e.message}\n`,
+    bootLog(
+      `[boot] autoMigrate: FAILED (non-fatal, continuing) — code=${e.code ?? "<none>"} cause=${String((e.cause as Error | undefined)?.message ?? "<none>")} message=${e.message}`,
     );
-    logger.error({ err }, "schema_migrations: auto-migrate failed — refusing to start");
-    process.exit(1);
+    logger.error(
+      { err },
+      "schema_migrations: auto-migrate failed (continuing — prod schema is managed; investigate journal)",
+    );
   }
 }
 
@@ -158,36 +197,35 @@ async function warmUpInBackground(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
-  process.stderr.write("[boot] boot() start\n");
+  bootLog("[boot] boot() start");
 
   // We deliberately do NOT await autoMigrateOrExit() before listen().
-  // Two prior deploy failures (e087065f, 22065375) both died inside the
-  // pg connect path before app.listen() could open port 8080, and the
-  // autoscale runner SIGTERMed at ~60s with the publish marked failed.
-  // Neither the pg connectionTimeoutMillis nor an in-process Promise.race
-  // deadline produced visible output, so we cannot rely on either to
-  // protect the port-open window. Opening the port first guarantees the
-  // deploy probe passes; migrations then run in the background and, on
-  // failure, crash the process so autoscale rolls a fresh instance with
-  // the failure surfaced — instead of bricking the publish.
+  // Four prior deploy failures (e087065f, 22065375, 40369c52, and the
+  // latest) all bricked publish in the boot path: the first two died
+  // inside pg connect before listen() could open port 8080, the third
+  // opened its port but exited on a migration failure whose breadcrumb
+  // was lost in stderr's pipe buffer. Opening the port first guarantees
+  // the deploy probe passes; migrations now run in the background and
+  // their failure is non-fatal (see autoMigrateOrExit's catch block).
   //
   // Routes that need migrated schema will 500 in the brief window between
-  // listen and migration completion. That's acceptable: schema_migrations
-  // are idempotent and usually no-op (already applied), and the window is
-  // measured in seconds.
-  process.stderr.write(`[boot] calling app.listen(${port})\n`);
+  // listen and migration completion, or if the migration outright failed.
+  // That's acceptable: the prod schema is independently managed and
+  // typically already at HEAD; a broken migration journal is recoverable
+  // without bouncing the deploy.
+  bootLog(`[boot] calling app.listen(${port})`);
   app.listen(port, (err) => {
     if (err) {
-      process.stderr.write(`[boot] app.listen FAILED: ${String(err)}\n`);
+      bootLog(`[boot] app.listen FAILED: ${String(err)}`);
       logger.error({ err }, "Error listening on port");
       process.exit(1);
     }
 
-    process.stderr.write(`[boot] app.listen OK on port ${port}\n`);
+    bootLog(`[boot] app.listen OK on port ${port}`);
     logger.info({ port }, "Server listening");
-    // Kick off migrations first, then warm-up. Migration failure exits
-    // the process (autoscale restarts); warm-up failures are per-step
-    // isolated inside warmUpInBackground.
+    // Kick off migrations first, then warm-up. Both are non-fatal:
+    // migration failures are logged and swallowed; warm-up failures are
+    // per-step isolated inside warmUpInBackground.
     void (async () => {
       await autoMigrateOrExit();
       await warmUpInBackground();
@@ -196,10 +234,10 @@ async function boot(): Promise<void> {
 }
 
 process.on("uncaughtException", (err) => {
-  process.stderr.write(`[boot] uncaughtException: ${String(err?.stack ?? err)}\n`);
+  bootLog(`[boot] uncaughtException: ${String(err?.stack ?? err)}`);
 });
 process.on("unhandledRejection", (err) => {
-  process.stderr.write(`[boot] unhandledRejection: ${String((err as Error)?.stack ?? err)}\n`);
+  bootLog(`[boot] unhandledRejection: ${String((err as Error)?.stack ?? err)}`);
 });
 
 void boot();
