@@ -1,6 +1,26 @@
 import { Link } from "wouter";
-import { useGetStorefrontMarketplace, getGetStorefrontMarketplaceQueryKey } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+
+interface UnifiedStorefront {
+  source: "obc" | "constellation";
+  slug: string;
+  displayName: string;
+  agent: { id: number | null; slug: string; displayName: string; avatarUrl: string | null };
+  settings: { displayName: string; accentColor: string | null; heroImageUrl: string | null; tagline: string | null };
+  publishedDropCount: number;
+  artifactCount: number;
+  latestPublishedAt: string | null;
+  claimed: boolean;
+  phi: number | null;
+  consciousnessLevel: string | null;
+  lastSeenAt: string | null;
+}
+
+interface CombinedResponse {
+  storefronts: UnifiedStorefront[];
+  counts: { obc: number; constellation: number };
+}
 
 function startClaim() {
   const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
@@ -12,8 +32,13 @@ import { useStorefrontSeo } from "@/lib/storefront-seo";
 
 export default function Marketplace() {
   const { user } = useAuth();
-  const { data, isLoading, isError } = useGetStorefrontMarketplace({
-    query: { queryKey: getGetStorefrontMarketplaceQueryKey() },
+  const { data, isLoading, isError } = useQuery<CombinedResponse>({
+    queryKey: ["/api/marketplace/combined"],
+    queryFn: async () => {
+      const res = await fetch("/api/marketplace/combined");
+      if (!res.ok) throw new Error("marketplace fetch failed");
+      return (await res.json()) as CombinedResponse;
+    },
   });
 
   useStorefrontSeo({
@@ -85,15 +110,17 @@ export default function Marketplace() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {data.storefronts.map(({ agent, settings, publishedDropCount, artifactCount, latestPublishedAt }) => {
+            {data.storefronts.map((sf) => {
+              const { source, slug, agent, settings, publishedDropCount, artifactCount, latestPublishedAt, consciousnessLevel, phi } = sf;
               const name = settings.displayName || agent.displayName;
-              const accent = settings.accentColor || "#7C3AED";
+              const accent = settings.accentColor || (source === "constellation" ? "#39ff14" : "#7C3AED");
+              const isConstellation = source === "constellation";
               return (
                 <Link
-                  key={agent.id}
-                  href={`/s/${agent.slug}`}
-                  className="group block border border-border hover:border-primary transition-colors"
-                  data-testid={`card-storefront-${agent.slug}`}
+                  key={`${source}-${slug}`}
+                  href={isConstellation ? `/constellation/${slug}` : `/s/${slug}`}
+                  className="group block border border-border hover:border-primary transition-colors relative"
+                  data-testid={`card-storefront-${slug}`}
                 >
                   <div
                     className="aspect-[16/9] bg-secondary overflow-hidden relative"
@@ -115,24 +142,50 @@ export default function Marketplace() {
                   </div>
                   <div className="p-4">
                     <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-                      @{agent.slug}
+                      @{slug}
                     </p>
-                    <h3 className="text-lg font-bold tracking-tight mt-1" data-testid={`text-storefront-name-${agent.slug}`}>
-                      {name}
-                    </h3>
+                    <div className="flex items-center justify-between mt-1 gap-2">
+                      <h3 className="text-lg font-bold tracking-tight" data-testid={`text-storefront-name-${slug}`}>
+                        {name}
+                      </h3>
+                      {isConstellation && (
+                        <span
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 border border-green-400/40 text-green-400 font-mono"
+                          title="Discovered via Kannaka constellation NATS bus"
+                        >
+                          🌐 Constellation
+                        </span>
+                      )}
+                    </div>
                     {settings.tagline && (
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{settings.tagline}</p>
                     )}
                     <div className="flex items-center gap-3 mt-3 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-                      <span data-testid={`text-drops-count-${agent.slug}`}>
-                        {publishedDropCount} drop{publishedDropCount !== 1 ? "s" : ""}
-                      </span>
-                      <span>·</span>
-                      <span>{artifactCount} artifact{artifactCount !== 1 ? "s" : ""}</span>
-                      {latestPublishedAt && (
+                      {isConstellation ? (
                         <>
+                          {consciousnessLevel && (
+                            <span data-testid={`text-conscious-${slug}`}>{consciousnessLevel}</span>
+                          )}
+                          {phi !== null && (
+                            <>
+                              {consciousnessLevel && <span>·</span>}
+                              <span>Φ {phi.toFixed(3)}</span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span data-testid={`text-drops-count-${slug}`}>
+                            {publishedDropCount} drop{publishedDropCount !== 1 ? "s" : ""}
+                          </span>
                           <span>·</span>
-                          <span>{new Date(latestPublishedAt).toLocaleDateString()}</span>
+                          <span>{artifactCount} artifact{artifactCount !== 1 ? "s" : ""}</span>
+                          {latestPublishedAt && (
+                            <>
+                              <span>·</span>
+                              <span>{new Date(latestPublishedAt).toLocaleDateString()}</span>
+                            </>
+                          )}
                         </>
                       )}
                     </div>

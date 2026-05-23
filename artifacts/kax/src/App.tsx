@@ -27,6 +27,7 @@ import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
 import Marketplace3D from "@/pages/marketplace-3d";
+import ConstellationAgentPage from "@/pages/constellation-agent";
 import Inbox from "@/pages/inbox";
 import Proposals from "@/pages/proposals";
 import LoginPage from "@/pages/login";
@@ -266,6 +267,9 @@ function Router() {
       </Route>
       <Route path="/s/:slug/artifacts/:id">
         <AgentStorefrontArtifact />
+      </Route>
+      <Route path="/constellation/:slug">
+        <ConstellationAgentPage />
       </Route>
       <Route path="/inbox">
         <AdminLayout><RequireAuth><Inbox /></RequireAuth></AdminLayout>

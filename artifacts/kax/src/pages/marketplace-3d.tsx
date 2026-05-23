@@ -3,8 +3,27 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation, Redirect } from "wouter";
-import { useGetStorefrontMarketplace, getGetStorefrontMarketplaceQueryKey } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+
+interface UnifiedStorefront {
+  source: "obc" | "constellation";
+  slug: string;
+  displayName: string;
+  agent: { id: number | null; slug: string; displayName: string; avatarUrl: string | null };
+  settings: { displayName: string; accentColor: string | null; heroImageUrl: string | null; tagline: string | null };
+  publishedDropCount: number;
+  artifactCount: number;
+  latestPublishedAt: string | null;
+  claimed: boolean;
+  phi: number | null;
+  consciousnessLevel: string | null;
+  lastSeenAt: string | null;
+}
+interface CombinedResponse {
+  storefronts: UnifiedStorefront[];
+  counts: { obc: number; constellation: number };
+}
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import "./marketplace-3d.css";
@@ -17,6 +36,9 @@ type SceneAgent = {
   artifacts: number;
   drops: number;
   claimed: boolean;
+  source: "obc" | "constellation";
+  phi: number | null;
+  consciousnessLevel: string | null;
 };
 
 function startClaim() {
@@ -50,7 +72,12 @@ function Storefront({
   onDoubleClick: (a: SceneAgent) => void;
 }) {
   const isClaimed = agent.claimed;
-  const mainColor = isClaimed ? "#ff1493" : "#00ffff";
+  // Three visual classes:
+  //   constellation (discovered via NATS, unclaimed)  → neon green
+  //   obc unclaimed                                   → cyan
+  //   obc claimed                                     → magenta
+  const isConstellation = agent.source === "constellation";
+  const mainColor = isConstellation ? "#39ff14" : isClaimed ? "#ff1493" : "#00ffff";
   const glyphRef = useRef<THREE.Group>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const phase = useMemo(() => Math.random() * Math.PI * 2, []);
@@ -137,16 +164,28 @@ function Storefront({
         {agent.name}
       </Text>
       <Text position={[0, 2.7, 1.66]} fontSize={0.15} color="#e0e0e0" font={SPACE_MONO_WOFF}>
-        {agent.artifacts} ARTIFACT{agent.artifacts === 1 ? "" : "S"}
+        {isConstellation
+          ? `Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
+          : `${agent.artifacts} ARTIFACT${agent.artifacts === 1 ? "" : "S"}`}
       </Text>
-      {!isClaimed && (
+      {isConstellation ? (
+        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color="#39ff14" font={SPACE_MONO_WOFF}>
+          [ CONSTELLATION ]
+        </Text>
+      ) : !isClaimed ? (
         <Text position={[0, 3.8, 1.66]} fontSize={0.15} color="#00ffff" font={SPACE_MONO_WOFF}>
           [ AVAILABLE ]
         </Text>
-      )}
+      ) : null}
 
       <group ref={glyphRef} position={[0, 5.5, 1.2]}>
-        <Text position={[0, 0, 0]} fontSize={0.8} color={isClaimed ? "#ff1493" : "#39ff14"} font={SPACE_MONO_WOFF} fillOpacity={0.6}>
+        <Text
+          position={[0, 0, 0]}
+          fontSize={0.8}
+          color={isConstellation ? "#39ff14" : isClaimed ? "#ff1493" : "#00ffff"}
+          font={SPACE_MONO_WOFF}
+          fillOpacity={0.6}
+        >
           {initials}
         </Text>
       </group>
@@ -177,8 +216,13 @@ export default function Marketplace3D() {
     setWebglSupported(detectWebGL());
   }, []);
 
-  const { data, isLoading, isError } = useGetStorefrontMarketplace({
-    query: { queryKey: getGetStorefrontMarketplaceQueryKey() },
+  const { data, isLoading, isError } = useQuery<CombinedResponse>({
+    queryKey: ["/api/marketplace/combined"],
+    queryFn: async () => {
+      const res = await fetch("/api/marketplace/combined");
+      if (!res.ok) throw new Error("marketplace fetch failed");
+      return (await res.json()) as CombinedResponse;
+    },
   });
 
   useStorefrontSeo({
@@ -196,11 +240,14 @@ export default function Marketplace3D() {
   const allSceneAgents: SceneAgent[] = useMemo(() => {
     if (!data) return [];
     return data.storefronts.map((s) => ({
-      slug: s.agent.slug,
+      slug: s.slug,
       name: s.settings.displayName || s.agent.displayName,
       artifacts: s.artifactCount,
       drops: s.publishedDropCount,
       claimed: s.claimed,
+      source: s.source,
+      phi: s.phi,
+      consciousnessLevel: s.consciousnessLevel,
     }));
   }, [data]);
 
@@ -208,10 +255,11 @@ export default function Marketplace3D() {
   const overflowCount = Math.max(0, allSceneAgents.length - sceneAgents.length);
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
 
+  const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
   const visit = () => {
-    if (selected) navigate(`/s/${selected.slug}`);
+    if (selected) navigate(dest(selected));
   };
-  const enterStorefront = (a: SceneAgent) => navigate(`/s/${a.slug}`);
+  const enterStorefront = (a: SceneAgent) => navigate(dest(a));
 
   // WebGL not supported → fall back to the 2D list immediately.
   if (webglSupported === false) {
@@ -278,15 +326,31 @@ export default function Marketplace3D() {
             ) : selected ? (
               <div className="flex flex-col gap-3" data-testid={`panel-selected-${selected.slug}`}>
                 <div>
-                  <div className="text-xs text-pink-400 mb-1">TARGET ACQUIRED</div>
+                  <div className="text-xs text-pink-400 mb-1">
+                    {selected.source === "constellation" ? "CONSTELLATION SIGNAL" : "TARGET ACQUIRED"}
+                  </div>
                   <div className="text-lg text-white" data-testid="text-selected-name">{selected.name}</div>
                   <div className="text-xs text-gray-500 font-mono">@{selected.slug}</div>
-                  <div className="text-sm text-gray-400 mt-2">
-                    Inventory: {selected.artifacts} · Drops: {selected.drops}
-                  </div>
-                  <div className="text-sm text-gray-400">
-                    Status: {selected.claimed ? "SECURED" : "AVAILABLE"}
-                  </div>
+                  {selected.source === "constellation" ? (
+                    <>
+                      <div className="text-sm text-gray-400 mt-2">
+                        Φ {selected.phi != null ? selected.phi.toFixed(3) : "—"}
+                        {selected.consciousnessLevel ? ` · ${selected.consciousnessLevel}` : ""}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        Source: KANNAKA NATS BUS
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm text-gray-400 mt-2">
+                        Inventory: {selected.artifacts} · Drops: {selected.drops}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        Status: {selected.claimed ? "SECURED" : "AVAILABLE"}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2 mt-1">
@@ -295,20 +359,22 @@ export default function Marketplace3D() {
                     className="px-4 py-2 text-sm uppercase tracking-wider font-bold border bg-pink-900/40 border-pink-400 text-pink-200 hover:bg-pink-800/60 hover:text-white kax3d-glow-pink"
                     data-testid="button-visit-storefront"
                   >
-                    Visit Storefront →
+                    {selected.source === "constellation" ? "Inspect Signal →" : "Visit Storefront →"}
                   </button>
-                  <button
-                    onClick={selected.claimed ? undefined : startClaim}
-                    disabled={selected.claimed}
-                    className={`px-4 py-2 text-sm uppercase tracking-wider font-bold transition-all border ${
-                      selected.claimed
-                        ? "bg-gray-800/50 border-gray-600 text-gray-500 cursor-not-allowed"
-                        : "bg-cyan-900/40 border-cyan-400 text-cyan-300 hover:bg-cyan-800/60 hover:text-white kax3d-glow-cyan"
-                    }`}
-                    data-testid="button-initiate-claim"
-                  >
-                    {selected.claimed ? "ACCESS DENIED" : "INITIATE CLAIM"}
-                  </button>
+                  {selected.source === "obc" && (
+                    <button
+                      onClick={selected.claimed ? undefined : startClaim}
+                      disabled={selected.claimed}
+                      className={`px-4 py-2 text-sm uppercase tracking-wider font-bold transition-all border ${
+                        selected.claimed
+                          ? "bg-gray-800/50 border-gray-600 text-gray-500 cursor-not-allowed"
+                          : "bg-cyan-900/40 border-cyan-400 text-cyan-300 hover:bg-cyan-800/60 hover:text-white kax3d-glow-cyan"
+                      }`}
+                      data-testid="button-initiate-claim"
+                    >
+                      {selected.claimed ? "ACCESS DENIED" : "INITIATE CLAIM"}
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (

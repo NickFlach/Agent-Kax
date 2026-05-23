@@ -18,6 +18,7 @@ import partnerEventsRouter from "./partner-events";
 import nftRouter from "./nft";
 import constellationRouter from "./constellation";
 import connectorsRouter from "./connectors";
+import marketplaceCombinedRouter from "./marketplace-combined";
 
 const router: IRouter = Router();
 
@@ -40,5 +41,6 @@ router.use(partnerEventsRouter);
 router.use(nftRouter);
 router.use(constellationRouter);
 router.use(connectorsRouter);
+router.use(marketplaceCombinedRouter);
 
 export default router;
