@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { ArtifactCover } from "@/components/artifact-cover";
 
 export default function DropDetail() {
   const routeParams = useParams<{ id: string }>();
@@ -147,16 +148,10 @@ export default function DropDetail() {
                                 className="w-full flex items-center gap-3 p-3 hover:bg-secondary transition-colors text-left"
                                 data-testid={`button-add-${a.id}`}
                               >
-                                <div className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
-                                  <img
-                                    src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? a.thumbnailUrl : a.publicUrl}
-                                    alt={a.title}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
-                                    }}
-                                  />
-                                </div>
+                                <ArtifactCover
+                                  artifact={a}
+                                  className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0"
+                                />
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium truncate">{a.title}</p>
                                   <p className="text-xs text-muted-foreground">{a.creatorName}</p>
@@ -202,24 +197,11 @@ export default function DropDetail() {
                         <EditionBadge editionType={artifact.editionType} editionTotal={artifact.editionTotal} editionSerial={artifact.editionSerial} />
                       </div>
                       <Link href={`/artifacts/${artifact.id}`}>
-                        <div className="aspect-square bg-secondary overflow-hidden">
-                          {(artifact.artifactType === "audio" || artifact.artifactType === "music") && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
-                            <img
-                              src={artifact.thumbnailUrl}
-                              alt={artifact.title}
-                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <img
-                              src={artifact.publicUrl}
-                              alt={artifact.title}
-                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
-                              }}
-                            />
-                          )}
-                        </div>
+                        <ArtifactCover
+                          artifact={artifact}
+                          className="aspect-square bg-secondary overflow-hidden"
+                          imgClassName="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
                       </Link>
                       <div className="mt-1">
                         <p className="text-xs truncate font-medium">{artifact.title}</p>
@@ -332,14 +314,7 @@ export default function DropDetail() {
                           title={`Add ${a.title}`}
                           data-testid={`suggestion-add-${a.id}`}
                         >
-                          <img
-                            src={(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes("suno.ai") ? a.thumbnailUrl : a.publicUrl}
-                            alt={a.title}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
-                            }}
-                          />
+                          <ArtifactCover artifact={a} />
                         </button>
                       ))}
                     </div>

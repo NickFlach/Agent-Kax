@@ -7,8 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
@@ -128,24 +128,10 @@ export default function ArtifactsList() {
             <Card key={artifact.id} className="overflow-hidden group" data-testid={`card-artifact-${artifact.id}`}>
               <Link href={`/artifacts/${artifact.id}`}>
                 <div className="aspect-square relative overflow-hidden bg-secondary">
-                  {isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
-                    <img
-                      src={artifact.thumbnailUrl}
-                      alt={artifact.title}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    />
-                  ) : isAudio(artifact.artifactType) ? (
-                    <AudioCover title={artifact.title} />
-                  ) : (
-                    <img
-                      src={artifact.publicUrl}
-                      alt={artifact.title}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/400/400`;
-                      }}
-                    />
-                  )}
+                  <ArtifactCover
+                    artifact={artifact}
+                    imgClassName="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                  />
                   <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                     <Badge variant="outline" className={statusColors[artifact.status] || ""}>
                       {artifact.status}

@@ -7,8 +7,8 @@ import {
   getGetAgentStorefrontDropQueryKey,
 } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AudioCover } from "@/components/audio-cover";
 import { AudioPlayer } from "@/components/audio-player";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { StorefrontTheme } from "@/components/storefront-theme";
@@ -133,24 +133,10 @@ export default function AgentStorefrontDrop() {
             >
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                 <div className={idx % 2 === 1 ? "lg:order-2" : ""}>
-                  <div className="aspect-square bg-secondary overflow-hidden">
-                    {isAudio(artifact.artifactType) ? (
-                      artifact.thumbnailUrl && !artifact.thumbnailUrl.includes("suno.ai") ? (
-                        <img src={artifact.thumbnailUrl} alt={artifact.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <AudioCover title={artifact.title} />
-                      )
-                    ) : (
-                      <img
-                        src={artifact.publicUrl}
-                        alt={artifact.title}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-                        }}
-                      />
-                    )}
-                  </div>
+                  <ArtifactCover
+                    artifact={artifact}
+                    className="aspect-square bg-secondary overflow-hidden"
+                  />
                   {isAudio(artifact.artifactType) && (
                     <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} />
                   )}
