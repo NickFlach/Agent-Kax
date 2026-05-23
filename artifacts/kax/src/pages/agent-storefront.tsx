@@ -9,7 +9,7 @@ import {
   getGetAgentStorefrontHotQueryKey,
 } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AudioCover } from "@/components/audio-cover";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { StorefrontTheme } from "@/components/storefront-theme";
@@ -83,8 +83,6 @@ export default function AgentStorefront() {
   const { agent, settings, featured, latestDrop } = landing;
   const title = settings.displayName || agent.displayName;
   const tagline = settings.tagline || `curated by ${agent.displayName}`;
-  const isAudio = (t: string) => t === "audio" || t === "music";
-
   return (
     <StorefrontTheme settings={settings}>
       <div className="border-b border-border">
@@ -143,26 +141,10 @@ export default function AgentStorefront() {
                     data-testid={`trending-item-${item.id}`}
                   >
                     <div className="relative aspect-square bg-secondary overflow-hidden">
-                      {isAudio(item.artifactType) ? (
-                        item.thumbnailUrl && !item.thumbnailUrl.includes("suno.ai") ? (
-                          <img
-                            src={item.thumbnailUrl}
-                            alt={item.title}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <AudioCover title={item.title} />
-                        )
-                      ) : (
-                        <img
-                          src={item.publicUrl}
-                          alt={item.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${item.id}/400/400`;
-                          }}
-                        />
-                      )}
+                      <ArtifactCover
+                        artifact={item}
+                        imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
                       <div className="absolute top-1 left-1 bg-background/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
                         #{idx + 1}
                       </div>
@@ -191,28 +173,11 @@ export default function AgentStorefront() {
                 className={`relative overflow-hidden group ${idx === 0 ? "col-span-2 row-span-2" : ""}`}
                 data-testid={`featured-artifact-${artifact.id}`}
               >
-                <div className="aspect-square bg-secondary">
-                  {isAudio(artifact.artifactType) ? (
-                    artifact.thumbnailUrl && !artifact.thumbnailUrl.includes("suno.ai") ? (
-                      <img
-                        src={artifact.thumbnailUrl}
-                        alt={artifact.title}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <AudioCover title={artifact.title} />
-                    )
-                  ) : (
-                    <img
-                      src={artifact.publicUrl}
-                      alt={artifact.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-                      }}
-                    />
-                  )}
-                </div>
+                <ArtifactCover
+                  artifact={artifact}
+                  className="aspect-square bg-secondary"
+                  imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
                 <div className="absolute top-2 left-2 z-10">
                   <EditionBadge
                     editionType={artifact.editionType}
@@ -239,13 +204,11 @@ export default function AgentStorefront() {
               >
                 <div className="flex gap-1 flex-shrink-0">
                   {latestDrop.artifacts.slice(0, 3).map((a) => (
-                    <div key={a.id} className="w-20 h-20 bg-secondary overflow-hidden">
-                      {isAudio(a.artifactType) ? (
-                        <AudioCover title={a.title} />
-                      ) : (
-                        <img src={a.publicUrl} alt={a.title} className="w-full h-full object-cover" />
-                      )}
-                    </div>
+                    <ArtifactCover
+                      key={a.id}
+                      artifact={a}
+                      className="w-20 h-20 bg-secondary overflow-hidden"
+                    />
                   ))}
                 </div>
                 <div>
@@ -281,13 +244,11 @@ export default function AgentStorefront() {
                   {drop.artifacts.length > 0 && (
                     <div className="flex gap-1 mb-4">
                       {drop.artifacts.slice(0, 4).map((a) => (
-                        <div key={a.id} className="flex-1 aspect-square bg-secondary overflow-hidden">
-                          {isAudio(a.artifactType) ? (
-                            <AudioCover title={a.title} />
-                          ) : (
-                            <img src={a.publicUrl} alt={a.title} className="w-full h-full object-cover" />
-                          )}
-                        </div>
+                        <ArtifactCover
+                          key={a.id}
+                          artifact={a}
+                          className="flex-1 aspect-square bg-secondary overflow-hidden"
+                        />
                       ))}
                     </div>
                   )}

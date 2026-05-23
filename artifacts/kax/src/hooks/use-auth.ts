@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import type { AuthUser } from "@workspace/api-client-react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getGetCurrentAuthUserQueryKey,
+  type AuthUser,
+} from "@workspace/api-client-react";
 import { getInjectedProvider, personalSign, requestAccounts } from "@/lib/wallet";
 
 export type { AuthUser };
+
+interface AuthEnvelope {
+  user: AuthUser | null;
+}
 
 interface AuthState {
   user: AuthUser | null;
@@ -16,43 +23,31 @@ interface AuthState {
 }
 
 const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "";
+const AUTH_QUERY_KEY = getGetCurrentAuthUserQueryKey();
 
-async function fetchCurrentUser(): Promise<AuthUser | null> {
+async function fetchAuthEnvelope(): Promise<AuthEnvelope> {
+  // Use raw fetch (instead of the generated hook) so a 401 collapses to
+  // `{ user: null }` rather than throwing — the rest of the SPA treats
+  // logged-out as a normal state, not an error.
   const res = await fetch("/api/auth/user", { credentials: "include" });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { user: AuthUser | null };
-  return data.user ?? null;
+  if (!res.ok) return { user: null };
+  return (await res.json()) as AuthEnvelope;
 }
 
 export function useAuth(): AuthState {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const qc = useQueryClient();
+  const { data, isLoading, refetch } = useQuery<AuthEnvelope>({
+    queryKey: AUTH_QUERY_KEY,
+    queryFn: fetchAuthEnvelope,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const user = data?.user ?? null;
 
   const refresh = useCallback(async () => {
-    const u = await fetchCurrentUser();
-    setUser(u);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCurrentUser()
-      .then((u) => {
-        if (!cancelled) {
-          setUser(u);
-          setIsLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUser(null);
-          setIsLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    await refetch();
+  }, [refetch]);
 
   const login = useCallback(() => {
     const target = `${BASE}/login`;
@@ -65,7 +60,7 @@ export function useAuth(): AuthState {
         () => undefined,
       );
     } finally {
-      setUser(null);
+      qc.setQueryData(AUTH_QUERY_KEY, { user: null } satisfies AuthEnvelope);
       qc.clear();
       const target = `${BASE}/` || "/";
       window.location.href = target;
@@ -108,8 +103,14 @@ export function useAuth(): AuthState {
       throw new Error(text || "Signature was rejected. Please try again.");
     }
     const { user: signedIn } = (await verifyRes.json()) as { user: AuthUser };
-    setUser(signedIn);
-    qc.clear();
+    qc.setQueryData(AUTH_QUERY_KEY, { user: signedIn } satisfies AuthEnvelope);
+    // Invalidate every other cached query so authed views refetch with cookies.
+    qc.invalidateQueries({
+      predicate: (q) => {
+        const k = q.queryKey;
+        return !(Array.isArray(k) && k[0] === AUTH_QUERY_KEY[0]);
+      },
+    });
     return signedIn;
   }, [qc]);
 

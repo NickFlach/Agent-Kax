@@ -242,6 +242,48 @@ export default function Marketplace3D() {
 
   return (
     <div className="relative min-h-screen w-full bg-black overflow-hidden kax3d-font">
+      {/* Skip link + screen-reader-only directory of storefronts so keyboard
+          and assistive-tech users can reach every storefront without going
+          through the WebGL scene (which is unreachable by keyboard). */}
+      <a
+        href="#marketplace-storefront-list"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-3 focus:py-2 focus:bg-pink-900 focus:text-white focus:text-xs focus:uppercase focus:tracking-wider"
+      >
+        Skip 3D scene · list every storefront
+      </a>
+      <nav
+        id="marketplace-storefront-list"
+        aria-label="All storefronts"
+        className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:top-12 focus-within:left-2 focus-within:right-2 focus-within:z-[90] focus-within:bg-black/95 focus-within:border focus-within:border-pink-500/50 focus-within:p-4 focus-within:max-h-[70vh] focus-within:overflow-auto"
+      >
+        <h2 className="text-xs uppercase tracking-widest text-pink-300 mb-2">
+          {allSceneAgents.length} storefronts
+        </h2>
+        <ul className="space-y-1">
+          {allSceneAgents.map((a) => (
+            <li key={`${a.source}:${a.slug}`}>
+              <Link
+                href={dest(a)}
+                className="block text-sm text-cyan-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-pink-400 px-2 py-1"
+                data-testid={`a11y-storefront-link-${a.slug}`}
+              >
+                {a.name}
+                <span className="text-[10px] text-gray-500 ml-2 uppercase tracking-widest">
+                  {a.source === "constellation" ? "constellation" : a.claimed ? "secured" : "available"}
+                </span>
+              </Link>
+            </li>
+          ))}
+          <li>
+            <Link
+              href="/marketplace/list"
+              className="block text-xs uppercase tracking-widest text-pink-300 hover:text-white px-2 py-1"
+            >
+              Open full list view →
+            </Link>
+          </li>
+        </ul>
+      </nav>
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-3 pointer-events-none">
         <Link href="/" className="font-bold tracking-widest text-sm text-white pointer-events-auto" data-testid="link-home">

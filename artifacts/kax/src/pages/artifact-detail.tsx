@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
-import { AudioCover } from "@/components/audio-cover";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
@@ -88,26 +88,7 @@ export default function ArtifactDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <div className="aspect-square bg-secondary overflow-hidden">
-            {isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes('suno.ai') ? (
-              <img
-                src={artifact.thumbnailUrl}
-                alt={artifact.title}
-                className="w-full h-full object-cover"
-              />
-            ) : isAudio(artifact.artifactType) ? (
-              <AudioCover title={artifact.title} />
-            ) : (
-              <img
-                src={artifact.publicUrl}
-                alt={artifact.title}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/800/800`;
-                }}
-              />
-            )}
-          </div>
+          <ArtifactCover artifact={artifact} className="aspect-square bg-secondary overflow-hidden" />
           {isAudio(artifact.artifactType) && (
             <AudioPlayer src={artifact.publicUrl} title={artifact.title} artist={artifact.creatorName} />
           )}

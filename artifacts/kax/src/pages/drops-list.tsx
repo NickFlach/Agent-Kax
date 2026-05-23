@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
-import { AudioCover } from "@/components/audio-cover";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
 export default function DropsList() {
@@ -182,26 +182,11 @@ export default function DropsList() {
                 {drop.artifacts.length > 0 && (
                   <div className="flex gap-1 mt-3 overflow-hidden">
                     {drop.artifacts.slice(0, 4).map((a) => (
-                      <div key={a.id} className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0">
-                        {(a.artifactType === "audio" || a.artifactType === "music") && a.thumbnailUrl && !a.thumbnailUrl.includes('suno.ai') ? (
-                          <img
-                            src={a.thumbnailUrl}
-                            alt={a.title}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (a.artifactType === "audio" || a.artifactType === "music") ? (
-                          <AudioCover title={a.title} />
-                        ) : (
-                          <img
-                            src={a.publicUrl}
-                            alt={a.title}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/100/100`;
-                            }}
-                          />
-                        )}
-                      </div>
+                      <ArtifactCover
+                        key={a.id}
+                        artifact={a}
+                        className="w-12 h-12 bg-secondary overflow-hidden flex-shrink-0"
+                      />
                     ))}
                     {drop.artifacts.length > 4 && (
                       <div className="w-12 h-12 bg-secondary flex items-center justify-center text-xs text-muted-foreground flex-shrink-0">

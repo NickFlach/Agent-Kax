@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PlayerProvider } from "@/contexts/player-context";
 import { PersistentPlayer } from "@/components/persistent-player";
 import { ConstellationBackdrop } from "@/components/constellation-backdrop";
+import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import ArtifactsList from "@/pages/artifacts-list";
@@ -145,13 +146,19 @@ function AuthControls() {
   );
 }
 
-function AdminLayout({ children }: { children: React.ReactNode }) {
+function AdminChrome({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const { proposalsPending, dmsUnread } = useInboxNotifications(!!user);
   return (
     <div className="min-h-screen bg-background">
-      <nav className="border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-50">
+      <a
+        href="#admin-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-3 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:text-xs focus:uppercase focus:tracking-wider"
+      >
+        Skip to main content
+      </a>
+      <nav className="border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-50" aria-label="Primary">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-12">
           <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-logo">KAX</Link>
           <div className="flex items-center gap-1">
@@ -172,7 +179,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </nav>
-      <main className="max-w-7xl mx-auto px-6 py-6 pb-20">
+      <main id="admin-main" className="max-w-7xl mx-auto px-6 py-6 pb-20">
         {children}
       </main>
     </div>
@@ -180,7 +187,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 }
 
 function RequireAuth({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
-  const { user, isLoading, login } = useAuth();
+  const { user, isLoading } = useAuth();
   const [location] = useLocation();
   if (isLoading) {
     return (
@@ -215,47 +222,134 @@ function RequireAuth({ children, adminOnly = false }: { children: React.ReactNod
   return <>{children}</>;
 }
 
+// Routes that share the admin chrome (sticky nav + main container). Rendering
+// these inside a single <AdminChrome> wrapper keeps the nav mounted across
+// navigations — only the inner <Switch> swaps, so we avoid the chrome flash
+// users used to see between pages.
+function AdminRoutes() {
+  return (
+    <AdminChrome>
+      <Switch>
+        <Route path="/bots">
+          <RequireAuth><BotsPage /></RequireAuth>
+        </Route>
+        <Route path="/dashboard">
+          <RequireAuth><Dashboard /></RequireAuth>
+        </Route>
+        <Route path="/artifacts">
+          <RequireAuth><ArtifactsList /></RequireAuth>
+        </Route>
+        <Route path="/artifacts/:id">
+          <RequireAuth><ArtifactDetail /></RequireAuth>
+        </Route>
+        <Route path="/drops">
+          <RequireAuth><DropsList /></RequireAuth>
+        </Route>
+        <Route path="/drops/:id">
+          <RequireAuth><DropDetail /></RequireAuth>
+        </Route>
+        <Route path="/agents">
+          <RequireAuth><AgentsList /></RequireAuth>
+        </Route>
+        <Route path="/agents/:slug/storefront">
+          <RequireAuth><StorefrontSettings /></RequireAuth>
+        </Route>
+        <Route path="/agents/:slug">
+          <RequireAuth><AgentDetail /></RequireAuth>
+        </Route>
+        <Route path="/inbox">
+          <RequireAuth><Inbox /></RequireAuth>
+        </Route>
+        <Route path="/proposals">
+          <RequireAuth><Proposals /></RequireAuth>
+        </Route>
+        <Route path="/harvester">
+          <RequireAuth><HarvesterPage /></RequireAuth>
+        </Route>
+        <Route path="/vault">
+          <RequireAuth><Vault /></RequireAuth>
+        </Route>
+        <Route path="/admin/users">
+          <RequireAuth adminOnly><AdminUsers /></RequireAuth>
+        </Route>
+        <Route path="/admin/integrations">
+          <RequireAuth adminOnly><AdminIntegrations /></RequireAuth>
+        </Route>
+      </Switch>
+    </AdminChrome>
+  );
+}
+
+const ADMIN_PATHS = [
+  "/bots",
+  "/dashboard",
+  "/artifacts",
+  "/drops",
+  "/agents",
+  "/inbox",
+  "/proposals",
+  "/harvester",
+  "/vault",
+  "/admin",
+];
+
+function isAdminPath(location: string): boolean {
+  return ADMIN_PATHS.some((p) => location === p || location.startsWith(`${p}/`));
+}
+
+function Marketplace3DSafe() {
+  return (
+    <ErrorBoundary
+      fallback={(reset) => (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-black text-center px-6">
+          <p className="text-xs uppercase tracking-[0.3em] text-pink-400">
+            &gt; Render fault in the neon district
+          </p>
+          <p className="text-sm text-cyan-300 max-w-md">
+            Your browser couldn&rsquo;t paint the 3D scene. Try the list view, or reset and try again.
+          </p>
+          <div className="flex gap-2">
+            <Link
+              href="/marketplace/list"
+              className="px-4 py-2 text-xs uppercase tracking-wider border border-cyan-400 text-cyan-300 hover:bg-cyan-900/40"
+              data-testid="link-marketplace-fallback-list"
+            >
+              Open list view
+            </Link>
+            <button
+              onClick={reset}
+              className="px-4 py-2 text-xs uppercase tracking-wider border border-pink-400 text-pink-300 hover:bg-pink-900/40"
+              data-testid="button-marketplace-retry"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+    >
+      <Marketplace3D />
+    </ErrorBoundary>
+  );
+}
+
 function Router() {
+  const [location] = useLocation();
+  if (isAdminPath(location)) {
+    return <AdminRoutes />;
+  }
   return (
     <Switch>
       <Route path="/">
-        <Marketplace3D />
+        <Marketplace3DSafe />
       </Route>
       <Route path="/login">
         <LoginPage />
-      </Route>
-      <Route path="/bots">
-        <AdminLayout><RequireAuth><BotsPage /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/dashboard">
-        <AdminLayout><RequireAuth><Dashboard /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/artifacts">
-        <AdminLayout><RequireAuth><ArtifactsList /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/artifacts/:id">
-        <AdminLayout><RequireAuth><ArtifactDetail /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/drops">
-        <AdminLayout><RequireAuth><DropsList /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/drops/:id">
-        <AdminLayout><RequireAuth><DropDetail /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/agents">
-        <AdminLayout><RequireAuth><AgentsList /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/agents/:slug/storefront">
-        <AdminLayout><RequireAuth><StorefrontSettings /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/agents/:slug">
-        <AdminLayout><RequireAuth><AgentDetail /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/s">
         <Marketplace />
       </Route>
       <Route path="/marketplace">
-        <Marketplace3D />
+        <Marketplace3DSafe />
       </Route>
       <Route path="/marketplace/list">
         <Marketplace />
@@ -271,24 +365,6 @@ function Router() {
       </Route>
       <Route path="/constellation/:slug">
         <ConstellationAgentPage />
-      </Route>
-      <Route path="/inbox">
-        <AdminLayout><RequireAuth><Inbox /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/proposals">
-        <AdminLayout><RequireAuth><Proposals /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/harvester">
-        <AdminLayout><RequireAuth><HarvesterPage /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/vault">
-        <AdminLayout><RequireAuth><Vault /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/admin/users">
-        <AdminLayout><RequireAuth adminOnly><AdminUsers /></RequireAuth></AdminLayout>
-      </Route>
-      <Route path="/admin/integrations">
-        <AdminLayout><RequireAuth adminOnly><AdminIntegrations /></RequireAuth></AdminLayout>
       </Route>
       <Route path="/storefront">
         <Redirect to="/s/kannaka" />
