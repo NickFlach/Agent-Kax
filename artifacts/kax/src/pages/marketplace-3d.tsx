@@ -3,27 +3,8 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation, Redirect } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
-
-interface UnifiedStorefront {
-  source: "obc" | "constellation";
-  slug: string;
-  displayName: string;
-  agent: { id: number | null; slug: string; displayName: string; avatarUrl: string | null };
-  settings: { displayName: string; accentColor: string | null; heroImageUrl: string | null; tagline: string | null };
-  publishedDropCount: number;
-  artifactCount: number;
-  latestPublishedAt: string | null;
-  claimed: boolean;
-  phi: number | null;
-  consciousnessLevel: string | null;
-  lastSeenAt: string | null;
-}
-interface CombinedResponse {
-  storefronts: UnifiedStorefront[];
-  counts: { obc: number; constellation: number };
-}
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import "./marketplace-3d.css";
@@ -216,14 +197,7 @@ export default function Marketplace3D() {
     setWebglSupported(detectWebGL());
   }, []);
 
-  const { data, isLoading, isError } = useQuery<CombinedResponse>({
-    queryKey: ["/api/marketplace/combined"],
-    queryFn: async () => {
-      const res = await fetch("/api/marketplace/combined");
-      if (!res.ok) throw new Error("marketplace fetch failed");
-      return (await res.json()) as CombinedResponse;
-    },
-  });
+  const { data, isLoading, isError } = useGetMarketplaceCombined();
 
   useStorefrontSeo({
     title: "KAX // Neon District — All Storefronts",
@@ -246,8 +220,8 @@ export default function Marketplace3D() {
       drops: s.publishedDropCount,
       claimed: s.claimed,
       source: s.source,
-      phi: s.phi,
-      consciousnessLevel: s.consciousnessLevel,
+      phi: s.phi ?? null,
+      consciousnessLevel: s.consciousnessLevel ?? null,
     }));
   }, [data]);
 

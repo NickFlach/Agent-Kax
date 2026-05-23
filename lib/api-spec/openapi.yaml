@@ -29,6 +29,12 @@ tags:
     description: Partner-driven proposals, DMs, and matches
   - name: nft
     description: 1-of-1 NFT minting + token metadata
+  - name: marketplace
+    description: Unified marketplace surface combining OBC storefronts and constellation agents
+  - name: constellation
+    description: Read-only mirror of the Kannaka constellation NATS bus
+  - name: connectors
+    description: Pluggable agentic-platform connector registry
 
 paths:
   /healthz:
@@ -192,6 +198,21 @@ paths:
           description: Auth required
         '404':
           description: Bot not attached to this user
+  /me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: Alias of /auth/user returning the current authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
   /me/notification-prefs:
     patch:
       tags: [Auth]
@@ -332,6 +353,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminUser'
+
+  /admin/reattribute-artifacts:
+    post:
+      tags: [admin]
+      operationId: reattributeArtifacts
+      summary: Re-link orphaned artifacts to their creators (admin only)
+      parameters:
+        - name: dryRun
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Reattribution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReattributeArtifactsResponse'
+
+  /admin/obc/status:
+    get:
+      tags: [admin]
+      operationId: getObcStatus
+      summary: OBC integration health snapshot (admin only)
+      responses:
+        '200':
+          description: Snapshot of partner key, webhook, and public probe state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObcStatusResponse'
+
+  /admin/obc/replay:
+    post:
+      tags: [admin]
+      operationId: replayObcEvents
+      summary: Drain OBC /events/recent through the event dispatcher (admin only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ObcReplayBody'
+      responses:
+        '200':
+          description: Replay result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObcReplayResponse'
+        '503':
+          description: Partner API key not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /agents:
     get:
@@ -1286,6 +1364,213 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ScoreDistribution"
+
+  /marketplace/combined:
+    get:
+      tags: [marketplace]
+      operationId: getMarketplaceCombined
+      summary: Unified marketplace listing (OBC storefronts + constellation agents)
+      description: |
+        Single endpoint that returns both OBC storefronts (claimed + with
+        published drops) and recently-seen constellation agents in one
+        unified shape, so the marketplace UIs can render the whole grid
+        without two queries and a client-side merge.
+      responses:
+        '200':
+          description: Combined storefront list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceCombinedResponse'
+
+  /constellation/status:
+    get:
+      tags: [constellation]
+      operationId: getConstellationStatus
+      summary: Constellation bridge connection + mirror table counts
+      responses:
+        '200':
+          description: Bridge status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstellationStatusResponse'
+
+  /constellation/agents:
+    get:
+      tags: [constellation]
+      operationId: listConstellationAgents
+      summary: Recently-seen agents on the Kannaka constellation bus
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Constellation agent list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstellationAgentListResponse'
+
+  /constellation/artifacts:
+    get:
+      tags: [constellation]
+      operationId: listConstellationArtifacts
+      summary: Recently-published constellation artifacts
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Constellation artifact list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstellationArtifactListResponse'
+
+  /constellation/background:
+    get:
+      tags: [constellation]
+      operationId: getConstellationBackground
+      summary: One random recent constellation image to use as a backdrop
+      responses:
+        '200':
+          description: A backdrop artifact
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConstellationArtifact'
+        '204':
+          description: No candidate artifacts available
+
+  /connectors:
+    get:
+      tags: [connectors]
+      operationId: listConnectors
+      summary: Enumerate every known connector + its availability
+      responses:
+        '200':
+          description: Connector registry snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorListResponse'
+
+  /connectors/{id}/agent/{slug}:
+    get:
+      tags: [connectors]
+      operationId: lookupConnectorAgent
+      summary: Resolve an agent through a specific connector
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent profile from the connector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorAgentLookupResponse'
+        '404':
+          description: Connector unknown or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: Connector upstream error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Connector unavailable (not configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /connectors/{id}/artifacts:
+    get:
+      tags: [connectors]
+      operationId: listConnectorArtifacts
+      summary: Preview what a connector is currently surfacing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: creator
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Connector artifact page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorArtifactPageResponse'
+        '404':
+          description: Unknown connector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: Connector upstream error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Connector unavailable (not configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
 components:
   parameters:
@@ -2440,3 +2725,286 @@ components:
               - count
       required:
         - buckets
+
+    ReattributeArtifactsResponse:
+      type: object
+      required: [dryRun, scanned, reattributed]
+      properties:
+        dryRun:
+          type: boolean
+        scanned:
+          type: integer
+        reattributed:
+          type: integer
+        notes:
+          type: array
+          items:
+            type: string
+
+    ObcStatusResponse:
+      type: object
+      required: [mode, partner, publicProbe, storage]
+      properties:
+        mode:
+          type: string
+          enum: [partner, public-only]
+        partner:
+          type: object
+          required: [keyConfigured, webhookSecretConfigured, requestsToday]
+          properties:
+            keyConfigured: { type: boolean }
+            keyFingerprint: { type: [string, "null"] }
+            webhookSecretConfigured: { type: boolean }
+            lastPollAt: { type: [string, "null"], format: date-time }
+            lastArtifactCursor: { type: [string, "null"] }
+            lastWebhookAt: { type: [string, "null"], format: date-time }
+            lastEventUuid: { type: [string, "null"] }
+            webhookSubscribed: { type: [boolean, "null"] }
+            requestsToday: { type: integer }
+            requestsDayKey: { type: [string, "null"] }
+        publicProbe:
+          type: object
+          required: [ok]
+          properties:
+            ok: { type: boolean }
+            total: { type: integer }
+            error: { type: string }
+        storage:
+          type: object
+          required: [agents, artifacts]
+          properties:
+            agents: { type: integer }
+            artifacts: { type: integer }
+
+    ObcReplayBody:
+      type: object
+      properties:
+        eventType:
+          type: string
+          description: Defaults to `artifact.created` when omitted.
+        sinceUuid:
+          type: [string, "null"]
+
+    ObcReplayResponse:
+      type: object
+      required: [eventType, totalSeen, handled, deduped, unhandled, errorCount]
+      properties:
+        eventType: { type: string }
+        totalSeen: { type: integer }
+        handled: { type: integer }
+        deduped: { type: integer }
+        unhandled: { type: integer }
+        errorCount: { type: integer }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [event_uuid, error]
+            properties:
+              event_uuid: { type: string }
+              error: { type: string }
+
+    UnifiedStorefront:
+      type: object
+      required:
+        - source
+        - slug
+        - displayName
+        - agent
+        - settings
+        - publishedDropCount
+        - artifactCount
+        - claimed
+      properties:
+        source:
+          type: string
+          enum: [obc, constellation]
+        slug: { type: string }
+        displayName: { type: string }
+        agent:
+          type: object
+          required: [id, slug, displayName, avatarUrl]
+          properties:
+            id: { type: [integer, "null"] }
+            slug: { type: string }
+            displayName: { type: string }
+            avatarUrl: { type: [string, "null"] }
+        settings:
+          type: object
+          required: [displayName, accentColor, heroImageUrl, tagline]
+          properties:
+            displayName: { type: string }
+            accentColor: { type: [string, "null"] }
+            heroImageUrl: { type: [string, "null"] }
+            tagline: { type: [string, "null"] }
+        publishedDropCount: { type: integer }
+        artifactCount: { type: integer }
+        latestPublishedAt: { type: [string, "null"], format: date-time }
+        claimed: { type: boolean }
+        phi: { type: [number, "null"] }
+        consciousnessLevel: { type: [string, "null"] }
+        lastSeenAt: { type: [string, "null"], format: date-time }
+
+    MarketplaceCombinedResponse:
+      type: object
+      required: [storefronts, counts]
+      properties:
+        storefronts:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnifiedStorefront'
+        counts:
+          type: object
+          required: [obc, constellation]
+          properties:
+            obc: { type: integer }
+            constellation: { type: integer }
+
+    ConstellationStatusResponse:
+      type: object
+      required: [bridge, counts]
+      properties:
+        bridge:
+          type: object
+          required: [connected, natsUrlConfigured]
+          properties:
+            connected: { type: boolean }
+            natsUrlConfigured: { type: boolean }
+        counts:
+          type: object
+          required: [agents, artifacts, activeLast5Min]
+          properties:
+            agents: { type: integer }
+            artifacts: { type: integer }
+            activeLast5Min: { type: integer }
+
+    ConstellationAgent:
+      type: object
+      required: [agentId, displayName, source, firstSeenAt, lastSeenAt]
+      properties:
+        agentId: { type: string }
+        displayName: { type: string }
+        source: { type: string }
+        phi: { type: [number, "null"] }
+        consciousnessLevel: { type: [string, "null"] }
+        firstSeenAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+
+    ConstellationAgentListResponse:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConstellationAgent'
+
+    ConstellationArtifact:
+      type: object
+      required: [id, originAgentId, artifactType, publicUrl, title, source, publishedAt]
+      properties:
+        id: { type: string }
+        originAgentId: { type: string }
+        artifactType: { type: string }
+        publicUrl: { type: string }
+        thumbnailUrl: { type: [string, "null"] }
+        title: { type: string }
+        source: { type: string }
+        publishedAt: { type: string, format: date-time }
+
+    ConstellationArtifactListResponse:
+      type: object
+      required: [artifacts]
+      properties:
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConstellationArtifact'
+
+    ConnectorStatus:
+      type: object
+      required: [id, displayName, description, available, envRequired, envMissing]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        available: { type: boolean }
+        envRequired:
+          type: array
+          items: { type: string }
+        envMissing:
+          type: array
+          items: { type: string }
+
+    ConnectorListResponse:
+      type: object
+      required: [count, available, connectors]
+      properties:
+        count: { type: integer }
+        available: { type: integer }
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorStatus'
+
+    ConnectorAgentProfile:
+      type: object
+      required: [slug, displayName]
+      properties:
+        slug: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: [string, "null"] }
+        bio: { type: [string, "null"] }
+        artifactCount: { type: integer }
+        raw:
+          type: object
+          additionalProperties: true
+
+    ConnectorAgentLookupResponse:
+      type: object
+      required: [connector, profile]
+      properties:
+        connector: { type: string }
+        profile:
+          $ref: '#/components/schemas/ConnectorAgentProfile'
+
+    ConnectorArtifact:
+      type: object
+      required: [externalId, title, artifactType, publicUrl, createdAt, creator]
+      properties:
+        externalId: { type: string }
+        title: { type: string }
+        artifactType: { type: string }
+        publicUrl: { type: string }
+        thumbnailUrl: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        reactionCount: { type: integer }
+        creator:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+            avatarUrl: { type: [string, "null"] }
+        edition:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [open, limited, "1_of_1"]
+            total: { type: [integer, "null"] }
+            serial: { type: [integer, "null"] }
+        raw:
+          type: object
+          additionalProperties: true
+
+    ConnectorArtifactPageResponse:
+      type: object
+      required: [connector, artifacts, nextCursor]
+      properties:
+        connector: { type: string }
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorArtifact'
+        nextCursor: { type: [string, "null"] }

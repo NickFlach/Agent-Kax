@@ -121,10 +121,11 @@ router.get("/constellation/background", async (_req, res) => {
   }
   res.json({
     id: row.id,
+    originAgentId: row.originAgentId,
+    artifactType: row.artifactType,
     publicUrl: row.publicUrl,
     thumbnailUrl: row.thumbnailUrl,
     title: row.title,
-    originAgentId: row.originAgentId,
     source: row.source,
     publishedAt: row.publishedAt.toISOString(),
   });

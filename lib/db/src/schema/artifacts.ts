@@ -12,6 +12,24 @@ export const artifactsTable = pgTable("artifacts", {
   id: serial("id").primaryKey(),
   externalId: text("external_id").notNull(),
   connectorId: text("connector_id").notNull().default("obc_public"),
+  // `obcArtifactUuid` keeps a GLOBAL unique constraint (not partial by
+  // connectorId) on purpose. Rationale:
+  //   * The column is the OpenBotCity-issued artifact UUID. It is only
+  //     ever populated for connector rows that ultimately resolve to an
+  //     OBC artifact (obc_partner, obc_public, and `constellation` rows
+  //     that mirror an OBC origin via `artifact.published`).
+  //   * Any non-OBC connector (civitai, etc.) leaves this NULL, so the
+  //     unique index already behaves like a partial index in practice —
+  //     NULLs are not constrained by UNIQUE in Postgres.
+  //   * Keeping it global means that if two connectors independently
+  //     surface the SAME OBC artifact (e.g. partner API + a constellation
+  //     mirror message), we get a hard collision instead of two rows for
+  //     the same canonical artifact. Connector-aware dedupe (the
+  //     `artifacts_connector_external_unique` index below) handles the
+  //     other axis: same externalId across different connectors.
+  // If a future non-OBC connector ever needs to reuse this column, swap
+  // to a partial unique index `WHERE connector_id IN ('obc_partner','obc_public')`
+  // — but until then the simpler global UNIQUE is the safer invariant.
   obcArtifactUuid: text("obc_artifact_uuid").unique(),
   title: text("title").notNull(),
   creatorName: text("creator_name").notNull(),

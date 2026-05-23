@@ -33,6 +33,13 @@ import type {
   ArtifactListResponse,
   ArtifactMintState,
   AuthUserEnvelope,
+  ConnectorAgentLookupResponse,
+  ConnectorArtifactPageResponse,
+  ConnectorListResponse,
+  ConstellationAgentListResponse,
+  ConstellationArtifact,
+  ConstellationArtifactListResponse,
+  ConstellationStatusResponse,
   CreateAgentBody,
   CreateDropBody,
   DashboardSummary,
@@ -60,20 +67,29 @@ import type {
   InboxCounts,
   ListAdminUsersResponse,
   ListArtifactsParams,
+  ListConnectorArtifactsParams,
+  ListConstellationAgentsParams,
+  ListConstellationArtifactsParams,
   ListDmsParams,
   ListDropsParams,
   ListMatchesParams,
   ListProposalsParams,
   LogoutSuccess,
+  MarketplaceCombinedResponse,
   MatchListResponse,
   NftMetadata,
   NotificationPrefs,
+  ObcReplayBody,
+  ObcReplayResponse,
+  ObcStatusResponse,
   OutboundMessage,
   PartnerSyncStatus,
   ProposalDecisionBody,
   ProposalDecisionResponse,
   ProposalListResponse,
   ProposalThread,
+  ReattributeArtifactsParams,
+  ReattributeArtifactsResponse,
   RecordMintBody,
   ReplyMessageBody,
   ScoreDistribution,
@@ -754,6 +770,71 @@ export const useDetachUserBot = <
 };
 
 /**
+ * @summary Alias of /auth/user returning the current authenticated user
+ */
+export const getGetMeUrl = () => {
+  return `/api/me`;
+};
+
+export const getMe = async (
+  options?: RequestInit,
+): Promise<AuthUserEnvelope> => {
+  return customFetch<AuthUserEnvelope>(getGetMeUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMeQueryKey = () => {
+  return [`/api/me`] as const;
+};
+
+export const getGetMeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMe>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMeQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({
+    signal,
+  }) => getMe({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMe>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMeQueryResult = NonNullable<Awaited<ReturnType<typeof getMe>>>;
+export type GetMeQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Alias of /auth/user returning the current authenticated user
+ */
+
+export function useGetMe<
+  TData = Awaited<ReturnType<typeof getMe>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMeQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Update the current user's notification preferences
  */
 export const getUpdateNotificationPrefsUrl = () => {
@@ -1352,6 +1433,268 @@ export const useUpdateAdminUser = <
   TContext
 > => {
   return useMutation(getUpdateAdminUserMutationOptions(options));
+};
+
+/**
+ * @summary Re-link orphaned artifacts to their creators (admin only)
+ */
+export const getReattributeArtifactsUrl = (
+  params?: ReattributeArtifactsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/reattribute-artifacts?${stringifiedParams}`
+    : `/api/admin/reattribute-artifacts`;
+};
+
+export const reattributeArtifacts = async (
+  params?: ReattributeArtifactsParams,
+  options?: RequestInit,
+): Promise<ReattributeArtifactsResponse> => {
+  return customFetch<ReattributeArtifactsResponse>(
+    getReattributeArtifactsUrl(params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getReattributeArtifactsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reattributeArtifacts>>,
+    TError,
+    { params?: ReattributeArtifactsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof reattributeArtifacts>>,
+  TError,
+  { params?: ReattributeArtifactsParams },
+  TContext
+> => {
+  const mutationKey = ["reattributeArtifacts"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof reattributeArtifacts>>,
+    { params?: ReattributeArtifactsParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return reattributeArtifacts(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReattributeArtifactsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof reattributeArtifacts>>
+>;
+
+export type ReattributeArtifactsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Re-link orphaned artifacts to their creators (admin only)
+ */
+export const useReattributeArtifacts = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof reattributeArtifacts>>,
+    TError,
+    { params?: ReattributeArtifactsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof reattributeArtifacts>>,
+  TError,
+  { params?: ReattributeArtifactsParams },
+  TContext
+> => {
+  return useMutation(getReattributeArtifactsMutationOptions(options));
+};
+
+/**
+ * @summary OBC integration health snapshot (admin only)
+ */
+export const getGetObcStatusUrl = () => {
+  return `/api/admin/obc/status`;
+};
+
+export const getObcStatus = async (
+  options?: RequestInit,
+): Promise<ObcStatusResponse> => {
+  return customFetch<ObcStatusResponse>(getGetObcStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetObcStatusQueryKey = () => {
+  return [`/api/admin/obc/status`] as const;
+};
+
+export const getGetObcStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getObcStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getObcStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetObcStatusQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getObcStatus>>> = ({
+    signal,
+  }) => getObcStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getObcStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetObcStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getObcStatus>>
+>;
+export type GetObcStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary OBC integration health snapshot (admin only)
+ */
+
+export function useGetObcStatus<
+  TData = Awaited<ReturnType<typeof getObcStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getObcStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetObcStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Drain OBC /events/recent through the event dispatcher (admin only)
+ */
+export const getReplayObcEventsUrl = () => {
+  return `/api/admin/obc/replay`;
+};
+
+export const replayObcEvents = async (
+  obcReplayBody?: ObcReplayBody,
+  options?: RequestInit,
+): Promise<ObcReplayResponse> => {
+  return customFetch<ObcReplayResponse>(getReplayObcEventsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(obcReplayBody),
+  });
+};
+
+export const getReplayObcEventsMutationOptions = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replayObcEvents>>,
+    TError,
+    { data: BodyType<ObcReplayBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof replayObcEvents>>,
+  TError,
+  { data: BodyType<ObcReplayBody> },
+  TContext
+> => {
+  const mutationKey = ["replayObcEvents"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof replayObcEvents>>,
+    { data: BodyType<ObcReplayBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return replayObcEvents(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReplayObcEventsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof replayObcEvents>>
+>;
+export type ReplayObcEventsMutationBody = BodyType<ObcReplayBody>;
+export type ReplayObcEventsMutationError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Drain OBC /events/recent through the event dispatcher (admin only)
+ */
+export const useReplayObcEvents = <
+  TError = ErrorType<ErrorEnvelope>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof replayObcEvents>>,
+    TError,
+    { data: BodyType<ObcReplayBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof replayObcEvents>>,
+  TError,
+  { data: BodyType<ObcReplayBody> },
+  TContext
+> => {
+  return useMutation(getReplayObcEventsMutationOptions(options));
 };
 
 /**
@@ -5225,6 +5568,747 @@ export function useGetScoreDistribution<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetScoreDistributionQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Single endpoint that returns both OBC storefronts (claimed + with
+published drops) and recently-seen constellation agents in one
+unified shape, so the marketplace UIs can render the whole grid
+without two queries and a client-side merge.
+
+ * @summary Unified marketplace listing (OBC storefronts + constellation agents)
+ */
+export const getGetMarketplaceCombinedUrl = () => {
+  return `/api/marketplace/combined`;
+};
+
+export const getMarketplaceCombined = async (
+  options?: RequestInit,
+): Promise<MarketplaceCombinedResponse> => {
+  return customFetch<MarketplaceCombinedResponse>(
+    getGetMarketplaceCombinedUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetMarketplaceCombinedQueryKey = () => {
+  return [`/api/marketplace/combined`] as const;
+};
+
+export const getGetMarketplaceCombinedQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMarketplaceCombined>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMarketplaceCombined>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMarketplaceCombinedQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMarketplaceCombined>>
+  > = ({ signal }) => getMarketplaceCombined({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMarketplaceCombined>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMarketplaceCombinedQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMarketplaceCombined>>
+>;
+export type GetMarketplaceCombinedQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Unified marketplace listing (OBC storefronts + constellation agents)
+ */
+
+export function useGetMarketplaceCombined<
+  TData = Awaited<ReturnType<typeof getMarketplaceCombined>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMarketplaceCombined>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMarketplaceCombinedQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Constellation bridge connection + mirror table counts
+ */
+export const getGetConstellationStatusUrl = () => {
+  return `/api/constellation/status`;
+};
+
+export const getConstellationStatus = async (
+  options?: RequestInit,
+): Promise<ConstellationStatusResponse> => {
+  return customFetch<ConstellationStatusResponse>(
+    getGetConstellationStatusUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetConstellationStatusQueryKey = () => {
+  return [`/api/constellation/status`] as const;
+};
+
+export const getGetConstellationStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConstellationStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetConstellationStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getConstellationStatus>>
+  > = ({ signal }) => getConstellationStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetConstellationStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConstellationStatus>>
+>;
+export type GetConstellationStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Constellation bridge connection + mirror table counts
+ */
+
+export function useGetConstellationStatus<
+  TData = Awaited<ReturnType<typeof getConstellationStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetConstellationStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Recently-seen agents on the Kannaka constellation bus
+ */
+export const getListConstellationAgentsUrl = (
+  params?: ListConstellationAgentsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/constellation/agents?${stringifiedParams}`
+    : `/api/constellation/agents`;
+};
+
+export const listConstellationAgents = async (
+  params?: ListConstellationAgentsParams,
+  options?: RequestInit,
+): Promise<ConstellationAgentListResponse> => {
+  return customFetch<ConstellationAgentListResponse>(
+    getListConstellationAgentsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListConstellationAgentsQueryKey = (
+  params?: ListConstellationAgentsParams,
+) => {
+  return [`/api/constellation/agents`, ...(params ? [params] : [])] as const;
+};
+
+export const getListConstellationAgentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConstellationAgents>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConstellationAgentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConstellationAgents>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListConstellationAgentsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listConstellationAgents>>
+  > = ({ signal }) =>
+    listConstellationAgents(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConstellationAgents>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConstellationAgentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConstellationAgents>>
+>;
+export type ListConstellationAgentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recently-seen agents on the Kannaka constellation bus
+ */
+
+export function useListConstellationAgents<
+  TData = Awaited<ReturnType<typeof listConstellationAgents>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConstellationAgentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConstellationAgents>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConstellationAgentsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Recently-published constellation artifacts
+ */
+export const getListConstellationArtifactsUrl = (
+  params?: ListConstellationArtifactsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/constellation/artifacts?${stringifiedParams}`
+    : `/api/constellation/artifacts`;
+};
+
+export const listConstellationArtifacts = async (
+  params?: ListConstellationArtifactsParams,
+  options?: RequestInit,
+): Promise<ConstellationArtifactListResponse> => {
+  return customFetch<ConstellationArtifactListResponse>(
+    getListConstellationArtifactsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListConstellationArtifactsQueryKey = (
+  params?: ListConstellationArtifactsParams,
+) => {
+  return [`/api/constellation/artifacts`, ...(params ? [params] : [])] as const;
+};
+
+export const getListConstellationArtifactsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConstellationArtifacts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConstellationArtifactsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConstellationArtifacts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListConstellationArtifactsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listConstellationArtifacts>>
+  > = ({ signal }) =>
+    listConstellationArtifacts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConstellationArtifacts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConstellationArtifactsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConstellationArtifacts>>
+>;
+export type ListConstellationArtifactsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recently-published constellation artifacts
+ */
+
+export function useListConstellationArtifacts<
+  TData = Awaited<ReturnType<typeof listConstellationArtifacts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConstellationArtifactsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConstellationArtifacts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConstellationArtifactsQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary One random recent constellation image to use as a backdrop
+ */
+export const getGetConstellationBackgroundUrl = () => {
+  return `/api/constellation/background`;
+};
+
+export const getConstellationBackground = async (
+  options?: RequestInit,
+): Promise<ConstellationArtifact | void> => {
+  return customFetch<ConstellationArtifact | void>(
+    getGetConstellationBackgroundUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetConstellationBackgroundQueryKey = () => {
+  return [`/api/constellation/background`] as const;
+};
+
+export const getGetConstellationBackgroundQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConstellationBackground>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationBackground>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetConstellationBackgroundQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getConstellationBackground>>
+  > = ({ signal }) => getConstellationBackground({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationBackground>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetConstellationBackgroundQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConstellationBackground>>
+>;
+export type GetConstellationBackgroundQueryError = ErrorType<unknown>;
+
+/**
+ * @summary One random recent constellation image to use as a backdrop
+ */
+
+export function useGetConstellationBackground<
+  TData = Awaited<ReturnType<typeof getConstellationBackground>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getConstellationBackground>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetConstellationBackgroundQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Enumerate every known connector + its availability
+ */
+export const getListConnectorsUrl = () => {
+  return `/api/connectors`;
+};
+
+export const listConnectors = async (
+  options?: RequestInit,
+): Promise<ConnectorListResponse> => {
+  return customFetch<ConnectorListResponse>(getListConnectorsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListConnectorsQueryKey = () => {
+  return [`/api/connectors`] as const;
+};
+
+export const getListConnectorsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConnectors>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectors>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListConnectorsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnectors>>> = ({
+    signal,
+  }) => listConnectors({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectors>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConnectorsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConnectors>>
+>;
+export type ListConnectorsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Enumerate every known connector + its availability
+ */
+
+export function useListConnectors<
+  TData = Awaited<ReturnType<typeof listConnectors>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectors>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConnectorsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Resolve an agent through a specific connector
+ */
+export const getLookupConnectorAgentUrl = (id: string, slug: string) => {
+  return `/api/connectors/${id}/agent/${slug}`;
+};
+
+export const lookupConnectorAgent = async (
+  id: string,
+  slug: string,
+  options?: RequestInit,
+): Promise<ConnectorAgentLookupResponse> => {
+  return customFetch<ConnectorAgentLookupResponse>(
+    getLookupConnectorAgentUrl(id, slug),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getLookupConnectorAgentQueryKey = (id: string, slug: string) => {
+  return [`/api/connectors/${id}/agent/${slug}`] as const;
+};
+
+export const getLookupConnectorAgentQueryOptions = <
+  TData = Awaited<ReturnType<typeof lookupConnectorAgent>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof lookupConnectorAgent>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getLookupConnectorAgentQueryKey(id, slug);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof lookupConnectorAgent>>
+  > = ({ signal }) =>
+    lookupConnectorAgent(id, slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(id && slug),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof lookupConnectorAgent>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type LookupConnectorAgentQueryResult = NonNullable<
+  Awaited<ReturnType<typeof lookupConnectorAgent>>
+>;
+export type LookupConnectorAgentQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Resolve an agent through a specific connector
+ */
+
+export function useLookupConnectorAgent<
+  TData = Awaited<ReturnType<typeof lookupConnectorAgent>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof lookupConnectorAgent>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getLookupConnectorAgentQueryOptions(id, slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Preview what a connector is currently surfacing
+ */
+export const getListConnectorArtifactsUrl = (
+  id: string,
+  params?: ListConnectorArtifactsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/connectors/${id}/artifacts?${stringifiedParams}`
+    : `/api/connectors/${id}/artifacts`;
+};
+
+export const listConnectorArtifacts = async (
+  id: string,
+  params?: ListConnectorArtifactsParams,
+  options?: RequestInit,
+): Promise<ConnectorArtifactPageResponse> => {
+  return customFetch<ConnectorArtifactPageResponse>(
+    getListConnectorArtifactsUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListConnectorArtifactsQueryKey = (
+  id: string,
+  params?: ListConnectorArtifactsParams,
+) => {
+  return [
+    `/api/connectors/${id}/artifacts`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListConnectorArtifactsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConnectorArtifacts>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  params?: ListConnectorArtifactsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConnectorArtifacts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListConnectorArtifactsQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listConnectorArtifacts>>
+  > = ({ signal }) =>
+    listConnectorArtifacts(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConnectorArtifacts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConnectorArtifactsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConnectorArtifacts>>
+>;
+export type ListConnectorArtifactsQueryError = ErrorType<ErrorEnvelope>;
+
+/**
+ * @summary Preview what a connector is currently surfacing
+ */
+
+export function useListConnectorArtifacts<
+  TData = Awaited<ReturnType<typeof listConnectorArtifacts>>,
+  TError = ErrorType<ErrorEnvelope>,
+>(
+  id: string,
+  params?: ListConnectorArtifactsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConnectorArtifacts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConnectorArtifactsQueryOptions(
+    id,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

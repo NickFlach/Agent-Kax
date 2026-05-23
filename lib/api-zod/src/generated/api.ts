@@ -184,6 +184,45 @@ export const DetachUserBotResponse = zod.object({
 });
 
 /**
+ * @summary Alias of /auth/user returning the current authenticated user
+ */
+export const GetMeHeader = zod.object({
+  Authorization: zod
+    .string()
+    .optional()
+    .describe("Opaque session token — `Bearer <sid>`."),
+});
+
+export const GetMeResponse = zod.object({
+  user: zod.union([
+    zod.object({
+      id: zod.string(),
+      email: zod.string().email().nullable(),
+      firstName: zod.string().nullable(),
+      lastName: zod.string().nullable(),
+      profileImageUrl: zod.string().nullable(),
+      displayName: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]).optional(),
+      notificationPrefs: zod
+        .object({
+          emailOnProposal: zod.boolean(),
+          emailOnDm: zod.boolean(),
+        })
+        .optional(),
+      walletAddress: zod
+        .string()
+        .nullish()
+        .describe("Lowercased EVM address if user signed in via wallet"),
+      provider: zod
+        .string()
+        .nullish()
+        .describe("Auth provider for the active session (wallet, obc_agent)"),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
  * @summary Update the current user's notification preferences
  */
 export const UpdateNotificationPrefsBody = zod.object({
@@ -317,6 +356,76 @@ export const UpdateAdminUserResponse = zod.object({
   role: zod.enum(["user", "admin"]),
   disabledAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Re-link orphaned artifacts to their creators (admin only)
+ */
+export const ReattributeArtifactsQueryParams = zod.object({
+  dryRun: zod.coerce.boolean().optional(),
+});
+
+export const ReattributeArtifactsResponse = zod.object({
+  dryRun: zod.boolean(),
+  scanned: zod.number(),
+  reattributed: zod.number(),
+  notes: zod.array(zod.string()).optional(),
+});
+
+/**
+ * @summary OBC integration health snapshot (admin only)
+ */
+export const GetObcStatusResponse = zod.object({
+  mode: zod.enum(["partner", "public-only"]),
+  partner: zod.object({
+    keyConfigured: zod.boolean(),
+    keyFingerprint: zod.string().nullish(),
+    webhookSecretConfigured: zod.boolean(),
+    lastPollAt: zod.coerce.date().nullish(),
+    lastArtifactCursor: zod.string().nullish(),
+    lastWebhookAt: zod.coerce.date().nullish(),
+    lastEventUuid: zod.string().nullish(),
+    webhookSubscribed: zod.boolean().nullish(),
+    requestsToday: zod.number(),
+    requestsDayKey: zod.string().nullish(),
+  }),
+  publicProbe: zod.object({
+    ok: zod.boolean(),
+    total: zod.number().optional(),
+    error: zod.string().optional(),
+  }),
+  storage: zod.object({
+    agents: zod.number(),
+    artifacts: zod.number(),
+  }),
+});
+
+/**
+ * @summary Drain OBC /events/recent through the event dispatcher (admin only)
+ */
+export const ReplayObcEventsBody = zod.object({
+  eventType: zod
+    .string()
+    .optional()
+    .describe("Defaults to `artifact.created` when omitted."),
+  sinceUuid: zod.string().nullish(),
+});
+
+export const ReplayObcEventsResponse = zod.object({
+  eventType: zod.string(),
+  totalSeen: zod.number(),
+  handled: zod.number(),
+  deduped: zod.number(),
+  unhandled: zod.number(),
+  errorCount: zod.number(),
+  errors: zod
+    .array(
+      zod.object({
+        event_uuid: zod.string(),
+        error: zod.string(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -2274,4 +2383,217 @@ export const GetScoreDistributionResponse = zod.object({
       count: zod.number(),
     }),
   ),
+});
+
+/**
+ * Single endpoint that returns both OBC storefronts (claimed + with
+published drops) and recently-seen constellation agents in one
+unified shape, so the marketplace UIs can render the whole grid
+without two queries and a client-side merge.
+
+ * @summary Unified marketplace listing (OBC storefronts + constellation agents)
+ */
+export const GetMarketplaceCombinedResponse = zod.object({
+  storefronts: zod.array(
+    zod.object({
+      source: zod.enum(["obc", "constellation"]),
+      slug: zod.string(),
+      displayName: zod.string(),
+      agent: zod.object({
+        id: zod.number().nullable(),
+        slug: zod.string(),
+        displayName: zod.string(),
+        avatarUrl: zod.string().nullable(),
+      }),
+      settings: zod.object({
+        displayName: zod.string(),
+        accentColor: zod.string().nullable(),
+        heroImageUrl: zod.string().nullable(),
+        tagline: zod.string().nullable(),
+      }),
+      publishedDropCount: zod.number(),
+      artifactCount: zod.number(),
+      latestPublishedAt: zod.coerce.date().nullish(),
+      claimed: zod.boolean(),
+      phi: zod.number().nullish(),
+      consciousnessLevel: zod.string().nullish(),
+      lastSeenAt: zod.coerce.date().nullish(),
+    }),
+  ),
+  counts: zod.object({
+    obc: zod.number(),
+    constellation: zod.number(),
+  }),
+});
+
+/**
+ * @summary Constellation bridge connection + mirror table counts
+ */
+export const GetConstellationStatusResponse = zod.object({
+  bridge: zod.object({
+    connected: zod.boolean(),
+    natsUrlConfigured: zod.boolean(),
+  }),
+  counts: zod.object({
+    agents: zod.number(),
+    artifacts: zod.number(),
+    activeLast5Min: zod.number(),
+  }),
+});
+
+/**
+ * @summary Recently-seen agents on the Kannaka constellation bus
+ */
+export const listConstellationAgentsQueryLimitMax = 100;
+
+export const ListConstellationAgentsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listConstellationAgentsQueryLimitMax)
+    .optional(),
+});
+
+export const ListConstellationAgentsResponse = zod.object({
+  agents: zod.array(
+    zod.object({
+      agentId: zod.string(),
+      displayName: zod.string(),
+      source: zod.string(),
+      phi: zod.number().nullish(),
+      consciousnessLevel: zod.string().nullish(),
+      firstSeenAt: zod.coerce.date(),
+      lastSeenAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Recently-published constellation artifacts
+ */
+export const listConstellationArtifactsQueryLimitMax = 100;
+
+export const ListConstellationArtifactsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listConstellationArtifactsQueryLimitMax)
+    .optional(),
+  type: zod.coerce.string().optional(),
+});
+
+export const ListConstellationArtifactsResponse = zod.object({
+  artifacts: zod.array(
+    zod.object({
+      id: zod.string(),
+      originAgentId: zod.string(),
+      artifactType: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      title: zod.string(),
+      source: zod.string(),
+      publishedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary One random recent constellation image to use as a backdrop
+ */
+export const GetConstellationBackgroundResponse = zod.object({
+  id: zod.string(),
+  originAgentId: zod.string(),
+  artifactType: zod.string(),
+  publicUrl: zod.string(),
+  thumbnailUrl: zod.string().nullish(),
+  title: zod.string(),
+  source: zod.string(),
+  publishedAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Enumerate every known connector + its availability
+ */
+export const ListConnectorsResponse = zod.object({
+  count: zod.number(),
+  available: zod.number(),
+  connectors: zod.array(
+    zod.object({
+      id: zod.string(),
+      displayName: zod.string(),
+      description: zod.string(),
+      available: zod.boolean(),
+      envRequired: zod.array(zod.string()),
+      envMissing: zod.array(zod.string()),
+    }),
+  ),
+});
+
+/**
+ * @summary Resolve an agent through a specific connector
+ */
+export const LookupConnectorAgentParams = zod.object({
+  id: zod.coerce.string(),
+  slug: zod.coerce.string(),
+});
+
+export const LookupConnectorAgentResponse = zod.object({
+  connector: zod.string(),
+  profile: zod.object({
+    slug: zod.string(),
+    displayName: zod.string(),
+    avatarUrl: zod.string().nullish(),
+    bio: zod.string().nullish(),
+    artifactCount: zod.number().optional(),
+    raw: zod.record(zod.string(), zod.unknown()).optional(),
+  }),
+});
+
+/**
+ * @summary Preview what a connector is currently surfacing
+ */
+export const ListConnectorArtifactsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const listConnectorArtifactsQueryLimitMax = 100;
+
+export const ListConnectorArtifactsQueryParams = zod.object({
+  type: zod.coerce.string().optional(),
+  creator: zod.coerce.string().optional(),
+  cursor: zod.coerce.string().optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(listConnectorArtifactsQueryLimitMax)
+    .optional(),
+});
+
+export const ListConnectorArtifactsResponse = zod.object({
+  connector: zod.string(),
+  artifacts: zod.array(
+    zod.object({
+      externalId: zod.string(),
+      title: zod.string(),
+      artifactType: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+      reactionCount: zod.number().optional(),
+      creator: zod.object({
+        id: zod.string(),
+        displayName: zod.string(),
+        avatarUrl: zod.string().nullish(),
+      }),
+      edition: zod
+        .object({
+          type: zod.enum(["open", "limited", "1_of_1"]).optional(),
+          total: zod.number().nullish(),
+          serial: zod.number().nullish(),
+        })
+        .optional(),
+      raw: zod.record(zod.string(), zod.unknown()).optional(),
+    }),
+  ),
+  nextCursor: zod.string().nullable(),
 });

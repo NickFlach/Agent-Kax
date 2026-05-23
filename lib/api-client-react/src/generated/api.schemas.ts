@@ -824,10 +824,273 @@ export interface ScoreDistribution {
   buckets: ScoreDistributionBucketsItem[];
 }
 
+export interface ReattributeArtifactsResponse {
+  dryRun: boolean;
+  scanned: number;
+  reattributed: number;
+  notes?: string[];
+}
+
+export type ObcStatusResponseMode =
+  (typeof ObcStatusResponseMode)[keyof typeof ObcStatusResponseMode];
+
+export const ObcStatusResponseMode = {
+  partner: "partner",
+  "public-only": "public-only",
+} as const;
+
+export type ObcStatusResponsePartner = {
+  keyConfigured: boolean;
+  /** @nullable */
+  keyFingerprint?: string | null;
+  webhookSecretConfigured: boolean;
+  /** @nullable */
+  lastPollAt?: string | null;
+  /** @nullable */
+  lastArtifactCursor?: string | null;
+  /** @nullable */
+  lastWebhookAt?: string | null;
+  /** @nullable */
+  lastEventUuid?: string | null;
+  /** @nullable */
+  webhookSubscribed?: boolean | null;
+  requestsToday: number;
+  /** @nullable */
+  requestsDayKey?: string | null;
+};
+
+export type ObcStatusResponsePublicProbe = {
+  ok: boolean;
+  total?: number;
+  error?: string;
+};
+
+export type ObcStatusResponseStorage = {
+  agents: number;
+  artifacts: number;
+};
+
+export interface ObcStatusResponse {
+  mode: ObcStatusResponseMode;
+  partner: ObcStatusResponsePartner;
+  publicProbe: ObcStatusResponsePublicProbe;
+  storage: ObcStatusResponseStorage;
+}
+
+export interface ObcReplayBody {
+  /** Defaults to `artifact.created` when omitted. */
+  eventType?: string;
+  /** @nullable */
+  sinceUuid?: string | null;
+}
+
+export type ObcReplayResponseErrorsItem = {
+  event_uuid: string;
+  error: string;
+};
+
+export interface ObcReplayResponse {
+  eventType: string;
+  totalSeen: number;
+  handled: number;
+  deduped: number;
+  unhandled: number;
+  errorCount: number;
+  errors?: ObcReplayResponseErrorsItem[];
+}
+
+export type UnifiedStorefrontSource =
+  (typeof UnifiedStorefrontSource)[keyof typeof UnifiedStorefrontSource];
+
+export const UnifiedStorefrontSource = {
+  obc: "obc",
+  constellation: "constellation",
+} as const;
+
+export type UnifiedStorefrontAgent = {
+  /** @nullable */
+  id: number | null;
+  slug: string;
+  displayName: string;
+  /** @nullable */
+  avatarUrl: string | null;
+};
+
+export type UnifiedStorefrontSettings = {
+  displayName: string;
+  /** @nullable */
+  accentColor: string | null;
+  /** @nullable */
+  heroImageUrl: string | null;
+  /** @nullable */
+  tagline: string | null;
+};
+
+export interface UnifiedStorefront {
+  source: UnifiedStorefrontSource;
+  slug: string;
+  displayName: string;
+  agent: UnifiedStorefrontAgent;
+  settings: UnifiedStorefrontSettings;
+  publishedDropCount: number;
+  artifactCount: number;
+  /** @nullable */
+  latestPublishedAt?: string | null;
+  claimed: boolean;
+  /** @nullable */
+  phi?: number | null;
+  /** @nullable */
+  consciousnessLevel?: string | null;
+  /** @nullable */
+  lastSeenAt?: string | null;
+}
+
+export type MarketplaceCombinedResponseCounts = {
+  obc: number;
+  constellation: number;
+};
+
+export interface MarketplaceCombinedResponse {
+  storefronts: UnifiedStorefront[];
+  counts: MarketplaceCombinedResponseCounts;
+}
+
+export type ConstellationStatusResponseBridge = {
+  connected: boolean;
+  natsUrlConfigured: boolean;
+};
+
+export type ConstellationStatusResponseCounts = {
+  agents: number;
+  artifacts: number;
+  activeLast5Min: number;
+};
+
+export interface ConstellationStatusResponse {
+  bridge: ConstellationStatusResponseBridge;
+  counts: ConstellationStatusResponseCounts;
+}
+
+export interface ConstellationAgent {
+  agentId: string;
+  displayName: string;
+  source: string;
+  /** @nullable */
+  phi?: number | null;
+  /** @nullable */
+  consciousnessLevel?: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface ConstellationAgentListResponse {
+  agents: ConstellationAgent[];
+}
+
+export interface ConstellationArtifact {
+  id: string;
+  originAgentId: string;
+  artifactType: string;
+  publicUrl: string;
+  /** @nullable */
+  thumbnailUrl?: string | null;
+  title: string;
+  source: string;
+  publishedAt: string;
+}
+
+export interface ConstellationArtifactListResponse {
+  artifacts: ConstellationArtifact[];
+}
+
+export interface ConnectorStatus {
+  id: string;
+  displayName: string;
+  description: string;
+  available: boolean;
+  envRequired: string[];
+  envMissing: string[];
+}
+
+export interface ConnectorListResponse {
+  count: number;
+  available: number;
+  connectors: ConnectorStatus[];
+}
+
+export type ConnectorAgentProfileRaw = { [key: string]: unknown };
+
+export interface ConnectorAgentProfile {
+  slug: string;
+  displayName: string;
+  /** @nullable */
+  avatarUrl?: string | null;
+  /** @nullable */
+  bio?: string | null;
+  artifactCount?: number;
+  raw?: ConnectorAgentProfileRaw;
+}
+
+export interface ConnectorAgentLookupResponse {
+  connector: string;
+  profile: ConnectorAgentProfile;
+}
+
+export type ConnectorArtifactCreator = {
+  id: string;
+  displayName: string;
+  /** @nullable */
+  avatarUrl?: string | null;
+};
+
+export type ConnectorArtifactEditionType =
+  (typeof ConnectorArtifactEditionType)[keyof typeof ConnectorArtifactEditionType];
+
+export const ConnectorArtifactEditionType = {
+  open: "open",
+  limited: "limited",
+  "1_of_1": "1_of_1",
+} as const;
+
+export type ConnectorArtifactEdition = {
+  type?: ConnectorArtifactEditionType;
+  /** @nullable */
+  total?: number | null;
+  /** @nullable */
+  serial?: number | null;
+};
+
+export type ConnectorArtifactRaw = { [key: string]: unknown };
+
+export interface ConnectorArtifact {
+  externalId: string;
+  title: string;
+  artifactType: string;
+  publicUrl: string;
+  /** @nullable */
+  thumbnailUrl?: string | null;
+  createdAt: string;
+  reactionCount?: number;
+  creator: ConnectorArtifactCreator;
+  edition?: ConnectorArtifactEdition;
+  raw?: ConnectorArtifactRaw;
+}
+
+export interface ConnectorArtifactPageResponse {
+  connector: string;
+  artifacts: ConnectorArtifact[];
+  /** @nullable */
+  nextCursor: string | null;
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */
 export type AuthorizationSessionHeaderParameter = string;
+
+export type ReattributeArtifactsParams = {
+  dryRun?: boolean;
+};
 
 export type ListArtifactsParams = {
   status?: ListArtifactsStatus;
@@ -965,4 +1228,32 @@ export type GetScoreDistributionParams = {
    * Admin only. When `true`, aggregates across all owners; otherwise scoped to the caller.
    */
   all?: boolean;
+};
+
+export type ListConstellationAgentsParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type ListConstellationArtifactsParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+  type?: string;
+};
+
+export type ListConnectorArtifactsParams = {
+  type?: string;
+  creator?: string;
+  cursor?: string;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
 };
