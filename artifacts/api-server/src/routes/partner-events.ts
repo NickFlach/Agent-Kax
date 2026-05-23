@@ -11,6 +11,17 @@ import {
   type OutboundMessage,
 } from "@workspace/db/schema";
 import { and, asc, desc, eq, isNull, count } from "drizzle-orm";
+import {
+  DecideProposalParams,
+  DecideProposalBody,
+  ReplyProposalParams,
+  ReplyProposalBody,
+  GetProposalThreadParams,
+  MarkDmReadParams,
+  ReplyDmParams,
+  ReplyDmBody,
+  GetDmThreadParams,
+} from "@workspace/api-zod";
 import { requireAuth, getOwnerScope, canMutate } from "../middlewares/requireAuth";
 import {
   partnerApiAvailable,
@@ -114,20 +125,12 @@ router.get("/proposals", requireAuth, async (req, res) => {
 });
 
 router.post("/proposals/:id/decision", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-  const body = (req.body ?? {}) as { decision?: string; replyMessage?: string };
-  const decision = body.decision;
-  if (decision !== "accepted" && decision !== "declined") {
-    res.status(400).json({ error: "decision must be 'accepted' or 'declined'" });
-    return;
-  }
+  const { id } = DecideProposalParams.parse(req.params);
+  const parsed = DecideProposalBody.parse(req.body ?? {});
+  const decision = parsed.decision;
   const replyMessage =
-    typeof body.replyMessage === "string" && body.replyMessage.trim().length > 0
-      ? body.replyMessage.trim()
+    typeof parsed.replyMessage === "string" && parsed.replyMessage.trim().length > 0
+      ? parsed.replyMessage.trim()
       : null;
   const [row] = await db.select().from(proposalsTable).where(eq(proposalsTable.id, id)).limit(1);
   if (!row) {
@@ -187,13 +190,9 @@ router.post("/proposals/:id/decision", requireAuth, async (req, res) => {
 });
 
 router.post("/proposals/:id/reply", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-  const body = (req.body ?? {}) as { body?: string };
-  const text = typeof body.body === "string" ? body.body.trim() : "";
+  const { id } = ReplyProposalParams.parse(req.params);
+  const parsed = ReplyProposalBody.parse(req.body ?? {});
+  const text = parsed.body.trim();
   if (text.length === 0) {
     res.status(400).json({ error: "body is required" });
     return;
@@ -243,11 +242,7 @@ router.post("/proposals/:id/reply", requireAuth, async (req, res) => {
 });
 
 router.get("/proposals/:id/thread", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const { id } = GetProposalThreadParams.parse(req.params);
   const [row] = await db.select().from(proposalsTable).where(eq(proposalsTable.id, id)).limit(1);
   if (!row) {
     res.status(404).json({ error: "Proposal not found" });
@@ -281,11 +276,7 @@ router.get("/dms", requireAuth, async (req, res) => {
 });
 
 router.post("/dms/:id/read", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const { id } = MarkDmReadParams.parse(req.params);
   const [row] = await db.select().from(dmsTable).where(eq(dmsTable.id, id)).limit(1);
   if (!row) {
     res.status(404).json({ error: "DM not found" });
@@ -304,13 +295,9 @@ router.post("/dms/:id/read", requireAuth, async (req, res) => {
 });
 
 router.post("/dms/:id/reply", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-  const body = (req.body ?? {}) as { body?: string };
-  const text = typeof body.body === "string" ? body.body.trim() : "";
+  const { id } = ReplyDmParams.parse(req.params);
+  const parsed = ReplyDmBody.parse(req.body ?? {});
+  const text = parsed.body.trim();
   if (text.length === 0) {
     res.status(400).json({ error: "body is required" });
     return;
@@ -367,11 +354,7 @@ router.post("/dms/:id/reply", requireAuth, async (req, res) => {
 });
 
 router.get("/dms/:id/thread", requireAuth, async (req, res) => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const { id } = GetDmThreadParams.parse(req.params);
   const [row] = await db.select().from(dmsTable).where(eq(dmsTable.id, id)).limit(1);
   if (!row) {
     res.status(404).json({ error: "DM not found" });

@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import request from "supertest";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "@workspace/db";
 import { proposalsTable, dmsTable, matchesTable } from "@workspace/db/schema";
 import partnerEventsRouter from "./partner-events";
@@ -34,6 +35,19 @@ function buildTestApp(): Express {
     next();
   });
   app.use(partnerEventsRouter);
+  // Mirror app.ts's global error handler so Zod failures collapse to a 400
+  // here too. Without it, schema parses inside the route would throw and
+  // bubble up as Express's default 500.
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({
+        error: "Invalid request",
+        issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      });
+      return;
+    }
+    res.status(500).json({ error: "Internal server error" });
+  });
   return app;
 }
 

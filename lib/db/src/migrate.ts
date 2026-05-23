@@ -91,10 +91,19 @@ export async function runMigrations(opts: { log?: (m: string) => void } = {}): P
   return { applied: pending, skipped };
 }
 
-// CLI mode — `pnpm db:migrate` runs this directly.
+// CLI mode — `pnpm db:migrate` runs this directly. The `basename` guard is
+// load-bearing: this module is re-exported from `./index` and gets bundled
+// into other artifacts (e.g. the api-server esbuild bundle). In that case
+// `import.meta.url` is the bundle URL and equals `process.argv[1]`, which
+// would otherwise trip this branch on every boot and call `pool.query`
+// before the pool finishes initializing. Restricting to "the running script
+// is literally migrate.{ts,mjs}" keeps the CLI path working while making
+// the bundled path a no-op.
+const argv1 = process.argv[1] ?? "";
 const isMain =
-  import.meta.url === `file://${process.argv[1]}` ||
-  import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/")}`;
+  (import.meta.url === `file://${argv1}` ||
+    import.meta.url === `file:///${argv1.replace(/\\/g, "/")}`) &&
+  /(^|[\\/])migrate\.(?:ts|mjs|js)$/.test(argv1);
 if (isMain) {
   runMigrations({ log: (m) => console.log(m) })
     .then((r) => {

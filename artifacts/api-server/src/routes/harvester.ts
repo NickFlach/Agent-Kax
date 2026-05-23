@@ -122,94 +122,91 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
   let newArtifacts = 0;
   let duplicates = 0;
 
-  try {
-    if (partnerApiAvailable()) {
-      if (!body.agentId) {
-        res.status(400).json({
-          error: "Partner harvest requires an agentId. Add an agent first or pick one to harvest.",
-        });
-        return;
-      }
-      const [agent] = await db
-        .select()
-        .from(agentsTable)
-        .where(eq(agentsTable.id, body.agentId))
-        .limit(1);
-      if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
-      }
-      if (!(await canMutate(req, agent.ownerId))) {
-        res.status(403).json({ error: "Not authorized to harvest this agent" });
-        return;
-      }
-      const partnerType = type === "all" ? undefined : type;
-      const result = await runPartnerHarvestForAgent({
-        agent,
-        limit: requestedLimit,
-        ...(partnerType ? { type: partnerType } : {}),
+  // Note: we no longer wrap this in a try/catch that swallows errors and
+  // returns 200. Async route rejections propagate to the global error
+  // handler in app.ts, which returns a 500 with a logged stack so DB
+  // hiccups stop silently pretending to succeed.
+  if (partnerApiAvailable()) {
+    if (!body.agentId) {
+      res.status(400).json({
+        error: "Partner harvest requires an agentId. Add an agent first or pick one to harvest.",
       });
-      harvested = result.harvested;
-      newArtifacts = result.newArtifacts;
-      duplicates = result.duplicates;
-    } else {
-      // Registry path — fans out across every enabled AgenticConnector.
-      // OBC public + constellation today; HF Spaces / Civitai / Replicate
-      // when those land (#21). Adding a new platform never has to touch
-      // this route.
-      const minReactions = body.minReactions ?? 0;
-      const creatorFilter = body.creator?.toLowerCase();
-      const keywordFilter = body.keyword?.toLowerCase();
-      const result = await runRegistryHarvest({
-        ownerId,
-        ...(type !== "all" ? { type: type as never } : {}),
-        ...(body.creator ? { creator: body.creator } : {}),
-        limit: requestedLimit,
-      });
-      harvested = result.totalHarvested;
-      newArtifacts = result.totalNew;
-      duplicates = result.totalDuplicates;
-
-      // Post-fetch filters that pre-registry legacy supported but the
-      // connector contract doesn't yet model. Apply by deleting the
-      // already-inserted rows that don't match. Cheaper than threading
-      // filters through every connector, and these are rarely used.
-      if (minReactions > 0 || keywordFilter) {
-        const justInserted = await db
-          .select()
-          .from(artifactsTable)
-          .where(eq(artifactsTable.ownerId, ownerId))
-          .orderBy(desc(artifactsTable.ingestedAt))
-          .limit(newArtifacts);
-        const toDelete = justInserted.filter((row) => {
-          if (minReactions > 0 && row.reactionCount < minReactions) return true;
-          if (keywordFilter && !row.title.toLowerCase().includes(keywordFilter)) return true;
-          return false;
-        });
-        if (toDelete.length > 0) {
-          for (const row of toDelete) {
-            await db.delete(artifactsTable).where(eq(artifactsTable.id, row.id));
-          }
-          newArtifacts -= toDelete.length;
-        }
-      }
-
-      if (newArtifacts > 0) {
-        const summary = result.perConnector
-          .filter((p) => p.newArtifacts > 0)
-          .map((p) => `${p.connectorId}:${p.newArtifacts}`)
-          .join(" ");
-        await db.insert(activitiesTable).values({
-          type: "harvested",
-          message: `Registry harvest: ${newArtifacts} new ${type} across [${summary}] (${duplicates} duplicates)`,
-          ownerId,
-        });
-      }
-      // Silence: unused references when no filter — kept as docs.
-      void creatorFilter;
+      return;
     }
-  } catch (err) {
-    req.log.error({ err }, "Error running harvester");
+    const [agent] = await db
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.id, body.agentId))
+      .limit(1);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    if (!(await canMutate(req, agent.ownerId))) {
+      res.status(403).json({ error: "Not authorized to harvest this agent" });
+      return;
+    }
+    const partnerType = type === "all" ? undefined : type;
+    const result = await runPartnerHarvestForAgent({
+      agent,
+      limit: requestedLimit,
+      ...(partnerType ? { type: partnerType } : {}),
+    });
+    harvested = result.harvested;
+    newArtifacts = result.newArtifacts;
+    duplicates = result.duplicates;
+  } else {
+    // Registry path — fans out across every enabled AgenticConnector.
+    // OBC public + constellation today; HF Spaces / Civitai / Replicate
+    // when those land (#21). Adding a new platform never has to touch
+    // this route.
+    const minReactions = body.minReactions ?? 0;
+    const keywordFilter = body.keyword?.toLowerCase();
+    const result = await runRegistryHarvest({
+      ownerId,
+      ...(type !== "all" ? { type: type as never } : {}),
+      ...(body.creator ? { creator: body.creator } : {}),
+      limit: requestedLimit,
+    });
+    harvested = result.totalHarvested;
+    newArtifacts = result.totalNew;
+    duplicates = result.totalDuplicates;
+
+    // Post-fetch filters that pre-registry legacy supported but the
+    // connector contract doesn't yet model. Apply by deleting the
+    // already-inserted rows that don't match. Cheaper than threading
+    // filters through every connector, and these are rarely used.
+    if (minReactions > 0 || keywordFilter) {
+      const justInserted = await db
+        .select()
+        .from(artifactsTable)
+        .where(eq(artifactsTable.ownerId, ownerId))
+        .orderBy(desc(artifactsTable.ingestedAt))
+        .limit(newArtifacts);
+      const toDelete = justInserted.filter((row) => {
+        if (minReactions > 0 && row.reactionCount < minReactions) return true;
+        if (keywordFilter && !row.title.toLowerCase().includes(keywordFilter)) return true;
+        return false;
+      });
+      if (toDelete.length > 0) {
+        for (const row of toDelete) {
+          await db.delete(artifactsTable).where(eq(artifactsTable.id, row.id));
+        }
+        newArtifacts -= toDelete.length;
+      }
+    }
+
+    if (newArtifacts > 0) {
+      const summary = result.perConnector
+        .filter((p) => p.newArtifacts > 0)
+        .map((p) => `${p.connectorId}:${p.newArtifacts}`)
+        .join(" ");
+      await db.insert(activitiesTable).values({
+        type: "harvested",
+        message: `Registry harvest: ${newArtifacts} new ${type} across [${summary}] (${duplicates} duplicates)`,
+        ownerId,
+      });
+    }
   }
 
   const paired = await pairAudioToArt(req.log);

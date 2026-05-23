@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response, raw } from "express";
 import crypto from "node:crypto";
+import { WebhookEnvelope } from "@workspace/api-zod";
 import { recordWebhookReceived } from "../lib/partnerClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
 
@@ -18,18 +19,6 @@ function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): 
   }
 }
 
-interface WebhookEnvelope {
-  event_uuid?: string;
-  id?: string;
-  event_type?: string;
-  event?: string;
-  type?: string;
-  occurred_at?: string;
-  data?: unknown;
-  payload?: unknown;
-  artifact?: unknown;
-}
-
 router.post(
   "/webhooks/openbotcity",
   raw({ type: "application/json" }),
@@ -43,13 +32,24 @@ router.post(
       return;
     }
 
-    let envelope: WebhookEnvelope;
+    let parsed: unknown;
     try {
-      envelope = JSON.parse(rawBody.toString("utf8")) as WebhookEnvelope;
+      parsed = JSON.parse(rawBody.toString("utf8"));
     } catch {
       res.status(400).json({ error: "Invalid JSON" });
       return;
     }
+
+    const envelopeResult = WebhookEnvelope.safeParse(parsed);
+    if (!envelopeResult.success) {
+      const issues = envelopeResult.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      res.status(400).json({ error: "Invalid webhook envelope", issues });
+      return;
+    }
+    const envelope = envelopeResult.data;
 
     const eventUuid = envelope.event_uuid || envelope.id;
     const eventType =

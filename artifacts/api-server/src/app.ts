@@ -1,7 +1,13 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
+import { z } from "zod";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { authMiddleware } from "./middlewares/authMiddleware";
@@ -84,5 +90,25 @@ app.get(/^\/storefront(\/.*)?$/, (req, res) => {
 });
 
 app.use("/api", router);
+
+// Global error handler. Express 5 forwards async route rejections here, so
+// route handlers no longer need ad-hoc try/catch to avoid hanging sockets.
+// Zod validation failures collapse to a single 400 with a field-level path
+// so the client doesn't see a generic 500.
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  if (res.headersSent) {
+    return;
+  }
+  if (err instanceof z.ZodError) {
+    const issues = err.issues.map((i) => ({
+      path: i.path.join("."),
+      message: i.message,
+    }));
+    res.status(400).json({ error: "Invalid request", issues });
+    return;
+  }
+  req.log.error({ err }, "Unhandled route error");
+  res.status(500).json({ error: "Internal server error" });
+});
 
 export default app;
