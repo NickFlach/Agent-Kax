@@ -80,17 +80,40 @@ async function autoMigrateOrExit(): Promise<void> {
   }
 }
 
-async function boot(): Promise<void> {
-  await autoMigrateOrExit();
+// Background warm-up. Intentionally NOT awaited before app.listen() —
+// each of these calls out to the partner API (replay walks paginated
+// event feeds; backfill calls getPartnerAgent) or to NATS (constellation
+// bridge), and on a cold deploy any of them can take well over the 60s
+// the Replit runner waits for port 8080 to open. Pre-#40 these ran
+// after listen(); #40 (auto-migrate) accidentally awaited them too,
+// which is what bricked the publish.
+async function runStartupStep(name: string, fn: () => Promise<unknown>): Promise<void> {
   try {
-    await ensureKannakaOwnerAndBackfill();
-    await replayMissedEventsOnStartup();
-    await startAgentHarvestScheduler();
-    await startHeatDecayScheduler();
-    await startConstellationBridge();
+    await fn();
+    logger.info({ step: name }, "startup step completed");
   } catch (err) {
-    logger.error({ err }, "Failed to seed/backfill, replay events, or start constellation bridge");
+    // Per-step isolation: a partner-API hiccup in backfill or replay must
+    // NOT prevent the harvest/heat schedulers or constellation bridge from
+    // starting. Pre-fix, one shared try/catch around the sequential chain
+    // meant a single transient failure would silently disable ingestion
+    // and decay for the entire process lifetime.
+    logger.error({ step: name, err }, "startup step failed (continuing)");
   }
+}
+
+async function warmUpInBackground(): Promise<void> {
+  await runStartupStep("ensureKannakaOwnerAndBackfill", ensureKannakaOwnerAndBackfill);
+  await runStartupStep("replayMissedEventsOnStartup", replayMissedEventsOnStartup);
+  await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
+  await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
+  await runStartupStep("startConstellationBridge", startConstellationBridge);
+}
+
+async function boot(): Promise<void> {
+  // Migrations MUST complete before we accept traffic — otherwise routes
+  // 500 against a stale schema (see task #36). Everything else is
+  // best-effort warm-up and runs after the port opens.
+  await autoMigrateOrExit();
 
   app.listen(port, (err) => {
     if (err) {
@@ -99,6 +122,7 @@ async function boot(): Promise<void> {
     }
 
     logger.info({ port }, "Server listening");
+    void warmUpInBackground();
   });
 }
 
