@@ -7,18 +7,26 @@ import { publicArtifactWhere } from "../lib/visibility";
 const router: IRouter = Router();
 
 /**
- * Build the absolute base URL for share-surface assets. The previous
- * implementation forced `https://` even when the request was plainly
- * HTTP, producing broken OpenGraph URLs in local/staging (#11).
+ * Build the absolute base URL for share-surface assets.
+ *
+ * Share cards (og:image, og:url, favicon, audio-cover SVG fallback) are
+ * fetched and cached by external scrapers (Twitter cards, Slack unfurl,
+ * Discord). A poisoned card can persist into other users' link previews
+ * if the scraper followed an attacker-controlled Host — so we no longer
+ * trust the request's Host header (#26). Same posture as the NFT routes
+ * after #15.
  *
  * Precedence:
- *   1. `KAX_PUBLIC_URL` — explicit override
+ *   1. `KAX_PUBLIC_URL` — explicit canonical origin (required in prod)
  *   2. `REPLIT_DEV_DOMAIN` / `REPLIT_DOMAINS` — Replit always https
- *   3. `X-Forwarded-Proto` + `X-Forwarded-Host` — behind nginx / proxy
- *   4. request host + socket TLS guess — local dev
- *   5. `https://kax.replit.app` — last resort
+ *   3. `https://kax.replit.app` — last resort default. Local-dev users
+ *      who serve share cards should set KAX_PUBLIC_URL explicitly.
+ *
+ * The previous fallback chain (X-Forwarded-Host, req.host, socket TLS
+ * guess) is removed — those are all attacker-controllable through one
+ * malicious reverse proxy or a direct fetch with a custom Host header.
  */
-function getBaseUrl(req: Request): string {
+function getBaseUrl(_req: Request): string {
   const override = (process.env["KAX_PUBLIC_URL"] || "").trim();
   if (override) return override.replace(/\/+$/, "");
 
@@ -26,13 +34,6 @@ function getBaseUrl(req: Request): string {
     || (process.env["REPLIT_DOMAINS"] || "").split(",")[0];
   if (replitDomain) return `https://${replitDomain.trim()}`;
 
-  const fwdHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
-  const fwdProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  const host = fwdHost || req.get("host");
-  if (host) {
-    const proto = fwdProto || ((req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
-    return `${proto}://${host}`;
-  }
   return "https://kax.replit.app";
 }
 
