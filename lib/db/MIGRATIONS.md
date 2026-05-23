@@ -19,13 +19,28 @@ The runner prints which files it applied vs. which were already present.
 First run on a fresh DB applies everything; subsequent runs only apply
 new files.
 
-## Auto-apply at api-server boot (opt-in)
+## Auto-apply at api-server boot
 
-Set `KAX_AUTO_MIGRATE=1` in the api-server env. The boot sequence runs
-`runMigrations` before any scheduler / bridge starts. Recommended for
-dev / preview environments where the deploy doesn't have a separate
-migration step. Production should keep migrations as an explicit step
-in the deploy pipeline.
+The api-server runs `runMigrations` before any scheduler / bridge
+starts and before `app.listen()`. A failure here is **fatal** — the
+process exits non-zero rather than serving requests against a
+half-migrated schema.
+
+Enablement rules:
+
+| Env                                 | Auto-migrate? |
+| ----------------------------------- | ------------- |
+| `KAX_AUTO_MIGRATE=1`                | yes (force on)  |
+| `KAX_AUTO_MIGRATE=0`                | no  (force off) |
+| unset, `REPLIT_DEPLOYMENT=1`        | yes (deploy default) |
+| unset, no `REPLIT_DEPLOYMENT`       | no  (local dev default) |
+
+This means production / preview deploys on Replit auto-apply pending
+migrations on every boot (so a deploy that ships a new
+`lib/db/migrations/*.sql` reaches the prod DB without manual
+intervention), while local dev stays opt-in so `pnpm dev` doesn't
+touch your DB unless you ask. Set `KAX_AUTO_MIGRATE=0` on a deploy to
+suppress it if you want to gate migrations on a separate ops step.
 
 ## Add a new migration
 

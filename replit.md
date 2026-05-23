@@ -166,6 +166,15 @@ curl -s -b cookies.txt -X POST localhost:80/api/auth/agent/verify \
 curl -s -b cookies.txt -X DELETE localhost:80/api/auth/bots/<uuid>      # detach
 ```
 
+## Migrations
+
+The api-server auto-applies pending SQL migrations (`lib/db/migrations/*.sql`)
+at boot before `app.listen()`. Enabled by default on Replit deploys
+(`REPLIT_DEPLOYMENT=1`), opt-in locally via `KAX_AUTO_MIGRATE=1`, opt-out
+on a deploy via `KAX_AUTO_MIGRATE=0`. A migration failure is fatal —
+the process exits rather than serving against a half-migrated schema.
+See `lib/db/MIGRATIONS.md` for details and the rules table.
+
 ## Commands
 
 - `pnpm run typecheck` — Full typecheck

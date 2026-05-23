@@ -45,39 +45,61 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Optional auto-migrate at boot — production keeps migrations as a separate
-// deploy step, but dev/CI/Replit setups can opt in with KAX_AUTO_MIGRATE=1
-// so a fresh DB doesn't trip on missing tables before the manual step runs.
-async function maybeAutoMigrate(): Promise<void> {
-  if (process.env["KAX_AUTO_MIGRATE"] !== "1") return;
+// Auto-migrate at boot. Enabled by default on Replit deployments
+// (REPLIT_DEPLOYMENT=1) so production never serves with a stale schema
+// after a deploy that ships new migrations. Dev/CI can opt in explicitly
+// with KAX_AUTO_MIGRATE=1, or opt out of the deploy default with
+// KAX_AUTO_MIGRATE=0. A failure here is fatal — we'd rather refuse to
+// boot than answer requests against a half-migrated schema (the exact
+// "column does not exist" 500 storm task #36 had to clean up by hand).
+function shouldAutoMigrate(): boolean {
+  const flag = process.env["KAX_AUTO_MIGRATE"];
+  if (flag === "1") return true;
+  if (flag === "0") return false;
+  return process.env["REPLIT_DEPLOYMENT"] === "1";
+}
+
+async function autoMigrateOrExit(): Promise<void> {
+  if (!shouldAutoMigrate()) return;
   try {
     const result = await runMigrations({ log: (m) => logger.info(m) });
     if (result.applied.length > 0) {
-      logger.info({ applied: result.applied }, "schema_migrations: applied at boot");
+      logger.info(
+        { applied: result.applied, skipped: result.skipped.length },
+        "schema_migrations: applied at boot",
+      );
+    } else {
+      logger.info(
+        { skipped: result.skipped.length },
+        "schema_migrations: up to date at boot",
+      );
     }
   } catch (err) {
-    logger.error({ err }, "schema_migrations: auto-migrate failed");
-    // Don't refuse to start — operators may prefer hand-applied migrations
-    // and just want the runner available; the real fail-loudly path is
-    // `pnpm --filter @workspace/db migrate` exiting non-zero.
+    logger.error({ err }, "schema_migrations: auto-migrate failed — refusing to start");
+    process.exit(1);
   }
 }
 
-maybeAutoMigrate()
-  .then(() => ensureKannakaOwnerAndBackfill())
-  .then(() => replayMissedEventsOnStartup())
-  .then(() => startAgentHarvestScheduler())
-  .then(() => startHeatDecayScheduler())
-  .then(() => startConstellationBridge())
-  .catch((err) => {
+async function boot(): Promise<void> {
+  await autoMigrateOrExit();
+  try {
+    await ensureKannakaOwnerAndBackfill();
+    await replayMissedEventsOnStartup();
+    await startAgentHarvestScheduler();
+    await startHeatDecayScheduler();
+    await startConstellationBridge();
+  } catch (err) {
     logger.error({ err }, "Failed to seed/backfill, replay events, or start constellation bridge");
-  });
-
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
   }
 
-  logger.info({ port }, "Server listening");
-});
+  app.listen(port, (err) => {
+    if (err) {
+      logger.error({ err }, "Error listening on port");
+      process.exit(1);
+    }
+
+    logger.info({ port }, "Server listening");
+  });
+}
+
+void boot();
