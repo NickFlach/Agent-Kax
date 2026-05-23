@@ -151,11 +151,15 @@ export default function DropsList() {
       ) : data?.drops && data.drops.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.drops.map((drop) => (
-            <Card key={drop.id} className="group" data-testid={`card-drop-${drop.id}`}>
+            <Card key={drop.id} className="group focus-within:ring-2 focus-within:ring-primary" data-testid={`card-drop-${drop.id}`}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <Link href={`/drops/${drop.id}`}>
-                    <CardTitle className="text-lg cursor-pointer hover:text-primary transition-colors" data-testid={`text-drop-title-${drop.id}`}>
+                  <Link
+                    href={`/drops/${drop.id}`}
+                    className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+                    aria-label={`View drop: ${drop.title}`}
+                  >
+                    <CardTitle className="text-lg hover:text-primary transition-colors" data-testid={`text-drop-title-${drop.id}`}>
                       {drop.title}
                     </CardTitle>
                   </Link>
@@ -195,15 +199,16 @@ export default function DropsList() {
                     )}
                   </div>
                 )}
-                <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                   {drop.status === "draft" && (
                     <button
                       onClick={(e) => {
                         e.preventDefault();
                         deleteMutation.mutate({ id: drop.id });
                       }}
-                      className="text-xs px-2 py-1 text-destructive hover:bg-destructive/10 transition-colors"
+                      className="text-xs px-2 py-1 text-destructive hover:bg-destructive/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-destructive transition-colors"
                       data-testid={`button-delete-${drop.id}`}
+                      aria-label={`Delete draft drop ${drop.title}`}
                     >
                       Delete
                     </button>

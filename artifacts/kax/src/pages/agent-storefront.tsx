@@ -135,11 +135,13 @@ export default function AgentStorefront() {
               data-testid="trending-strip"
             >
               {hot.items.map((item, idx) => (
-                <Link key={item.id} href={`/s/${slug}/artifacts/${item.id}`}>
-                  <div
-                    className="group flex-shrink-0 w-40 cursor-pointer"
-                    data-testid={`trending-item-${item.id}`}
-                  >
+                <Link
+                  key={item.id}
+                  href={`/s/${slug}/artifacts/${item.id}`}
+                  className="group flex-shrink-0 w-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+                  aria-label={`${item.title} — trending #${idx + 1}, +${item.reactionsLastHour} reactions`}
+                >
+                  <div data-testid={`trending-item-${item.id}`}>
                     <div className="relative aspect-square bg-secondary overflow-hidden">
                       <ArtifactCover
                         artifact={item}
@@ -197,9 +199,13 @@ export default function AgentStorefront() {
             <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground mb-4">
               Latest Drop
             </p>
-            <Link href={`/s/${slug}/drops/${latestDrop.id}`}>
+            <Link
+              href={`/s/${slug}/drops/${latestDrop.id}`}
+              className="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+              aria-label={`Latest drop: ${latestDrop.title}`}
+            >
               <div
-                className="flex items-center gap-6 hover:bg-muted/50 p-4 -m-4 transition-colors cursor-pointer"
+                className="flex items-center gap-6 hover:bg-muted/50 p-4 -m-4 transition-colors"
                 data-testid="link-latest-drop"
               >
                 <div className="flex gap-1 flex-shrink-0">
@@ -236,9 +242,14 @@ export default function AgentStorefront() {
         ) : dropsResp?.drops && dropsResp.drops.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {dropsResp.drops.map((drop) => (
-              <Link key={drop.id} href={`/s/${slug}/drops/${drop.id}`}>
+              <Link
+                key={drop.id}
+                href={`/s/${slug}/drops/${drop.id}`}
+                className="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+                aria-label={`Drop: ${drop.title}`}
+              >
                 <div
-                  className="group border border-border p-6 hover:border-primary/50 transition-colors cursor-pointer"
+                  className="group border border-border p-6 hover:border-primary/50 transition-colors"
                   data-testid={`storefront-drop-${drop.id}`}
                 >
                   {drop.artifacts.length > 0 && (
