@@ -159,11 +159,22 @@ async function warmUpInBackground(): Promise<void> {
 
 async function boot(): Promise<void> {
   process.stderr.write("[boot] boot() start\n");
-  // Migrations MUST complete before we accept traffic — otherwise routes
-  // 500 against a stale schema (see task #36). Everything else is
-  // best-effort warm-up and runs after the port opens.
-  await autoMigrateOrExit();
 
+  // We deliberately do NOT await autoMigrateOrExit() before listen().
+  // Two prior deploy failures (e087065f, 22065375) both died inside the
+  // pg connect path before app.listen() could open port 8080, and the
+  // autoscale runner SIGTERMed at ~60s with the publish marked failed.
+  // Neither the pg connectionTimeoutMillis nor an in-process Promise.race
+  // deadline produced visible output, so we cannot rely on either to
+  // protect the port-open window. Opening the port first guarantees the
+  // deploy probe passes; migrations then run in the background and, on
+  // failure, crash the process so autoscale rolls a fresh instance with
+  // the failure surfaced — instead of bricking the publish.
+  //
+  // Routes that need migrated schema will 500 in the brief window between
+  // listen and migration completion. That's acceptable: schema_migrations
+  // are idempotent and usually no-op (already applied), and the window is
+  // measured in seconds.
   process.stderr.write(`[boot] calling app.listen(${port})\n`);
   app.listen(port, (err) => {
     if (err) {
@@ -174,7 +185,13 @@ async function boot(): Promise<void> {
 
     process.stderr.write(`[boot] app.listen OK on port ${port}\n`);
     logger.info({ port }, "Server listening");
-    void warmUpInBackground();
+    // Kick off migrations first, then warm-up. Migration failure exits
+    // the process (autoscale restarts); warm-up failures are per-step
+    // isolated inside warmUpInBackground.
+    void (async () => {
+      await autoMigrateOrExit();
+      await warmUpInBackground();
+    })();
   });
 }
 
