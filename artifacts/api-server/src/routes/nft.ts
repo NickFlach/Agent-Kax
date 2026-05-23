@@ -4,6 +4,7 @@ import { artifactsTable, nftMintsTable, activitiesTable } from "@workspace/db/sc
 import { eq, and } from "drizzle-orm";
 import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 import { publicArtifactWhere } from "../lib/visibility";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -233,6 +234,19 @@ router.post("/artifacts/:id/mint", requireAuth, async (req, res) => {
         agentId: a.agentId ?? null,
       });
     }
+
+    // Outbound — radio + observatory can announce mints. Fire after the
+    // DB has the truth; before sending the response so the listener
+    // ordering aligns with the user's expectation of "the mint is done".
+    await publishConstellation("KAX.events.mint.recorded", {
+      artifactId: id,
+      title: a.title,
+      chainId: parsed.data.chainId,
+      contractAddress: parsed.data.contractAddress.toLowerCase(),
+      tokenId: parsed.data.tokenId,
+      txHash: parsed.data.txHash.toLowerCase(),
+      metadataUri,
+    });
 
     res.status(201).json({
       artifactId: id,

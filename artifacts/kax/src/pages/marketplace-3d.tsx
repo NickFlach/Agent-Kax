@@ -40,12 +40,14 @@ function Storefront({
   rotation,
   selected,
   onClick,
+  onDoubleClick,
 }: {
   agent: SceneAgent;
   position: [number, number, number];
   rotation: [number, number, number];
   selected: boolean;
   onClick: (a: SceneAgent) => void;
+  onDoubleClick: (a: SceneAgent) => void;
 }) {
   const isClaimed = agent.claimed;
   const mainColor = isClaimed ? "#ff1493" : "#00ffff";
@@ -77,12 +79,20 @@ function Storefront({
     e.stopPropagation?.();
     onClick(agent);
   };
+  // Double-click enters the storefront immediately — universal "enter"
+  // gesture in 3D world UIs. Single-click still selects + populates HUD
+  // for users who want to inspect first.
+  const enter = (e: { stopPropagation?: () => void }) => {
+    e.stopPropagation?.();
+    onDoubleClick(agent);
+  };
 
   return (
     <group
       position={position}
       rotation={rotation}
       onClick={select}
+      onDoubleClick={enter}
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "auto")}
     >
@@ -201,6 +211,7 @@ export default function Marketplace3D() {
   const visit = () => {
     if (selected) navigate(`/s/${selected.slug}`);
   };
+  const enterStorefront = (a: SceneAgent) => navigate(`/s/${a.slug}`);
 
   // WebGL not supported → fall back to the 2D list immediately.
   if (webglSupported === false) {
@@ -311,7 +322,7 @@ export default function Marketplace3D() {
 
       {/* Footer hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-[0.3em] text-cyan-300/60 pointer-events-none z-10 text-center">
-        Drag to orbit · Scroll to zoom · Click a sign to inspect
+        Drag to orbit · Scroll to zoom · Click to inspect · Double-click to enter
         {overflowCount > 0 && (
           <div className="mt-1 pointer-events-auto">
             <Link href="/marketplace/list" className="underline hover:text-white" data-testid="link-overflow-list">
@@ -372,6 +383,7 @@ export default function Marketplace3D() {
               rotation={item.rotation}
               selected={selected?.slug === item.agent.slug}
               onClick={(a) => setSelected(a)}
+              onDoubleClick={enterStorefront}
             />
           ))}
         </Suspense>

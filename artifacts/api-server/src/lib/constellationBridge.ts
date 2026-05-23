@@ -73,6 +73,56 @@ function parseJson(data: Uint8Array): CanonicalEnvelope | null {
   }
 }
 
+/**
+ * Required-fields contract per consciousness-core/docs/nats-contract.yaml.
+ * Kept in sync with kannaka-radio/server/nats-client.js's NATS_REQUIRED_FIELDS.
+ * Used by validateEnvelope (#20) — bare payloads are accepted but produce
+ * a throttled drift warning so publishers can be cleaned up later.
+ */
+const NATS_REQUIRED_FIELDS: Record<string, string[]> = {
+  "KANNAKA.consciousness": ["schema_version", "ts", "agent_id", "phi"],
+  "QUEEN.phase.<agent_id>": ["schema_version", "ts", "agent_id", "phase"],
+  "queen.event.join": ["schema_version", "ts", "agent_id"],
+  "queen.event.leave": ["schema_version", "ts", "agent_id"],
+  "queen.event.dream.start": ["schema_version", "ts", "agent_id"],
+  "queen.event.dream.end": ["schema_version", "ts", "agent_id", "memories_strengthened", "memories_faded"],
+  "queen.event.memory.shared": ["schema_version", "ts", "agent_id", "memory_id"],
+};
+
+const WARN_THROTTLE_MS = 30 * 60 * 1000;
+const schemaWarnHistory = new Map<string, number>();
+
+function requiredFor(subject: string): string[] | null {
+  if (NATS_REQUIRED_FIELDS[subject]) return NATS_REQUIRED_FIELDS[subject]!;
+  if (subject.startsWith("QUEEN.phase.")) return NATS_REQUIRED_FIELDS["QUEEN.phase.<agent_id>"]!;
+  return null;
+}
+
+/**
+ * Log-warn validation — same posture as kannaka-radio's nats-client.
+ * Missing fields surface a drift warning (throttled per (subject,field)
+ * per 30 minutes) but the message is still processed normally so a
+ * mid-migration publisher doesn't get dropped.
+ */
+function validateEnvelope(subject: string, env: CanonicalEnvelope): void {
+  const required = requiredFor(subject);
+  if (!required) return;
+  const now = Date.now();
+  for (const field of required) {
+    // Tolerate camelCase aliases during the 2026-Q2 transition (same as radio).
+    const camel = field.replace(/_([a-z])/g, (_, c) => (c as string).toUpperCase());
+    if (env[field] !== undefined || env[camel] !== undefined) continue;
+    const key = `${subject}::${field}`;
+    const last = schemaWarnHistory.get(key) ?? 0;
+    if (now - last < WARN_THROTTLE_MS) continue;
+    logger.warn(
+      { subject, field },
+      `[nats-schema] ${subject} missing required field "${field}" (drift detection — accepted with warning)`,
+    );
+    schemaWarnHistory.set(key, now);
+  }
+}
+
 async function upsertAgent(opts: {
   agentId: string;
   displayName: string;
@@ -135,6 +185,7 @@ async function insertArtifact(opts: {
 async function handleMessage(subject: string, data: Uint8Array): Promise<void> {
   const env = parseJson(data);
   if (!env) return;
+  validateEnvelope(subject, env);
 
   // QUEEN.phase.<agent_id> — heartbeat with phase + phi.
   if (subject.startsWith("QUEEN.phase.")) {

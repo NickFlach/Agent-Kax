@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { PlayerProvider } from "@/contexts/player-context";
 import { PersistentPlayer } from "@/components/persistent-player";
+import { ConstellationBackdrop } from "@/components/constellation-backdrop";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import ArtifactsList from "@/pages/artifacts-list";
@@ -303,6 +304,7 @@ function App() {
       <TooltipProvider>
         <PlayerProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <ConstellationBackdrop />
             <Router />
           </WouterRouter>
           <PersistentPlayer />

@@ -17,6 +17,7 @@ import {
 } from "@workspace/api-zod";
 import { canMutate, requireAuth, getOwnerScope, getOptionalAuth } from "../middlewares/requireAuth";
 import { isPublishableStatus } from "../lib/visibility";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -254,6 +255,16 @@ router.post("/drops/:id/publish", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Drop not found" });
     return;
   }
+
+  // Outbound — radio + observatory can react to drop releases. Best effort;
+  // no-op when KAX_NATS_URL is unset.
+  await publishConstellation("KAX.events.drop.published", {
+    dropId: result.id,
+    title: result.title,
+    artifactCount: result.artifacts.length,
+    publishedAt: result.publishedAt,
+  });
+
   res.json(result);
 });
 

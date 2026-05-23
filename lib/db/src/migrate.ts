@@ -1,0 +1,109 @@
+/**
+ * migrate.ts — minimal, idempotent SQL migration runner.
+ *
+ * Reads `lib/db/migrations/*.sql` in lexicographic order, tracks
+ * applied ones in `schema_migrations`, and skips already-applied
+ * entries. Safe to run on every boot or once-per-deploy.
+ *
+ * Why hand-rolled instead of drizzle-kit's migrate command?
+ *   - The existing `*.sql` files are hand-written (not drizzle-generated)
+ *     so they don't have the meta-journal drizzle-kit expects.
+ *   - The runner needs to work the same way in CI, in a one-shot ops
+ *     script, and (optionally, behind KAX_AUTO_MIGRATE=1) at api-server
+ *     boot. A 60-line PG-only runner is easier to reason about than
+ *     adopting drizzle-kit's full conventions retroactively.
+ */
+
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { pool } from "./index";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS_DIR = resolve(HERE, "../migrations");
+
+interface MigrationRow {
+  filename: string;
+  applied_at: Date;
+}
+
+async function ensureJournalTable(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename TEXT PRIMARY KEY,
+      applied_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+async function listApplied(): Promise<Set<string>> {
+  const res = await pool.query<MigrationRow>("SELECT filename FROM schema_migrations");
+  return new Set(res.rows.map((r) => r.filename));
+}
+
+function listOnDisk(): string[] {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort(); // lex order; the leading 000N keeps this deterministic
+}
+
+async function applyOne(filename: string, log: (m: string) => void): Promise<void> {
+  const sql = readFileSync(resolve(MIGRATIONS_DIR, filename), "utf8");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(sql);
+    await client.query("INSERT INTO schema_migrations (filename) VALUES ($1)", [filename]);
+    await client.query("COMMIT");
+    log(`  ✓ ${filename}`);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw new Error(`Migration ${filename} failed: ${(err as Error).message}`);
+  } finally {
+    client.release();
+  }
+}
+
+export interface MigrateResult {
+  applied: string[];
+  skipped: string[];
+}
+
+/** Run all pending migrations. Returns which were applied vs already-applied. */
+export async function runMigrations(opts: { log?: (m: string) => void } = {}): Promise<MigrateResult> {
+  const log = opts.log ?? (() => {});
+  await ensureJournalTable();
+  const applied = await listApplied();
+  const onDisk = listOnDisk();
+  const pending = onDisk.filter((f) => !applied.has(f));
+  const skipped = onDisk.filter((f) => applied.has(f));
+
+  if (pending.length === 0) {
+    log(`schema_migrations: up to date (${skipped.length} already applied)`);
+    return { applied: [], skipped };
+  }
+
+  log(`schema_migrations: applying ${pending.length} new migration(s)`);
+  for (const f of pending) {
+    await applyOne(f, log);
+  }
+
+  return { applied: pending, skipped };
+}
+
+// CLI mode — `pnpm db:migrate` runs this directly.
+const isMain =
+  import.meta.url === `file://${process.argv[1]}` ||
+  import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/")}`;
+if (isMain) {
+  runMigrations({ log: (m) => console.log(m) })
+    .then((r) => {
+      console.log(`migrations: ${r.applied.length} applied, ${r.skipped.length} skipped`);
+      return pool.end();
+    })
+    .catch((err) => {
+      console.error(err);
+      void pool.end();
+      process.exit(1);
+    });
+}

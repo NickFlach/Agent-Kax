@@ -25,6 +25,7 @@ import {
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
 import { formatArtifact } from "./artifacts";
 import { KANNAKA_SYSTEM_USER_ID, KANNAKA_AGENT_SLUG } from "../lib/backfill";
+import { isPublishableStatus, PUBLISHABLE_STATUSES } from "../lib/visibility";
 
 function isAgentClaimed(agent: Agent): boolean {
   if (agent.slug === KANNAKA_AGENT_SLUG) return true;
@@ -294,6 +295,11 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
               eq(artifactsTable.agentId, agent.id),
               isNotNull(artifactsTable.kannakaScore),
               inArray(artifactsTable.dropId, agentDropIds),
+              // Publishable-status floor (see #9 / lib/visibility.ts):
+              // dropId being on a published drop isn't enough — owners
+              // can attach + stamp 'dropped' on raw/scored artifacts
+              // without going through narrate.
+              inArray(artifactsTable.status, ["narrated", "dropped"] as const),
             ),
           )
           .orderBy(desc(artifactsTable.kannakaScore))
@@ -319,9 +325,10 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
       .select()
       .from(artifactsTable)
       .where(and(eq(artifactsTable.dropId, d.id), eq(artifactsTable.agentId, agent.id)));
+    const publishable = dropArtifacts.filter((a) => isPublishableStatus(a.status));
     latestDropWithArtifacts = {
       ...d,
-      artifacts: dropArtifacts.map(formatArtifact),
+      artifacts: publishable.map(formatArtifact),
       createdAt: d.createdAt.toISOString(),
       publishedAt: d.publishedAt?.toISOString() ?? null,
     };
@@ -385,6 +392,9 @@ router.get("/storefront/by-agent/:slug/hot", async (req, res) => {
         inArray(artifactsTable.dropId, publishedDropIds),
         isNotNull(artifactsTable.lastReactionAt),
         gte(artifactsTable.lastReactionAt, hourAgo),
+        // Publishable-status floor (#9): raw/scored back-doors with
+        // recent reactions shouldn't appear on the public hot list.
+        inArray(artifactsTable.status, ["narrated", "dropped"] as const),
       ),
     )
     .groupBy(artifactsTable.id)
@@ -450,9 +460,10 @@ router.get("/storefront/by-agent/:slug/drops", async (req, res) => {
         .select()
         .from(artifactsTable)
         .where(and(eq(artifactsTable.dropId, drop.id), eq(artifactsTable.agentId, agent.id)));
+      const publishable = artifacts.filter((a) => isPublishableStatus(a.status));
       return {
         ...drop,
-        artifacts: artifacts.map(formatArtifact),
+        artifacts: publishable.map(formatArtifact),
         createdAt: drop.createdAt.toISOString(),
         publishedAt: drop.publishedAt?.toISOString() ?? null,
       };
@@ -482,13 +493,14 @@ router.get("/storefront/by-agent/:slug/drops/:id", async (req, res) => {
     .select()
     .from(artifactsTable)
     .where(and(eq(artifactsTable.dropId, id), eq(artifactsTable.agentId, agent.id)));
-  if (artifacts.length === 0) {
+  const publishable = artifacts.filter((a) => isPublishableStatus(a.status));
+  if (publishable.length === 0) {
     res.status(404).json({ error: "Drop not found" });
     return;
   }
   res.json({
     ...drop,
-    artifacts: artifacts.map(formatArtifact),
+    artifacts: publishable.map(formatArtifact),
     createdAt: drop.createdAt.toISOString(),
     publishedAt: drop.publishedAt?.toISOString() ?? null,
   });
@@ -517,6 +529,12 @@ router.get("/storefront/by-agent/:slug/artifacts/:id", async (req, res) => {
       .where(eq(dropsTable.id, artifact.dropId))
       .limit(1);
     if (!drop || drop.status !== "published") {
+      res.status(404).json({ error: "Artifact not published" });
+      return;
+    }
+    // Publishable-status floor (#9): the artifact's own status must also
+    // be in the publishable set even when its drop is published.
+    if (!isPublishableStatus(artifact.status)) {
       res.status(404).json({ error: "Artifact not published" });
       return;
     }

@@ -6,6 +6,7 @@ import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
+import { runMigrations } from "@workspace/db";
 
 registerAllEventHandlers();
 
@@ -44,7 +45,26 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-ensureKannakaOwnerAndBackfill()
+// Optional auto-migrate at boot — production keeps migrations as a separate
+// deploy step, but dev/CI/Replit setups can opt in with KAX_AUTO_MIGRATE=1
+// so a fresh DB doesn't trip on missing tables before the manual step runs.
+async function maybeAutoMigrate(): Promise<void> {
+  if (process.env["KAX_AUTO_MIGRATE"] !== "1") return;
+  try {
+    const result = await runMigrations({ log: (m) => logger.info(m) });
+    if (result.applied.length > 0) {
+      logger.info({ applied: result.applied }, "schema_migrations: applied at boot");
+    }
+  } catch (err) {
+    logger.error({ err }, "schema_migrations: auto-migrate failed");
+    // Don't refuse to start — operators may prefer hand-applied migrations
+    // and just want the runner available; the real fail-loudly path is
+    // `pnpm --filter @workspace/db migrate` exiting non-zero.
+  }
+}
+
+maybeAutoMigrate()
+  .then(() => ensureKannakaOwnerAndBackfill())
   .then(() => replayMissedEventsOnStartup())
   .then(() => startAgentHarvestScheduler())
   .then(() => startHeatDecayScheduler())

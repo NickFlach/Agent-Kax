@@ -12,6 +12,7 @@ import { canMutate, requireAuth, getOwnerScope, getOptionalAuth } from "../middl
 import { computeScore } from "../lib/tasteEngine";
 import { isArtifactPublic } from "../lib/visibility";
 import { dropsTable } from "@workspace/db/schema";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -145,6 +146,17 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
     artifactTitle: a.title,
     ownerId: a.ownerId,
     agentId: a.agentId,
+  });
+
+  // Outbound — constellation can listen for high-score artifacts to
+  // trigger reactions on radio / observatory. No-op when bridge unset.
+  await publishConstellation("KAX.events.artifact.scored", {
+    artifactId: a.id,
+    title: a.title,
+    kannakaScore,
+    rarityScore,
+    breakdown,
+    editionType: a.editionType,
   });
 
   res.json(formatArtifact(updated[0]));
