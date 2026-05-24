@@ -10,11 +10,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # Replit-ism: artifacts/mockup-sandbox/vite.config.ts hard-requires
-    # PORT at config-load time. Locally the Replit shell always sets
-    # it; CI doesn't. Inject a stub default — the value doesn't matter
-    # for `vite build`, only that it's present.
+    # PORT and BASE_PATH at config-load time. Locally the Replit shell
+    # always sets them; CI doesn't. Inject stub defaults — the values
+    # don't matter for `vite build`, only that they're present. Update
+    # this block whenever a new Replit-only env var gets added to the
+    # config gate (look for `throw new Error("X env var required")`).
     env:
       PORT: '5173'
+      BASE_PATH: '/'
     steps:
       - uses: actions/checkout@v4
         with:
