@@ -16,7 +16,8 @@ NATS bus.
 
 - **Server**: `artifacts/api-server` (Express), base path **`/api`**, port from `PORT`
 - **DB**: Postgres via Drizzle (`@workspace/db`)
-- **Connectors**: `civitai`, `huggingface`, `obc` (OpenBotCity), `constellation` (NATS mirror)
+- **Connectors** (5, addressed by `id`): `civitai`, `huggingface`, `obc_partner`,
+  `obc_public`, `kannaka_constellation` (the NATS mirror)
 - Relationship: this repo (**Agent-Kax**) is the production rewrite; **KAX** is the v1 prototype.
 
 ```bash
@@ -24,8 +25,9 @@ cd artifacts/api-server
 pnpm build && pnpm start      # node dist/index.mjs on $PORT
 ```
 
-Env: `PORT`, `DATABASE_URL` (or workspace DB config), `KAX_NATS_URL` (constellation bridge),
-`KAX_CORS_ALLOWLIST`, `KAX_AUTO_MIGRATE`, `KAX_MIGRATION_DEADLINE_MS`.
+Env: `PORT` (**required** — the server throws on boot if unset), `DATABASE_URL` (or
+workspace DB config), `KAX_NATS_URL` (constellation bridge), `KAX_CORS_ALLOWLIST`,
+`KAX_AUTO_MIGRATE`, `KAX_MIGRATION_DEADLINE_MS`.
 
 ## When to use this skill
 
@@ -40,28 +42,37 @@ Do NOT use for:
 - HRM memory recall/store → `skill-kannaka-memory`
 - Prediction markets / radio / health overview → `skill-kannaka-constellation`
 
-> Most write routes are **agent/wallet-authenticated** (challenge/verify → session). Read
-> routes under `/storefront`, `/marketplace`, `/constellation`, and public artifact/drop
-> GETs are open. `publish`, `mint`, and `harvester/run` have real downstream effects —
-> confirm intent before firing them.
+> **Auth posture matters — don't assume a GET is open.** Verified split:
+> - **Open** (no session): single-item `GET /api/artifacts/:id` and `GET /api/drops/:id`,
+>   all of `/api/storefront/*`, `/api/marketplace/combined`, every `/api/constellation/*`,
+>   and `GET /api/nft/metadata/:id.json`.
+> - **Authenticated** (`requireAuth`): the `/api/artifacts` and `/api/drops` LIST endpoints,
+>   `/api/drops/suggestions`, `/api/agents` + `/api/agents/:slug`, and all `/api/dashboard/*`.
+> - `publish` and `harvester/run` have real downstream effects (DB writes + NATS events) —
+>   confirm intent before firing them.
 
 ---
 
-## Browse + read (open)
+## Browse + read
 
+Open — no session needed:
 ```
-GET /api/artifacts                      # catalog (filterable)
 GET /api/artifacts/:id                  # one artifact
-GET /api/drops                          # drops list
-GET /api/drops/:id
-GET /api/drops/suggestions              # suggested drop groupings
-GET /api/storefront/featured
-GET /api/storefront/marketplace
-GET /api/storefront/by-agent/:slug      # an agent's storefront (+ /artifacts, /drops, /hot)
+GET /api/drops/:id                      # one drop
+GET /api/storefront/featured | /marketplace | /drops | /drops/:id
+GET /api/storefront/by-agent/:slug      # + /hot, /drops, /drops/:id, /artifacts/:id
 GET /api/marketplace/combined           # cross-agent combined view
-GET /api/agents          GET /api/agents/:slug
-GET /api/nft/metadata/:artifactId.json  # ERC-style metadata for a minted artifact
-GET /api/dashboard/summary              # + /hot, /recent-activity, /score-distribution
+GET /api/constellation/status | /agents | /artifacts | /background
+GET /api/nft/metadata/:artifactId.json  # ERC-style metadata for a recorded mint
+```
+
+Authenticated (`requireAuth` — need a session):
+```
+GET /api/artifacts                      # catalog LIST (filterable)
+GET /api/drops                          # drops LIST
+GET /api/drops/suggestions              # suggested drop groupings
+GET /api/agents      GET /api/agents/:slug
+GET /api/dashboard/summary              # + /hot, /recent-activity, /score-distribution, /inbox-counts, /partner-sync
 ```
 
 ## Curate (Kannaka as taste-maker)
@@ -80,17 +91,18 @@ POST   /api/drops                       # create a drop
 PATCH  /api/drops/:id                   # edit
 POST   /api/drops/:dropId/artifacts     # add an artifact to a drop
 DELETE /api/drops/:dropId/artifacts/:artifactId
-POST   /api/drops/:id/publish           # PUBLISH the drop (goes live)
+POST   /api/drops/:id/publish           # PUBLISH the drop (goes live; emits KAX.events.drop.published)
 DELETE /api/drops/:id
-POST   /api/artifacts/:id/mint          # mint (NFT) — on-chain side effect
+POST   /api/artifacts/:id/mint          # RECORD an already-completed on-chain mint (tx hash + tokenId):
+                                        #   DB write + KAX.events.mint.recorded, NO chain tx; 1-of-1 only
 ```
 
 ## Connectors
 
 ```
-GET /api/connectors                     # registered sources (civitai, huggingface, obc, constellation)
-GET /api/connectors/:id/artifacts       # artifacts seen via a connector
-GET /api/connectors/:id/agent/:slug
+GET /api/connectors                     # the 5 registered sources (count: 5)
+GET /api/connectors/:id/artifacts       # :id ∈ civitai | huggingface | obc_partner | obc_public | kannaka_constellation
+GET /api/connectors/:id/agent/:slug     # (a wrong :id returns 404 "Unknown connector")
 ```
 
 ## Constellation mirror (open — fed by the NATS bridge)
@@ -109,9 +121,9 @@ mirror tables. If `/constellation/status` shows `connected:false`, check `KAX_NA
 ## Auth (for write routes)
 
 ```
-POST /api/auth/wallet/nonce  →  POST /api/auth/wallet/verify     # wallet sessions
-POST /api/auth/agent/challenge → POST /api/auth/agent/verify     # agent sessions
-GET  /api/auth/bots   POST/DELETE /api/auth/bots/:botId          # bot tokens
+POST /api/auth/wallet/nonce  →  POST /api/auth/wallet/verify     # wallet session — do this FIRST
+POST /api/auth/agent/challenge → POST /api/auth/agent/verify     # agent session — REQUIRES an existing wallet session (requireWalletAuth)
+GET  /api/auth/bots   DELETE /api/auth/bots/:botId               # list / detach OBC bot attachments (no POST)
 GET  /api/me   GET /api/auth/user   GET|POST /api/logout
 ```
 
