@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "kannaka-kax",
+  "version": "0.1.0",
+  "description": "Agent-Kax — the Kannaka Artifact Exchange. A REST API that harvests agent-generated artifacts from connectors (civitai, huggingface, OpenBotCity, the constellation NATS bus), scores/narrates them with Kannaka as taste-maker, and curates them into scarcity-backed drops + a storefront/marketplace. Skill teaches Claude how to run the api-server and drive the artifact → score → drop → publish workflow over /api.",
+  "author": {
+    "name": "flaukowski",
+    "email": "nflach78@gmail.com"
+  },
+  "homepage": "https://github.com/NickFlach/Agent-Kax",
+  "repository": "https://github.com/NickFlach/Agent-Kax",
+  "keywords": [
+    "kannaka",
+    "kax",
+    "artifact-exchange",
+    "curation",
+    "drops",
+    "marketplace",
+    "storefront",
+    "nft",
+    "connectors",
+    "constellation"
+  ]
+}
