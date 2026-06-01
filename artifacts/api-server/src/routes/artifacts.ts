@@ -126,6 +126,8 @@ router.post("/artifacts/:id/score", requireAuth, async (req, res) => {
     editionType: a.editionType,
     heat: a.heat,
     lastReactionAt: a.lastReactionAt,
+    id: a.id,
+    createdAt: a.ingestedAt,
   });
 
   const updated = await db
