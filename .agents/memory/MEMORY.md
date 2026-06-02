@@ -1,0 +1,1 @@
+- [DB migration drift (dev)](db-migration-drift.md) — journal-empty dev DB + route 500 "relation/column does not exist" → suspect drift; seed schema_migrations before running the runner.

@@ -12,6 +12,12 @@ paths = ["/api", "/storefront"]
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
 
+[services.development.env]
+# Auto-apply pending SQL migrations on dev boot so the local DB never
+# drifts behind the migration files (the journal is seeded; non-idempotent
+# migrations are already recorded and will be skipped).
+KAX_AUTO_MIGRATE = "1"
+
 [services.production]
 
 [services.production.build]

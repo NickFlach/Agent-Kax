@@ -18,24 +18,37 @@
 --      single value from an enum in-place, so we rename the old type,
 --      create the new one, alter the column to use it, drop the old
 --      type, and reset the default to `wallet`.
+--
+-- Idempotency: the whole transform is guarded on whether the enum
+-- still contains `replit`. Re-running against a DB that was already
+-- transformed (e.g. one historically built with `drizzle push`, where
+-- the schema is ahead but the migration journal is empty) is a no-op
+-- instead of erroring on `auth_provider = 'replit'`. The UPDATE that
+-- references the `'replit'` literal lives inside the IF branch, so
+-- plpgsql only plans it when `replit` is actually present.
 
-BEGIN;
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_enum e
+    JOIN pg_type t ON e.enumtypid = t.oid
+    WHERE t.typname = 'auth_provider' AND e.enumlabel = 'replit'
+  ) THEN
+    UPDATE users SET auth_provider = 'wallet' WHERE auth_provider = 'replit';
 
-UPDATE users SET auth_provider = 'wallet' WHERE auth_provider = 'replit';
+    ALTER TABLE users ALTER COLUMN auth_provider DROP DEFAULT;
 
-ALTER TABLE users ALTER COLUMN auth_provider DROP DEFAULT;
+    ALTER TYPE auth_provider RENAME TO auth_provider_old;
 
-ALTER TYPE auth_provider RENAME TO auth_provider_old;
+    CREATE TYPE auth_provider AS ENUM ('wallet', 'obc_agent');
 
-CREATE TYPE auth_provider AS ENUM ('wallet', 'obc_agent');
+    ALTER TABLE users
+      ALTER COLUMN auth_provider TYPE auth_provider
+      USING auth_provider::text::auth_provider;
 
-ALTER TABLE users
-  ALTER COLUMN auth_provider TYPE auth_provider
-  USING auth_provider::text::auth_provider;
+    ALTER TABLE users
+      ALTER COLUMN auth_provider SET DEFAULT 'wallet';
 
-ALTER TABLE users
-  ALTER COLUMN auth_provider SET DEFAULT 'wallet';
-
-DROP TYPE auth_provider_old;
-
-COMMIT;
+    DROP TYPE auth_provider_old;
+  END IF;
+END $$;
