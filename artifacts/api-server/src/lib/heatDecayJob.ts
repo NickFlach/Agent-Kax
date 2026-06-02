@@ -63,6 +63,8 @@ export async function runHeatDecayOnce(now: Date = new Date()): Promise<HeatDeca
       editionType: a.editionType,
       heat: a.heat,
       lastReactionAt: a.lastReactionAt,
+      id: a.id,
+      createdAt: a.ingestedAt,
       now,
     });
 
