@@ -46,6 +46,7 @@ export const artifactsTable = pgTable("artifacts", {
   rarityScore: real("rarity_score"),
   scoreBreakdown: jsonb("score_breakdown").$type<{
     reactionSignal: number;
+    heatSignal: number;
     novelty: number;
     exploration: number;
     baseScore: number;

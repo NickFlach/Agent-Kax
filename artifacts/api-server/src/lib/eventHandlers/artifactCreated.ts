@@ -35,6 +35,11 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
     .values({
       externalId: pa.uuid,
       obcArtifactUuid: pa.uuid,
+      // Webhook events come from the OBC partner API — stamp the same
+      // connectorId the pull-based harvester uses so registry-tag queries
+      // see both ingestion paths consistently (#16). The schema default
+      // ("obc_public") is wrong here.
+      connectorId: "obc_partner",
       title: pa.title || "Untitled",
       creatorName: pa.creator?.display_name || "Unknown",
       publicUrl: pa.public_url,
