@@ -1,1 +1,2 @@
 - [DB migration drift (dev)](db-migration-drift.md) — journal-empty dev DB + route 500 "relation/column does not exist" → suspect drift; seed schema_migrations before running the runner.
+- [Prod data writes & account consolidation](prod-ownership-transfer.md) — prod DB is read-only to the agent; mutate prod data via an idempotent env-gated startup step, then deploy. Legacy→wallet ownership transfer lives in claimLegacyOwnership.

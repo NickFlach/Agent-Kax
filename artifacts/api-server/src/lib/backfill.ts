@@ -1,5 +1,16 @@
 import { db } from "@workspace/db";
-import { usersTable, artifactsTable, dropsTable, agentsTable } from "@workspace/db/schema";
+import {
+  usersTable,
+  artifactsTable,
+  dropsTable,
+  agentsTable,
+  activitiesTable,
+  proposalsTable,
+  dmsTable,
+  matchesTable,
+  outboundMessagesTable,
+  userBotsTable,
+} from "@workspace/db/schema";
 import { isNull, eq, and, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import { getPartnerAgent, partnerApiAvailable, PartnerApiError } from "./partnerClient";
@@ -241,6 +252,122 @@ export async function maybeClaimKannakaOwnership(user: {
     }
   } catch (err) {
     logger.error({ err }, "Re-attribution sweep failed; continuing");
+  }
+}
+
+/**
+ * One-time account consolidation. When the agents were onboarded under a
+ * legacy (pre-wallet) account, that account is no longer loginable once
+ * login became wallet-only — so its agents/artifacts/drops are stranded.
+ *
+ * Gated by two env vars:
+ *   KAX_CLAIM_FROM_USER_ID — the legacy users.id to drain.
+ *   KAX_CLAIM_TO_WALLET    — the wallet address (0x…, any case) of the
+ *                            destination account the user logs in with.
+ *
+ * Transfers every owner-scoped row from the legacy account to the wallet
+ * account and promotes the wallet account to admin. Fully idempotent: once
+ * the legacy account owns nothing, every UPDATE matches zero rows, so it is
+ * safe to leave the env vars in place and re-run on every boot. Runs inside a
+ * single transaction so a partial transfer can never be observed.
+ */
+export async function claimLegacyOwnership(): Promise<void> {
+  const fromUserId = (process.env.KAX_CLAIM_FROM_USER_ID || "").trim();
+  const toWallet = (process.env.KAX_CLAIM_TO_WALLET || "").trim().toLowerCase();
+  if (!fromUserId || !toWallet) return;
+
+  const [target] = await db
+    .select({ id: usersTable.id, role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.walletAddress, toWallet))
+    .limit(1);
+
+  if (!target) {
+    logger.warn(
+      { toWallet },
+      "claimLegacyOwnership: no user found for KAX_CLAIM_TO_WALLET; skipping (the user must sign in with that wallet at least once first)",
+    );
+    return;
+  }
+  if (target.id === fromUserId) return;
+
+  logger.info(
+    { fromUserId, toUserId: target.id },
+    "claimLegacyOwnership: starting one-time legacy account transfer",
+  );
+
+  const counts = await db.transaction(async (tx) => {
+    const moveOwner = async (
+      table:
+        | typeof agentsTable
+        | typeof artifactsTable
+        | typeof dropsTable
+        | typeof activitiesTable
+        | typeof proposalsTable
+        | typeof dmsTable
+        | typeof matchesTable
+        | typeof outboundMessagesTable,
+    ) => {
+      const rows = await tx
+        .update(table)
+        .set({ ownerId: target.id })
+        .where(eq(table.ownerId, fromUserId))
+        .returning({ id: table.id });
+      return rows.length;
+    };
+
+    const agents = await moveOwner(agentsTable);
+    const artifacts = await moveOwner(artifactsTable);
+    const drops = await moveOwner(dropsTable);
+    const activities = await moveOwner(activitiesTable);
+    const proposals = await moveOwner(proposalsTable);
+    const dms = await moveOwner(dmsTable);
+    const matches = await moveOwner(matchesTable);
+    const outbound = await moveOwner(outboundMessagesTable);
+
+    const outboundSentBy = (
+      await tx
+        .update(outboundMessagesTable)
+        .set({ sentByUserId: target.id })
+        .where(eq(outboundMessagesTable.sentByUserId, fromUserId))
+        .returning({ id: outboundMessagesTable.id })
+    ).length;
+
+    const bots = (
+      await tx
+        .update(userBotsTable)
+        .set({ userId: target.id })
+        .where(eq(userBotsTable.userId, fromUserId))
+        .returning({ id: userBotsTable.id })
+    ).length;
+
+    if (target.role !== "admin") {
+      await tx
+        .update(usersTable)
+        .set({ role: "admin", updatedAt: new Date() })
+        .where(eq(usersTable.id, target.id));
+    }
+
+    return {
+      agents,
+      artifacts,
+      drops,
+      activities,
+      proposals,
+      dms,
+      matches,
+      outbound,
+      outboundSentBy,
+      bots,
+    };
+  });
+
+  const total = Object.values(counts).reduce((s, n) => s + n, 0);
+  if (total > 0) {
+    logger.info(
+      { fromUserId, toUserId: target.id, ...counts },
+      "claimLegacyOwnership: transferred legacy account ownership to wallet account",
+    );
   }
 }
 

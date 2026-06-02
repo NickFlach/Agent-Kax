@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { ensureKannakaOwnerAndBackfill } from "./lib/backfill";
+import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
@@ -190,6 +190,7 @@ async function runStartupStep(
 
 async function warmUpInBackground(): Promise<void> {
   await runStartupStep("ensureKannakaOwnerAndBackfill", ensureKannakaOwnerAndBackfill);
+  await runStartupStep("claimLegacyOwnership", claimLegacyOwnership);
   await runStartupStep("replayMissedEventsOnStartup", replayMissedEventsOnStartup);
   await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
