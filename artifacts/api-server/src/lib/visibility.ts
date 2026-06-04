@@ -45,10 +45,15 @@ export function isPublishableStatus(s: string | null | undefined): s is Publisha
  * Sync check for an artifact + its (optionally already-fetched) drop.
  * Pass undefined for `drop` only when you've already verified upstream
  * that the artifact's drop is published.
+ * Pass null when the drop was fetched but not found in the DB — treated
+ * as not public regardless of artifact status.
  */
 export function isArtifactPublic(a: Artifact, drop?: Pick<Drop, "status"> | null): boolean {
   if (a.dropId == null) return false;
   if (!isPublishableStatus(a.status)) return false;
+  // null means the DB lookup found nothing — the artifact's dropId is
+  // orphaned; treat it as not public.
+  if (drop === null) return false;
   if (drop && drop.status !== "published") return false;
   return true;
 }
