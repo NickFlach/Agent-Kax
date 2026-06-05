@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, agentsTable, agentStorefrontSettingsTable } from "@workspace/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
-import { publicArtifactWhere } from "../lib/visibility";
+import { publicArtifactWhere, isPublishableStatus } from "../lib/visibility";
 
 const router: IRouter = Router();
 
@@ -151,6 +151,10 @@ router.get("/share/artifact/:id", async (req, res) => {
   }
 
   const artifact = results[0].artifact;
+  if (!isPublishableStatus(artifact.status)) {
+    res.status(404).send("Not found");
+    return;
+  }
   const agent = results[0].agent;
   const settings = results[0].settings;
   const agentSlug = agent?.slug ?? "kannaka";
