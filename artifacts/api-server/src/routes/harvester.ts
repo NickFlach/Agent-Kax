@@ -3,13 +3,11 @@ import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/requireAuth";
-import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
+import { requireAdmin } from "../middlewares/requireAuth";
+import { runPartnerHarvest } from "../lib/harvesterJob";
 import { partnerApiAvailable } from "../lib/partnerClient";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import { runRegistryHarvest } from "../lib/registryHarvest";
-import { agentsTable } from "@workspace/db/schema";
-import { canMutate } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -112,7 +110,11 @@ async function legacyHarvestType(
   return { harvested, newArtifacts, duplicates };
 }
 
-router.post("/harvester/run", requireAuth, async (req, res) => {
+// Admin-only: with the partner API configured this triggers the single global
+// harvest pass (mutates rows across every owner, spends the shared partner
+// budget); the registry fallback likewise ingests system-wide. Either way this
+// is a privileged operation, not a per-user one.
+router.post("/harvester/run", requireAdmin, async (req, res) => {
   const body = RunHarvesterBody.parse(req.body);
   const ownerId = req.user!.id;
   const type = body.type ?? "image";
@@ -127,30 +129,13 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
   // handler in app.ts, which returns a 500 with a logged stack so DB
   // hiccups stop silently pretending to succeed.
   if (partnerApiAvailable()) {
-    if (!body.agentId) {
-      res.status(400).json({
-        error: "Partner harvest requires an agentId. Add an agent first or pick one to harvest.",
-      });
-      return;
-    }
-    const [agent] = await db
-      .select()
-      .from(agentsTable)
-      .where(eq(agentsTable.id, body.agentId))
-      .limit(1);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    if (!(await canMutate(req, agent.ownerId))) {
-      res.status(403).json({ error: "Not authorized to harvest this agent" });
-      return;
-    }
+    // The OBC partner feed ignores the creator filter, so harvesting is a
+    // single global top-anchored pass — there is no per-agent harvest. Each
+    // artifact is attributed to its true creator by bot UUID, auto-creating
+    // unclaimed placeholder agents as needed (see runPartnerHarvest). The
+    // optional agentId from the UI is ignored.
     const partnerType = type === "all" ? undefined : type;
-    // No limit: partner harvest does a full top-anchored catch-up so every new
-    // artifact for this agent is ingested in one run (see runPartnerHarvestForAgent).
-    const result = await runPartnerHarvestForAgent({
-      agent,
+    const result = await runPartnerHarvest({
       ...(partnerType ? { type: partnerType } : {}),
     });
     harvested = result.harvested;

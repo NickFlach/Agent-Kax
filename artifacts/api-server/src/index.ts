@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership } from "./lib/backfill";
+import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership, repairCreatorAttribution } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
@@ -191,6 +191,10 @@ async function runStartupStep(
 async function warmUpInBackground(): Promise<void> {
   await runStartupStep("ensureKannakaOwnerAndBackfill", ensureKannakaOwnerAndBackfill);
   await runStartupStep("claimLegacyOwnership", claimLegacyOwnership);
+  // One-time creator-attribution repair (env-gated: KAX_REPAIR_ATTRIBUTION=1).
+  // No-op unless the flag is set; runs after ownership consolidation so it
+  // attributes against the final owner set.
+  await runStartupStep("repairCreatorAttribution", repairCreatorAttribution);
   await runStartupStep("replayMissedEventsOnStartup", replayMissedEventsOnStartup);
   await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);

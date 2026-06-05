@@ -3,7 +3,6 @@ import {
   artifactsTable,
   activitiesTable,
   agentsTable,
-  type Agent,
 } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -17,6 +16,11 @@ import {
 } from "./partnerClient";
 import { logger } from "./logger";
 import { dispatchPartnerEvent, getRegisteredEventTypes } from "./eventDispatcher";
+import {
+  findOrCreateAgentByBotUuid,
+  KANNAKA_SYSTEM_USER_ID,
+  type ResolvedAgent,
+} from "./backfill";
 
 export interface HarvestRunResult {
   harvested: number;
@@ -24,10 +28,16 @@ export interface HarvestRunResult {
   duplicates: number;
 }
 
+interface Attribution {
+  ownerId: string;
+  agentId: number | null;
+  creatorName: string;
+  creatorBotId: string | null;
+}
+
 async function upsertPartnerArtifact(
   pa: PartnerArtifact,
-  ownerId: string,
-  agentId: number | null,
+  attribution: Attribution,
 ): Promise<"new" | "duplicate"> {
   // Insert with `ON CONFLICT DO NOTHING` (no target) so the statement
   // tolerates a violation on EITHER unique constraint
@@ -46,14 +56,15 @@ async function upsertPartnerArtifact(
       connectorId: "obc_partner",
       obcArtifactUuid: pa.uuid,
       title: pa.title || "Untitled",
-      creatorName: pa.creator?.display_name || "Unknown",
+      creatorName: attribution.creatorName,
+      creatorBotId: attribution.creatorBotId,
       publicUrl: pa.public_url,
       thumbnailUrl: pa.thumbnail_url ?? pa.public_url,
       reactionCount: pa.reaction_count ?? 0,
       artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture",
       tags: [],
-      ownerId,
-      agentId,
+      ownerId: attribution.ownerId,
+      agentId: attribution.agentId,
       editionType: pa.edition?.type ?? "open",
       editionTotal: pa.edition?.total ?? null,
       editionSerial: pa.edition?.serial ?? null,
@@ -64,7 +75,7 @@ async function upsertPartnerArtifact(
   if (inserted.length > 0) {
     if (pa.edition?.type === "1_of_1") {
       logger.info(
-        { uuid: pa.uuid, title: pa.title, agentId },
+        { uuid: pa.uuid, title: pa.title, agentId: attribution.agentId },
         "1-of-1 artifact harvested — eligible for NFT mint",
       );
     }
@@ -74,27 +85,27 @@ async function upsertPartnerArtifact(
 }
 
 /**
- * Harvest new artifacts for a single agent (top-anchored full catch-up).
+ * Global partner harvest (top-anchored full catch-up), attributing every
+ * artifact to its TRUE creator by bot UUID.
  *
- * The partner `since` param returns artifacts OLDER than the given id — the
- * feed is newest-first. A *persisted* cursor therefore only ever pages
- * backward into history and never sees fresh top-of-feed artifacts, which is
- * why agents that had "caught up" stopped ingesting brand-new work entirely.
+ * Why global and not per-agent: the OBC partner feed IGNORES the `creator`
+ * filter and always returns the same newest-first global feed. Running it
+ * per-agent therefore re-fetched the identical feed N times and stamped every
+ * artifact onto whichever agent happened to run. Instead we make a single pass
+ * and attribute each artifact via `creator_bot_id` -> `agents.obc_bot_id`,
+ * auto-creating an unclaimed placeholder agent (owned by the Kannaka system
+ * user) for creators nobody has onboarded yet.
  *
- * Instead we anchor every run at the top (`since=null`) and page downward
- * until we hit a page that is entirely already in our DB — i.e. we've reached
- * previously-synced territory — or the end of the feed. There is deliberately
- * NO per-run cap: a finite cap would let a run stop mid-backlog, and because
- * every run restarts at the top, the next run's first page would be all
- * duplicates and the early-stop below would fire before reaching the remaining
- * backlog, leaving a permanent gap. Running uncapped, each pass ingests the
- * whole contiguous new region in one go, so new artifacts are never stranded.
- * Idempotent inserts keep steady state cheap (a single all-duplicate page).
+ * The partner `since` param returns artifacts OLDER than the given id, so we
+ * anchor every run at the top (`since=null`) and page downward until we hit a
+ * page that is entirely already in our DB — i.e. previously-synced territory —
+ * or the end of the feed. There is deliberately NO per-run cap (see the
+ * MAX_PAGES safety bound only): each pass ingests the whole contiguous new
+ * region in one go, and idempotent inserts keep steady state cheap.
  */
-export async function runPartnerHarvestForAgent(opts: {
-  agent: Agent;
+export async function runPartnerHarvest(opts: {
   type?: string;
-}): Promise<HarvestRunResult> {
+} = {}): Promise<HarvestRunResult> {
   if (!partnerApiAvailable()) {
     throw new Error("OBC_PARTNER_API_KEY not configured");
   }
@@ -108,13 +119,17 @@ export async function runPartnerHarvestForAgent(opts: {
   let duplicates = 0;
   let pageIdx = 0;
 
+  // Cache bot id -> resolved agent within a run; also tally new artifacts per
+  // agent (for stats) and per owner (for activity-feed entries).
+  const agentCache = new Map<string, ResolvedAgent>();
+  const perAgentNew = new Map<number, number>();
+  const perOwnerNew = new Map<string, number>();
+
   for (; pageIdx < MAX_PAGES; pageIdx++) {
     const page = await listPartnerArtifacts({
       since: cursor,
       limit: PAGE_SIZE,
-      type: opts.type,
-      creator: opts.agent.slug,
-      fallbackDisplayName: opts.agent.displayName,
+      ...(opts.type ? { type: opts.type } : {}),
     });
     if (!page.artifacts || page.artifacts.length === 0) break;
     if (newestSeen === null) newestSeen = page.artifacts[0]?.uuid ?? null;
@@ -122,10 +137,28 @@ export async function runPartnerHarvestForAgent(opts: {
     let pageNew = 0;
     for (const pa of page.artifacts) {
       harvested++;
-      const result = await upsertPartnerArtifact(pa, opts.agent.ownerId, opts.agent.id);
+      const botId = pa.creator?.id || null;
+      let agent: ResolvedAgent | null = null;
+      if (botId) {
+        agent = agentCache.get(botId) ?? null;
+        if (!agent) {
+          agent = await findOrCreateAgentByBotUuid(botId);
+          agentCache.set(botId, agent);
+        }
+      }
+      const result = await upsertPartnerArtifact(pa, {
+        ownerId: agent?.ownerId ?? KANNAKA_SYSTEM_USER_ID,
+        agentId: agent?.id ?? null,
+        creatorName: agent?.displayName ?? (pa.creator?.display_name || "Unknown"),
+        creatorBotId: botId,
+      });
       if (result === "new") {
         newArtifacts++;
         pageNew++;
+        if (agent) {
+          perAgentNew.set(agent.id, (perAgentNew.get(agent.id) ?? 0) + 1);
+          perOwnerNew.set(agent.ownerId, (perOwnerNew.get(agent.ownerId) ?? 0) + 1);
+        }
       } else {
         duplicates++;
       }
@@ -139,29 +172,34 @@ export async function runPartnerHarvestForAgent(opts: {
 
   if (pageIdx >= MAX_PAGES) {
     logger.warn(
-      { agent: opts.agent.slug, maxPages: MAX_PAGES, newArtifacts },
+      { maxPages: MAX_PAGES, newArtifacts },
       "Partner harvest hit MAX_PAGES safety bound — backlog beyond 50k artifacts not ingested this run",
     );
   }
 
-  await db
-    .update(agentsTable)
-    .set({
-      lastArtifactCursor: newestSeen,
-      lastSyncAt: new Date(),
-      artifactsHarvested: sql`${agentsTable.artifactsHarvested} + ${newArtifacts}`,
-      updatedAt: new Date(),
-    })
-    .where(eq(agentsTable.id, opts.agent.id));
+  // Bump per-agent harvest counters + sync timestamps for agents that gained work.
+  for (const [agentId, n] of perAgentNew) {
+    await db
+      .update(agentsTable)
+      .set({
+        lastSyncAt: new Date(),
+        artifactsHarvested: sql`${agentsTable.artifactsHarvested} + ${n}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentsTable.id, agentId));
+  }
 
   await recordPollSuccess(newestSeen);
 
-  if (newArtifacts > 0) {
+  // One activity-feed entry per owner that gained artifacts, so a claimed
+  // creator sees harvest activity in their dashboard (placeholder/system-owned
+  // work is summarised under the Kannaka system user).
+  for (const [ownerId, n] of perOwnerNew) {
+    if (n <= 0) continue;
     await db.insert(activitiesTable).values({
       type: "harvested",
-      message: `Partner harvest [${opts.agent.slug}]: ${newArtifacts} new (${duplicates} duplicates)`,
-      ownerId: opts.agent.ownerId,
-      agentId: opts.agent.id,
+      message: `Partner harvest: ${n} new artifact${n === 1 ? "" : "s"}`,
+      ownerId,
     });
   }
 

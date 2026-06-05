@@ -177,6 +177,11 @@ async function partnerFetch(path: string, init: RequestInit = {}): Promise<Respo
     try {
       const res = await fetch(url, {
         ...init,
+        // Bound every request so a hung connection can't stall a caller
+        // forever (e.g. the backgrounded attribution repair, which makes
+        // thousands of sequential calls). A timeout aborts and is retried
+        // like any other transient failure by the loop below.
+        signal: AbortSignal.timeout(20_000),
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Accept": "application/json",

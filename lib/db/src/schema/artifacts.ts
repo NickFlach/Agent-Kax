@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
@@ -33,6 +33,12 @@ export const artifactsTable = pgTable("artifacts", {
   obcArtifactUuid: text("obc_artifact_uuid").unique(),
   title: text("title").notNull(),
   creatorName: text("creator_name").notNull(),
+  // The TRUE creator's OBC bot UUID (matches agents.obc_bot_id). The OBC
+  // partner feed ignores creator filters and returns one global feed, so this
+  // — not which agent ran the harvest — is the source of truth for attribution.
+  // Nullable: rows ingested before this column existed are backfilled by the
+  // attribution repair; a few may stay null if OBC no longer exposes them.
+  creatorBotId: text("creator_bot_id"),
   publicUrl: text("public_url").notNull(),
   thumbnailUrl: text("thumbnail_url"),
   reactionCount: integer("reaction_count").notNull().default(0),
@@ -71,6 +77,7 @@ export const artifactsTable = pgTable("artifacts", {
   // Connector-aware dedupe key. Lets HuggingFace's externalId=12345
   // coexist with Civitai's externalId=12345 without collision (#16).
   uniqueIndex("artifacts_connector_external_unique").on(t.connectorId, t.externalId),
+  index("artifacts_creator_bot_id_idx").on(t.creatorBotId),
 ]);
 
 export const insertArtifactSchema = createInsertSchema(artifactsTable).omit({ id: true });

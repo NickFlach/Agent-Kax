@@ -25,6 +25,7 @@ import {
   constellationAgentsTable,
 } from "@workspace/db/schema";
 import { eq, and, gte, desc, count, isNotNull } from "drizzle-orm";
+import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
 
 const router: IRouter = Router();
 
@@ -112,7 +113,9 @@ router.get("/marketplace/combined", async (_req, res) => {
     publishedDropCount: e.drops.size,
     artifactCount: e.artifacts.size,
     latestPublishedAt: e.latest?.toISOString() ?? null,
-    claimed: true,
+    // Claimed = a real user owns this agent. Auto-created placeholder agents
+    // (owned by the Kannaka system user) are pre-populated but unclaimed.
+    claimed: e.agent.ownerId !== KANNAKA_SYSTEM_USER_ID,
     phi: null,
     consciousnessLevel: null,
     lastSeenAt: null,

@@ -1,17 +1,18 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { agentsTable, artifactsTable, type Agent } from "@workspace/db/schema";
-import { eq, and, desc, count, avg } from "drizzle-orm";
+import { eq, and, or, desc, count, avg } from "drizzle-orm";
 import {
   CreateAgentBody,
   GetAgentParams,
   HarvestAgentParams,
   HarvestAgentBody,
 } from "@workspace/api-zod";
-import { requireAuth, canMutate } from "../middlewares/requireAuth";
+import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
 import { partnerApiAvailable, PartnerApiError } from "../lib/partnerClient";
 import { lookupAgent } from "../lib/publicClient";
-import { runPartnerHarvestForAgent } from "../lib/harvesterJob";
+import { runPartnerHarvest } from "../lib/harvesterJob";
+import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
 import { formatArtifact } from "./artifacts";
 
 const router: IRouter = Router();
@@ -23,6 +24,10 @@ function formatAgent(a: Agent) {
     displayName: a.displayName,
     avatarUrl: a.avatarUrl,
     ownerId: a.ownerId,
+    obcBotId: a.obcBotId,
+    // An agent is "onboarded"/claimed once a real user owns it; until then it
+    // is an auto-created placeholder owned by the Kannaka system user.
+    onboarded: a.ownerId !== KANNAKA_SYSTEM_USER_ID,
     artifactsHarvested: a.artifactsHarvested,
     lastSyncAt: a.lastSyncAt?.toISOString() ?? null,
     lastArtifactCursor: a.lastArtifactCursor,
@@ -51,6 +56,96 @@ router.post("/agents", requireAuth, async (req, res) => {
     return;
   }
 
+  // Agent validation works with or without partnership:
+  //   - with OBC_PARTNER_API_KEY → richer partner profile (avatar, bio, bot id)
+  //   - without → public-profile fallback (still surfaces display name,
+  //     soul excerpt, reputation, recent artifacts)
+  // lookupAgent abstracts that selection. Either path resolving with a
+  // non-null result counts as "this OBC slug exists".
+  let displayName = body.displayName ?? slug;
+  let avatarUrl: string | null = null;
+  let profileJson: Record<string, unknown> | null = null;
+  let botId: string | null = null;
+  try {
+    const profile = await lookupAgent(slug);
+    if (!profile) {
+      res.status(404).json({ error: `OpenBotCity agent "${slug}" not found or has no artifacts` });
+      return;
+    }
+    displayName = body.displayName?.trim() || profile.display_name || slug;
+    avatarUrl = profile.avatar_url ?? null;
+    profileJson = { ...profile.raw, _kax_source: profile.source };
+    // The partner profile carries the canonical bot UUID under `id`; the
+    // anonymous public profile does not. Used to match (and upgrade) an
+    // auto-created placeholder agent for this creator.
+    const rawId = (profile.raw as { id?: unknown }).id;
+    botId = typeof rawId === "string" && rawId.length > 0 ? rawId : null;
+  } catch (err) {
+    if (err instanceof PartnerApiError) {
+      req.log.warn({ err, slug }, "Partner API error while validating agent");
+      res.status(502).json({ error: `Partner API error: ${err.message}` });
+      return;
+    }
+    throw err;
+  }
+
+  // Upgrade path: a placeholder agent for this bot already exists (auto-created
+  // by the harvester/repair, owned by the Kannaka system user). Claim it in
+  // place rather than 409-ing on the slug-unique index.
+  if (botId) {
+    const [byBot] = await db
+      .select()
+      .from(agentsTable)
+      .where(eq(agentsTable.obcBotId, botId))
+      .limit(1);
+    if (byBot) {
+      if (byBot.ownerId !== KANNAKA_SYSTEM_USER_ID && byBot.ownerId !== req.user!.id) {
+        res.status(409).json({ error: `Agent "${byBot.slug}" is already claimed` });
+        return;
+      }
+      // Prefer the requested OBC slug if it's free (or already this row's),
+      // else keep the placeholder's existing slug to avoid a unique clash.
+      let newSlug = byBot.slug;
+      const [slugClash] = await db
+        .select({ id: agentsTable.id })
+        .from(agentsTable)
+        .where(eq(agentsTable.slug, slug))
+        .limit(1);
+      if (!slugClash || slugClash.id === byBot.id) newSlug = slug;
+      // Atomic claim: only upgrade if the row is still an unclaimed placeholder
+      // (or already ours). Two concurrent claimers therefore can't both win —
+      // the loser's UPDATE matches 0 rows and 409s instead of silently
+      // overwriting the winner's ownership.
+      const [upgraded] = await db
+        .update(agentsTable)
+        .set({
+          ownerId: req.user!.id,
+          displayName,
+          avatarUrl,
+          profileJson,
+          slug: newSlug,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(agentsTable.id, byBot.id),
+            or(
+              eq(agentsTable.ownerId, KANNAKA_SYSTEM_USER_ID),
+              eq(agentsTable.ownerId, req.user!.id),
+            ),
+          ),
+        )
+        .returning();
+      if (!upgraded) {
+        res.status(409).json({ error: `Agent "${byBot.slug}" is already claimed` });
+        return;
+      }
+      res.status(200).json(formatAgent(upgraded));
+      return;
+    }
+  }
+
+  // No placeholder for this bot → fresh onboard. Guard the slug-unique index.
   const [existing] = await db
     .select()
     .from(agentsTable)
@@ -61,33 +156,6 @@ router.post("/agents", requireAuth, async (req, res) => {
     return;
   }
 
-  // Agent validation works with or without partnership:
-  //   - with OBC_PARTNER_API_KEY → richer partner profile (avatar, bio)
-  //   - without → public-profile fallback (still surfaces display name,
-  //     soul excerpt, reputation, recent artifacts)
-  // lookupAgent abstracts that selection. Either path resolving with a
-  // non-null result counts as "this OBC slug exists".
-  let displayName = body.displayName ?? slug;
-  let avatarUrl: string | null = null;
-  let profileJson: Record<string, unknown> | null = null;
-  try {
-    const profile = await lookupAgent(slug);
-    if (!profile) {
-      res.status(404).json({ error: `OpenBotCity agent "${slug}" not found or has no artifacts` });
-      return;
-    }
-    displayName = body.displayName?.trim() || profile.display_name || slug;
-    avatarUrl = profile.avatar_url ?? null;
-    profileJson = { ...profile.raw, _kax_source: profile.source };
-  } catch (err) {
-    if (err instanceof PartnerApiError) {
-      req.log.warn({ err, slug }, "Partner API error while validating agent");
-      res.status(502).json({ error: `Partner API error: ${err.message}` });
-      return;
-    }
-    throw err;
-  }
-
   const [agent] = await db
     .insert(agentsTable)
     .values({
@@ -95,6 +163,7 @@ router.post("/agents", requireAuth, async (req, res) => {
       displayName,
       avatarUrl,
       profileJson,
+      obcBotId: botId,
       ownerId: req.user!.id,
     })
     .returning();
@@ -183,7 +252,12 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
   });
 });
 
-router.post("/agents/:slug/harvest", requireAuth, async (req, res) => {
+// Harvesting is admin-only: the OBC partner feed ignores the creator filter,
+// so every run is a single global pass that mutates rows across every owner and
+// consumes the shared partner request budget. It is therefore a privileged,
+// system-wide operation — not a per-agent action a regular owner may trigger.
+// (The scheduler runs this automatically; this endpoint is the manual override.)
+router.post("/agents/:slug/harvest", requireAdmin, async (req, res) => {
   const { slug } = HarvestAgentParams.parse(req.params);
   const body = HarvestAgentBody.parse(req.body ?? {});
 
@@ -196,25 +270,22 @@ router.post("/agents/:slug/harvest", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
-  if (!(await canMutate(req, agent.ownerId))) {
-    res.status(403).json({ error: "Not authorized to harvest this agent" });
-    return;
-  }
   if (!partnerApiAvailable()) {
     res.status(503).json({ error: "Partner API key is not configured" });
     return;
   }
 
   try {
-    // Full top-anchored catch-up: ingests every new artifact for this agent
-    // in one run (no per-run cap — see runPartnerHarvestForAgent).
-    const result = await runPartnerHarvestForAgent({
-      agent,
+    // The OBC partner feed ignores the creator filter, so there is no such
+    // thing as a per-agent harvest — every run pulls the same global feed.
+    // Trigger the single global pass; it attributes each artifact to its true
+    // creator by bot UUID (this agent's new work included).
+    const result = await runPartnerHarvest({
       ...(body.type && body.type !== "all" ? { type: body.type } : {}),
     });
     res.json(result);
   } catch (err) {
-    req.log.error({ err, slug }, "Per-agent harvest failed");
+    req.log.error({ err, slug }, "Harvest failed");
     res.status(500).json({ error: err instanceof Error ? err.message : "Harvest failed" });
   }
 });
