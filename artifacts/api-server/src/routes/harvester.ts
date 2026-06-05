@@ -147,9 +147,10 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
       return;
     }
     const partnerType = type === "all" ? undefined : type;
+    // No limit: partner harvest does a full top-anchored catch-up so every new
+    // artifact for this agent is ingested in one run (see runPartnerHarvestForAgent).
     const result = await runPartnerHarvestForAgent({
       agent,
-      limit: requestedLimit,
       ...(partnerType ? { type: partnerType } : {}),
     });
     harvested = result.harvested;

@@ -74,55 +74,87 @@ async function upsertPartnerArtifact(
 }
 
 /**
- * Harvest artifacts for a single agent using its own paginated cursor.
+ * Harvest new artifacts for a single agent (top-anchored full catch-up).
+ *
+ * The partner `since` param returns artifacts OLDER than the given id — the
+ * feed is newest-first. A *persisted* cursor therefore only ever pages
+ * backward into history and never sees fresh top-of-feed artifacts, which is
+ * why agents that had "caught up" stopped ingesting brand-new work entirely.
+ *
+ * Instead we anchor every run at the top (`since=null`) and page downward
+ * until we hit a page that is entirely already in our DB — i.e. we've reached
+ * previously-synced territory — or the end of the feed. There is deliberately
+ * NO per-run cap: a finite cap would let a run stop mid-backlog, and because
+ * every run restarts at the top, the next run's first page would be all
+ * duplicates and the early-stop below would fire before reaching the remaining
+ * backlog, leaving a permanent gap. Running uncapped, each pass ingests the
+ * whole contiguous new region in one go, so new artifacts are never stranded.
+ * Idempotent inserts keep steady state cheap (a single all-duplicate page).
  */
 export async function runPartnerHarvestForAgent(opts: {
   agent: Agent;
-  limit?: number;
   type?: string;
 }): Promise<HarvestRunResult> {
   if (!partnerApiAvailable()) {
     throw new Error("OBC_PARTNER_API_KEY not configured");
   }
-  const targetLimit = opts.limit ?? 50;
-  let cursor: string | null = opts.agent.lastArtifactCursor ?? null;
+  const MAX_PAGES = 1000; // safety bound: 1000 * 50 = 50k artifacts per run
+  const PAGE_SIZE = 50;
+
+  let cursor: string | null = null; // always start at the newest
+  let newestSeen: string | null = null;
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
+  let pageIdx = 0;
 
-  while (harvested < targetLimit) {
+  for (; pageIdx < MAX_PAGES; pageIdx++) {
     const page = await listPartnerArtifacts({
       since: cursor,
-      limit: Math.min(50, targetLimit - harvested),
+      limit: PAGE_SIZE,
       type: opts.type,
       creator: opts.agent.slug,
       fallbackDisplayName: opts.agent.displayName,
     });
     if (!page.artifacts || page.artifacts.length === 0) break;
+    if (newestSeen === null) newestSeen = page.artifacts[0]?.uuid ?? null;
 
+    let pageNew = 0;
     for (const pa of page.artifacts) {
       harvested++;
       const result = await upsertPartnerArtifact(pa, opts.agent.ownerId, opts.agent.id);
-      if (result === "new") newArtifacts++;
-      else duplicates++;
+      if (result === "new") {
+        newArtifacts++;
+        pageNew++;
+      } else {
+        duplicates++;
+      }
       cursor = pa.uuid;
     }
 
-    if (!page.next_cursor) break;
+    if (pageNew === 0) break; // whole page already known → caught up to synced region
+    if (!page.next_cursor) break; // reached the end of the feed
     cursor = page.next_cursor;
+  }
+
+  if (pageIdx >= MAX_PAGES) {
+    logger.warn(
+      { agent: opts.agent.slug, maxPages: MAX_PAGES, newArtifacts },
+      "Partner harvest hit MAX_PAGES safety bound — backlog beyond 50k artifacts not ingested this run",
+    );
   }
 
   await db
     .update(agentsTable)
     .set({
-      lastArtifactCursor: cursor,
+      lastArtifactCursor: newestSeen,
       lastSyncAt: new Date(),
       artifactsHarvested: sql`${agentsTable.artifactsHarvested} + ${newArtifacts}`,
       updatedAt: new Date(),
     })
     .where(eq(agentsTable.id, opts.agent.id));
 
-  await recordPollSuccess(cursor);
+  await recordPollSuccess(newestSeen);
 
   if (newArtifacts > 0) {
     await db.insert(activitiesTable).values({

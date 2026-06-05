@@ -9,7 +9,6 @@ import { runPartnerHarvestForAgent } from "./harvesterJob";
 import { logger } from "./logger";
 
 const HARVEST_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-const PER_AGENT_LIMIT = 25;
 const BUDGET_HEADROOM = 0.8; // stop at 80% of daily budget
 
 let timer: NodeJS.Timeout | null = null;
@@ -39,10 +38,9 @@ async function tick(): Promise<void> {
       }
 
       try {
-        const result = await runPartnerHarvestForAgent({
-          agent,
-          limit: PER_AGENT_LIMIT,
-        });
+        // No limit → full catch-up: page from the top until each agent reaches
+        // already-synced artifacts. Steady state is one all-duplicate page.
+        const result = await runPartnerHarvestForAgent({ agent });
         logger.info(
           { agent: agent.slug, owner: agent.ownerId, ...result },
           "Scheduled per-agent harvest",
@@ -71,7 +69,7 @@ export function startAgentHarvestScheduler(): void {
     void tick();
   }, HARVEST_INTERVAL_MS);
   logger.info(
-    { intervalMs: HARVEST_INTERVAL_MS, perAgentLimit: PER_AGENT_LIMIT },
+    { intervalMs: HARVEST_INTERVAL_MS },
     "Agent harvest scheduler started",
   );
   // Run an immediate first tick so ingestion does not wait a full interval.

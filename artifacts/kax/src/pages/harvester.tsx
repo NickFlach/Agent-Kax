@@ -141,21 +141,19 @@ export default function Harvester() {
               </Select>
             </div>
 
-            <div>
-              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Limit</label>
-              <Input
-                type="number"
-                value={limit}
-                onChange={(e) => setLimit(e.target.value)}
-                min={1}
-                max={100}
-                data-testid="input-limit"
-              />
-            </div>
+            <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
+              Partner harvest pulls <em>every</em> new artifact for the selected agent
+              automatically — no limit needed. KAX also auto-harvests all agents every
+              30 minutes.
+            </p>
 
             <details className="text-xs">
               <summary className="cursor-pointer text-muted-foreground uppercase tracking-wider">Legacy options (no partner key)</summary>
               <div className="space-y-3 mt-3">
+                <div>
+                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Limit</label>
+                  <Input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} min={1} max={1000} data-testid="input-limit" />
+                </div>
                 <div>
                   <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Min Reactions</label>
                   <Input type="number" value={minReactions} onChange={(e) => setMinReactions(e.target.value)} min={0} data-testid="input-min-reactions" />

@@ -206,9 +206,10 @@ router.post("/agents/:slug/harvest", requireAuth, async (req, res) => {
   }
 
   try {
+    // Full top-anchored catch-up: ingests every new artifact for this agent
+    // in one run (no per-run cap — see runPartnerHarvestForAgent).
     const result = await runPartnerHarvestForAgent({
       agent,
-      limit: body.limit ?? 25,
       ...(body.type && body.type !== "all" ? { type: body.type } : {}),
     });
     res.json(result);
