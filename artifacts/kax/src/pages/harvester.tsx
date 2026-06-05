@@ -7,6 +7,17 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 
 export default function Harvester() {
@@ -16,11 +27,13 @@ export default function Harvester() {
   const [creator, setCreator] = useState("");
   const [keyword, setKeyword] = useState("");
   const [agentId, setAgentId] = useState<string>("");
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number; paired?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { data: agentsData } = useListAgents({ query: { queryKey: getListAgentsQueryKey() } });
   const agents = agentsData?.agents ?? [];
+  const selectedAgent = agents.find((a) => String(a.id) === agentId);
 
   const mutation = useRunHarvester({
     mutation: {
@@ -50,19 +63,65 @@ export default function Harvester() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Agent</label>
-              <Select value={agentId} onValueChange={setAgentId}>
-                <SelectTrigger data-testid="select-agent">
-                  <SelectValue placeholder={agents.length === 0 ? "No agents — add one first" : "Select an agent"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.displayName} (@{a.slug})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">
+                Agent {agents.length > 0 && <span className="text-muted-foreground/60">({agents.length})</span>}
+              </label>
+              <Popover open={agentPickerOpen} onOpenChange={setAgentPickerOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    role="combobox"
+                    aria-expanded={agentPickerOpen}
+                    disabled={agents.length === 0}
+                    className="flex h-9 w-full items-center justify-between border border-input bg-transparent px-3 py-2 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-accent/30 transition-colors"
+                    data-testid="select-agent"
+                  >
+                    <span className={cn("truncate", !selectedAgent && "text-muted-foreground")}>
+                      {agents.length === 0
+                        ? "No agents — add one first"
+                        : selectedAgent
+                          ? `${selectedAgent.displayName} (@${selectedAgent.slug})`
+                          : "Select an agent"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command
+                    filter={(value, search) =>
+                      value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+                    }
+                  >
+                    <CommandInput placeholder="Search agents by name or @slug..." data-testid="input-agent-search" />
+                    <CommandList>
+                      <CommandEmpty>No agent found.</CommandEmpty>
+                      <CommandGroup>
+                        {agents.map((a) => (
+                          <CommandItem
+                            key={a.id}
+                            value={`${a.displayName} @${a.slug}`}
+                            onSelect={() => {
+                              setAgentId(String(a.id));
+                              setAgentPickerOpen(false);
+                            }}
+                            data-testid={`option-agent-${a.slug}`}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                agentId === String(a.id) ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span className="truncate">
+                              {a.displayName} <span className="text-muted-foreground">@{a.slug}</span>
+                            </span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div>
@@ -172,9 +231,18 @@ export default function Harvester() {
                     </div>
                   )}
                 </div>
-                <p className="text-xs text-center text-muted-foreground mt-4">
-                  Head to the Artifacts page to view and process the harvested items.
-                </p>
+
+                {lastResult.newArtifacts > 0 ? (
+                  <p className="text-xs text-center text-accent mt-4" data-testid="text-result-message">
+                    Harvested {lastResult.newArtifacts} new artifact{lastResult.newArtifacts === 1 ? "" : "s"}. Head to the Artifacts page to view and process them.
+                  </p>
+                ) : (
+                  <p className="text-xs text-center text-muted-foreground mt-4" data-testid="text-result-message">
+                    {selectedAgent ? <>No new artifacts for <span className="text-foreground">@{selectedAgent.slug}</span> matching this run's settings</> : "No new artifacts matching this run's settings"}
+                    {lastResult.harvested > 0 ? ` (${lastResult.duplicates} already in your library).` : "."}{" "}
+                    KAX also auto-harvests your agents in the background every 30 minutes.
+                  </p>
+                )}
               </div>
             )}
 
