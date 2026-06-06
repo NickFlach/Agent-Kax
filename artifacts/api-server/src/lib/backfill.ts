@@ -11,7 +11,7 @@ import {
   outboundMessagesTable,
   userBotsTable,
 } from "@workspace/db/schema";
-import { isNull, eq, and, sql } from "drizzle-orm";
+import { isNull, eq, and, or, sql } from "drizzle-orm";
 import { logger } from "./logger";
 import {
   getPartnerAgent,
@@ -20,7 +20,8 @@ import {
   PartnerApiError,
 } from "./partnerClient";
 import {
-  buildFullCreatorDirectory,
+  walkPublicGallery,
+  getCachedCreatorInfo,
   ensureCreatorName,
   type CreatorInfo,
 } from "./creatorDirectory";
@@ -627,11 +628,19 @@ async function resolveOnboardedAgentBotIds(): Promise<void> {
  * stamped artifacts onto whichever agent ran it. This re-attributes each
  * artifact to its TRUE creator by bot UUID:
  *   1. backfill `obc_bot_id` on onboarded agents (slug -> uuid),
- *   2. build the full public-catalog artifact -> creator map (+ names),
- *   3. for each artifact resolve its creator bot id (gallery map, else the
- *      preserved `creator_bot_id`, else a per-uuid partner lookup), then
- *      find-or-create that creator's agent and stamp
- *      agentId/ownerId/creatorName/creatorBotId.
+ *   2. stream the public catalog one page at a time, and for EACH page
+ *      immediately stamp any still-unattributed local artifacts whose uuid
+ *      appears on it (find-or-create the creator's agent, set
+ *      agentId/ownerId/creatorName/creatorBotId),
+ *   3. after the walk, a bounded per-uuid partner lookup mops up stragglers
+ *      whose uuid never appeared in the gallery.
+ *
+ * Why per-page (not a single buffered map): the catalog is ~1000 pages and the
+ * walk takes several minutes. The earlier design built the WHOLE map in memory
+ * before writing anything, so every redeploy that interrupted the walk threw
+ * away all progress and wrote ~nothing. Persisting per page means a partial
+ * walk still fixes thousands of rows and a restart resumes (already-attributed
+ * rows are skipped via `creator_bot_id IS NULL`).
  *
  * Nothing is deleted. Env-gated (`KAX_REPAIR_ATTRIBUTION=1`) because the prod
  * DB is read-only to the agent — it runs as a startup step on a deploy, then
@@ -673,113 +682,134 @@ export async function repairCreatorAttribution(): Promise<void> {
 
   await resolveOnboardedAgentBotIds();
 
-  const dir = await buildFullCreatorDirectory();
-
-  // Resumable: only touch rows not yet attributed. Every successful row sets
-  // `creator_bot_id`, so a crash/restart simply continues with what remains —
-  // and re-running after completion is a no-op (zero rows selected). This is
-  // what lets the repair converge across multiple boots even if a single pass
-  // is cut short by rate limits or DB pressure.
-  const rows = await withDbRetry(() =>
-    db
-      .select({
-        id: artifactsTable.id,
-        externalId: artifactsTable.externalId,
-        obcArtifactUuid: artifactsTable.obcArtifactUuid,
-        agentId: artifactsTable.agentId,
-        creatorBotId: artifactsTable.creatorBotId,
-      })
-      .from(artifactsTable)
-      .where(isNull(artifactsTable.creatorBotId)),
-  );
-
-  // Bound per-run partner usage: stragglers absent from the gallery fall back
-  // to a per-uuid partner lookup, but we cap it so a huge unresolved set can't
-  // exhaust the partner budget in one boot. Remaining rows are picked up on the
-  // next run (gallery coverage usually grows too).
-  const MAX_PARTNER_LOOKUPS = 2_000;
-  let partnerBudget = MAX_PARTNER_LOOKUPS;
-
   const agentCache = new Map<string, ResolvedAgent>();
-  let resolved = 0;
-  let viaPartner = 0;
-  let unresolved = 0;
   let updated = 0;
   let failed = 0;
-  let processed = 0;
+  let pages = 0;
+  let lastTotal = 0;
 
-  for (const row of rows) {
-    try {
+  // Resolve a creator's agent (cached), creating an unclaimed placeholder only
+  // when we actually have a local artifact for that creator.
+  async function resolveAgent(botId: string): Promise<ResolvedAgent> {
+    const cached = agentCache.get(botId);
+    if (cached) return cached;
+    const info: CreatorInfo | null = getCachedCreatorInfo(botId);
+    const agent = await withDbRetry(() =>
+      findOrCreateAgentByBotUuid(
+        botId,
+        info ? { name: info.displayName, avatarUrl: info.avatarUrl } : undefined,
+      ),
+    );
+    agentCache.set(botId, agent);
+    return agent;
+  }
+
+  // Stamp every still-unattributed local row matching `uuid` to `botId`'s
+  // agent. Returns the number of rows updated. A cheap existence check gates
+  // agent resolution so gallery-only creators (no local artifact) never spawn a
+  // placeholder agent; the write itself is a single set-based UPDATE.
+  const uuidMatch = (uuid: string) =>
+    and(
+      isNull(artifactsTable.creatorBotId),
+      or(eq(artifactsTable.obcArtifactUuid, uuid), eq(artifactsTable.externalId, uuid)),
+    );
+  async function attributeUuid(uuid: string, botId: string): Promise<number> {
+    const [exists] = await withDbRetry(() =>
+      db.select({ id: artifactsTable.id }).from(artifactsTable).where(uuidMatch(uuid)).limit(1),
+    );
+    if (!exists) return 0;
+    const agent = await resolveAgent(botId);
+    const updatedRows = await withDbRetry(() =>
+      db
+        .update(artifactsTable)
+        .set({
+          agentId: agent.id,
+          ownerId: agent.ownerId,
+          creatorName: agent.displayName,
+          creatorBotId: botId,
+        })
+        .where(uuidMatch(uuid))
+        .returning({ id: artifactsTable.id }),
+    );
+    return updatedRows.length;
+  }
+
+  // Phase 1: stream the catalog, persisting attribution per page so progress
+  // survives interruption.
+  for await (const page of walkPublicGallery()) {
+    pages++;
+    lastTotal = page.total || lastTotal;
+    for (const { artifactId: uuid, creatorId: botId } of page.artifactToCreator) {
+      if (!uuid || !botId) continue;
+      try {
+        updated += await attributeUuid(uuid, botId);
+      } catch (err) {
+        // Per-uuid isolation: a single failure must not abort the whole walk
+        // (the prior all-or-nothing design wrote nothing on any error).
+        failed++;
+        logger.warn({ err, uuid }, "repair: attribute failed; continuing");
+      }
+    }
+    if (pages % 25 === 0) {
+      logger.info({ pages, offset: page.offset, total: lastTotal, updated, failed }, "repair: progress");
+    }
+  }
+
+  // Phase 2: mop up stragglers whose uuid never appeared in the gallery, via a
+  // bounded per-uuid partner lookup (so a huge unresolved set can't exhaust the
+  // partner budget in one boot — the rest are retried next run).
+  const MAX_PARTNER_LOOKUPS = 2_000;
+  let viaPartner = 0;
+  let partnerUnresolved = 0;
+  if (partnerApiAvailable()) {
+    const stragglers = await withDbRetry(() =>
+      db
+        .select({
+          id: artifactsTable.id,
+          externalId: artifactsTable.externalId,
+          obcArtifactUuid: artifactsTable.obcArtifactUuid,
+        })
+        .from(artifactsTable)
+        .where(isNull(artifactsTable.creatorBotId))
+        .orderBy(artifactsTable.id)
+        .limit(MAX_PARTNER_LOOKUPS),
+    );
+    for (const row of stragglers) {
       const uuid = row.obcArtifactUuid ?? row.externalId;
-      let botId = (uuid ? dir.creatorByArtifact.get(uuid) : undefined) ?? row.creatorBotId ?? null;
-      if (!botId && uuid && partnerApiAvailable() && partnerBudget > 0) {
-        partnerBudget--;
-        try {
-          const pa = await getPartnerArtifact(uuid);
-          botId = pa?.creator_bot_id ?? null;
-          if (botId) viaPartner++;
-        } catch (err) {
-          logger.warn({ err, uuid }, "repair: per-uuid partner lookup failed; continuing");
+      if (!uuid) continue;
+      try {
+        const pa = await getPartnerArtifact(uuid);
+        const botId = pa?.creator_bot_id ?? null;
+        if (!botId) {
+          partnerUnresolved++;
+          continue;
         }
-      }
-      if (!botId) {
-        unresolved++;
-        continue;
-      }
-      resolved++;
-
-      let agent = agentCache.get(botId);
-      if (!agent) {
-        const info: CreatorInfo | undefined = dir.creatorById.get(botId);
-        agent = await withDbRetry(() =>
-          findOrCreateAgentByBotUuid(
-            botId!,
-            info ? { name: info.displayName, avatarUrl: info.avatarUrl } : undefined,
-          ),
-        );
-        agentCache.set(botId, agent);
-      }
-
-      if (row.agentId === agent.id && row.creatorBotId === botId) continue;
-      await withDbRetry(() =>
-        db
-          .update(artifactsTable)
-          .set({
-            agentId: agent.id,
-            ownerId: agent.ownerId,
-            creatorName: agent.displayName,
-            creatorBotId: botId,
-          })
-          .where(eq(artifactsTable.id, row.id)),
-      );
-      updated++;
-    } catch (err) {
-      // Per-row isolation: a single persistent failure (e.g. the DB pool
-      // briefly unavailable) must not abort the entire repair the way it did
-      // before. Count it and move on; the row stays NULL and is retried next
-      // run.
-      failed++;
-      logger.warn({ err, id: row.id }, "repair: row failed; continuing");
-    } finally {
-      processed++;
-      // Periodic breather so the long sequential sweep doesn't starve the
-      // request-serving connection pool.
-      if (processed % 200 === 0) {
-        await new Promise((r) => setTimeout(r, 50));
+        const n = await attributeUuid(uuid, botId);
+        if (n > 0) viaPartner += n;
+      } catch (err) {
+        failed++;
+        logger.warn({ err, uuid }, "repair: per-uuid partner lookup failed; continuing");
       }
     }
   }
 
+  const [{ remaining } = { remaining: -1 }] = await withDbRetry(() =>
+    db
+      .select({ remaining: sql<number>`count(*)::int` })
+      .from(artifactsTable)
+      .where(isNull(artifactsTable.creatorBotId)),
+  );
+
   logger.info(
     {
-      candidates: rows.length,
-      resolved,
-      viaPartner,
-      unresolved,
+      pages,
+      total: lastTotal,
       updated,
+      viaPartner,
+      partnerUnresolved,
       failed,
       distinctCreators: agentCache.size,
-      partnerBudgetLeft: partnerBudget,
+      remainingUnattributed: remaining,
     },
     "repairCreatorAttribution: complete",
   );

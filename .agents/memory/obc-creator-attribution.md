@@ -50,11 +50,36 @@ disambiguating obc_bot_id vs slug). Never trust the partner feed's filter params
 
 - Gallery + partner `fetch` had no timeout → the repair hung mid-walk. All partner/gallery
   fetches now use `AbortSignal.timeout(20_000)`.
-- The repair is slow (sequential per-row UPDATEs over thousands of rows) but acceptable
-  because it's backgrounded and one-time.
 - The public gallery walk's completeness depends on the external OBC API's live behavior
   (it can return an empty `total` / early-stop under load); the per-uuid partner fallback
   and the repair's re-runnable idempotence cover stragglers across deploys.
+
+## Deepest flaw: a multi-minute walk MUST persist progress per page, not buffer-then-write
+
+The catalog is ~1015 pages (gallery returns a hard **12 items/page**, ignores `limit`;
+total ≈ 12,177). A full walk takes several minutes. The repair USED to call
+`buildFullCreatorDirectory()` — which buffers the ENTIRE map in memory and only returns
+after the whole walk — then update rows. So when back-to-back task-merge redeploys each
+restarted the process mid-walk, the in-memory map was discarded and **zero rows were
+written** (prod stuck at ~180/12,176 attributed across several deploys, with NO "Built
+creator directory" / "complete" log lines — only `resolveOnboardedAgentBotIds` ran).
+
+**Fix:** the repair now drives the walk itself via `walkPublicGallery()` (async generator)
+and stamps matching local rows **per page**, so a partial walk still persists thousands of
+rows and a restart resumes (`creator_bot_id IS NULL` skips done rows). `attributeUuid` does
+a cheap existence check (gates placeholder-agent creation to creators we actually hold) then
+a single set-based `UPDATE … RETURNING`. `getCachedCreatorInfo(botId)` supplies names from
+the per-page `nameCache`. `buildFullCreatorDirectory` is kept but no longer used by the repair.
+
+**Why:** for any long external-API + bulk-DB background job, in-memory accumulation before
+the first write turns every interruption into total data loss. Write incrementally and make
+each unit idempotent so progress compounds across restarts/redeploys.
+
+**Also:** the gallery is NOT always rate-limiting — a fresh probe (many rapid 100-offset
+pages) returned all 200s, no 429. The earlier 429 wall was transient/contention; keep the
+backoff+pacing, but a stale "always 429s after 240 items" assumption is wrong. Phase-2
+straggler lookup is `ORDER BY id LIMIT 2000`; permanently-unresolvable rows (e.g. non-OBC
+huggingface artifacts, or works pulled from the gallery) stay NULL by design.
 
 ## Prod failure: the repair must survive 429s AND DB pool timeouts (else it does ~nothing)
 

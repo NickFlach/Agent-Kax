@@ -197,3 +197,47 @@ export async function buildFullCreatorDirectory(): Promise<CreatorDirectory> {
   );
   return { creatorById, creatorByArtifact };
 }
+
+export interface GalleryWalkPage {
+  /** artifact uuid -> creator bot id for this page. */
+  artifactToCreator: Array<{ artifactId: string; creatorId: string }>;
+  /** total catalog size reported by the API (best-effort). */
+  total: number;
+  /** offset of this page within the catalog. */
+  offset: number;
+}
+
+/**
+ * Stream the full public catalog one page at a time, with the same retry /
+ * pacing as {@link buildFullCreatorDirectory}. Unlike that function (which
+ * buffers the ENTIRE ~1000-page map in memory before returning), this lets the
+ * caller persist progress per page — essential for the attribution repair,
+ * whose earlier all-or-nothing design wrote nothing whenever a redeploy
+ * interrupted the multi-minute walk. `nameCache` is populated as a side effect,
+ * so {@link getCachedCreatorInfo} resolves names seen so far.
+ */
+export async function* walkPublicGallery(): AsyncGenerator<GalleryWalkPage> {
+  const MAX_PAGES = 2000;
+  let offset = 0;
+  let total = Infinity;
+  for (let pages = 0; pages < MAX_PAGES; pages++) {
+    let res: GalleryPage;
+    try {
+      res = await fetchGalleryPage(offset);
+    } catch (err) {
+      logger.warn({ err, offset }, "walkPublicGallery: gallery page fetch failed; stopping walk");
+      return;
+    }
+    total = res.total || total;
+    if (res.returned === 0) return;
+    yield { artifactToCreator: res.artifactToCreator, total, offset };
+    offset += res.returned;
+    if (offset >= total) return;
+    await sleep(GALLERY_PAGE_DELAY_MS);
+  }
+}
+
+/** Process-cached display name for a bot id (populated by gallery fetches). */
+export function getCachedCreatorInfo(botId: string): CreatorInfo | null {
+  return nameCache.get(botId) ?? null;
+}
