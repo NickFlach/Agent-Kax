@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useListArtifacts, getListArtifactsQueryKey, useScoreArtifact, useNarrateArtifact } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Link } from "wouter";
+import { Link, useSearchParams } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { AudioPlayer } from "@/components/audio-player";
 import { ArtifactCover } from "@/components/artifact-cover";
@@ -35,20 +35,50 @@ function getPageItems(current: number, totalPages: number): (number | "ellipsis"
 }
 
 export default function ArtifactsList() {
-  const [status, setStatus] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [editionFilter, setEditionFilter] = useState<string>("all");
-  const [search, setSearch] = useState("kannaka");
-  const [showAll, setShowAll] = useState(false);
-  const [page, setPage] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [jumpValue, setJumpValue] = useState("");
   const queryClient = useQueryClient();
 
   const PAGE_SIZE = 50;
 
-  useEffect(() => {
-    setPage(0);
-  }, [status, typeFilter, editionFilter, search, showAll]);
+  const status = searchParams.get("status") ?? "all";
+  const typeFilter = searchParams.get("type") ?? "all";
+  const editionFilter = searchParams.get("edition") ?? "all";
+  const search = searchParams.has("q") ? searchParams.get("q")! : "kannaka";
+  const showAll = searchParams.get("all") === "1";
+  const page = Math.max(0, parseInt(searchParams.get("page") ?? "0", 10) || 0);
+
+  const updateParams = (
+    changes: Record<string, string | null>,
+    options: { replace?: boolean; resetPage?: boolean } = {},
+  ) => {
+    const { replace = false, resetPage = true } = options;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(changes)) {
+          if (value === null) next.delete(key);
+          else next.set(key, value);
+        }
+        if (resetPage && !("page" in changes)) next.delete("page");
+        return next;
+      },
+      { replace },
+    );
+  };
+
+  const setStatus = (value: string) =>
+    updateParams({ status: value === "all" ? null : value });
+  const setTypeFilter = (value: string) =>
+    updateParams({ type: value === "all" ? null : value });
+  const setEditionFilter = (value: string) =>
+    updateParams({ edition: value === "all" ? null : value });
+  const setSearch = (value: string) =>
+    updateParams({ q: value }, { replace: true });
+  const setShowAll = (value: boolean) =>
+    updateParams({ all: value ? "1" : null });
+  const setPage = (next: number) =>
+    updateParams({ page: next <= 0 ? null : String(next) }, { resetPage: false });
 
   const params = {
     ...(status !== "all" ? { status: status as "raw" | "scored" | "narrated" | "dropped" } : {}),
@@ -246,7 +276,7 @@ export default function ArtifactsList() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    onClick={() => setPage(Math.max(0, page - 1))}
                     disabled={page === 0}
                     data-testid="button-prev-page"
                   >
@@ -279,7 +309,7 @@ export default function ArtifactsList() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
                     disabled={page >= totalPages - 1}
                     data-testid="button-next-page"
                   >
