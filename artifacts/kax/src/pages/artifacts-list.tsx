@@ -14,6 +14,26 @@ import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
+function getPageItems(current: number, totalPages: number): (number | "ellipsis")[] {
+  // current/totalPages are 1-indexed.
+  const delta = 1;
+  const pages = new Set<number>();
+  pages.add(1);
+  pages.add(totalPages);
+  for (let p = current - delta; p <= current + delta; p++) {
+    if (p >= 1 && p <= totalPages) pages.add(p);
+  }
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const items: (number | "ellipsis")[] = [];
+  let prev: number | null = null;
+  for (const p of sorted) {
+    if (prev !== null && p - prev > 1) items.push("ellipsis");
+    items.push(p);
+    prev = p;
+  }
+  return items;
+}
+
 export default function ArtifactsList() {
   const [status, setStatus] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -21,6 +41,7 @@ export default function ArtifactsList() {
   const [search, setSearch] = useState("kannaka");
   const [showAll, setShowAll] = useState(false);
   const [page, setPage] = useState(0);
+  const [jumpValue, setJumpValue] = useState("");
   const queryClient = useQueryClient();
 
   const PAGE_SIZE = 50;
@@ -214,33 +235,89 @@ export default function ArtifactsList() {
           const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
           const rangeStart = page * PAGE_SIZE + 1;
           const rangeEnd = Math.min(page * PAGE_SIZE + PAGE_SIZE, total);
+          const pageItems = getPageItems(page + 1, totalPages);
           return (
-            <div className="flex items-center justify-between border-t border-border pt-4">
+            <div className="flex flex-col gap-4 border-t border-border pt-4 lg:flex-row lg:items-center lg:justify-between">
               <span className="text-muted-foreground text-sm font-mono" data-testid="text-pagination-range">
                 {rangeStart}–{rangeEnd} of {total}
               </span>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  data-testid="button-prev-page"
-                >
-                  Previous
-                </Button>
-                <span className="text-muted-foreground text-sm font-mono" data-testid="text-pagination-page">
-                  Page {page + 1} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1}
-                  data-testid="button-next-page"
-                >
-                  Next
-                </Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    data-testid="button-prev-page"
+                  >
+                    Previous
+                  </Button>
+                  {pageItems.map((item, i) =>
+                    item === "ellipsis" ? (
+                      <span
+                        key={`ellipsis-${i}`}
+                        className="px-2 text-muted-foreground font-mono select-none"
+                        aria-hidden="true"
+                        data-testid="text-pagination-ellipsis"
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <Button
+                        key={item}
+                        variant={item === page + 1 ? "default" : "outline"}
+                        size="sm"
+                        className="min-w-9 px-2 font-mono"
+                        aria-current={item === page + 1 ? "page" : undefined}
+                        onClick={() => setPage(item - 1)}
+                        data-testid={`button-page-${item}`}
+                      >
+                        {item}
+                      </Button>
+                    )
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    data-testid="button-next-page"
+                  >
+                    Next
+                  </Button>
+                </div>
+                {totalPages > 1 && (
+                  <form
+                    className="flex items-center gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const parsed = parseInt(jumpValue, 10);
+                      if (!Number.isNaN(parsed)) {
+                        const clamped = Math.min(totalPages, Math.max(1, parsed));
+                        setPage(clamped - 1);
+                      }
+                      setJumpValue("");
+                    }}
+                  >
+                    <label htmlFor="jump-to-page" className="text-muted-foreground text-sm font-mono">
+                      Go to
+                    </label>
+                    <Input
+                      id="jump-to-page"
+                      type="number"
+                      min={1}
+                      max={totalPages}
+                      value={jumpValue}
+                      onChange={(e) => setJumpValue(e.target.value)}
+                      placeholder={`${page + 1}`}
+                      className="w-20 font-mono"
+                      data-testid="input-jump-page"
+                    />
+                    <Button type="submit" variant="outline" size="sm" data-testid="button-jump-page">
+                      Go
+                    </Button>
+                  </form>
+                )}
               </div>
             </div>
           );
