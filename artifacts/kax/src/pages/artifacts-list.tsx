@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useListArtifacts, getListArtifactsQueryKey, useScoreArtifact, useNarrateArtifact } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,7 +20,14 @@ export default function ArtifactsList() {
   const [editionFilter, setEditionFilter] = useState<string>("all");
   const [search, setSearch] = useState("kannaka");
   const [showAll, setShowAll] = useState(false);
+  const [page, setPage] = useState(0);
   const queryClient = useQueryClient();
+
+  const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    setPage(0);
+  }, [status, typeFilter, editionFilter, search, showAll]);
 
   const params = {
     ...(status !== "all" ? { status: status as "raw" | "scored" | "narrated" | "dropped" } : {}),
@@ -27,8 +35,8 @@ export default function ArtifactsList() {
     ...(editionFilter !== "all" ? { editionType: editionFilter as "open" | "limited" | "1_of_1" } : {}),
     ...(search ? { search } : {}),
     ...(showAll ? { all: true } : {}),
-    limit: 50,
-    offset: 0,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
   };
 
   const { data, isLoading } = useListArtifacts(params, {
@@ -199,6 +207,45 @@ export default function ArtifactsList() {
           <p className="text-sm mt-1">Run the harvester to ingest artifacts from OpenBotCity</p>
         </div>
       )}
+
+      {!isLoading && data?.total ? (
+        (() => {
+          const total = data.total;
+          const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+          const rangeStart = page * PAGE_SIZE + 1;
+          const rangeEnd = Math.min(page * PAGE_SIZE + PAGE_SIZE, total);
+          return (
+            <div className="flex items-center justify-between border-t border-border pt-4">
+              <span className="text-muted-foreground text-sm font-mono" data-testid="text-pagination-range">
+                {rangeStart}–{rangeEnd} of {total}
+              </span>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  data-testid="button-prev-page"
+                >
+                  Previous
+                </Button>
+                <span className="text-muted-foreground text-sm font-mono" data-testid="text-pagination-page">
+                  Page {page + 1} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={page >= totalPages - 1}
+                  data-testid="button-next-page"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          );
+        })()
+      ) : null}
     </div>
   );
 }
