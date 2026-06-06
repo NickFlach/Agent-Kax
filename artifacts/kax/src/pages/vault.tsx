@@ -1,7 +1,7 @@
 import { useListArtifacts, getListArtifactsQueryKey } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AudioCover } from "@/components/audio-cover";
+import { ArtifactCover } from "@/components/artifact-cover";
 import { EditionBadge } from "@/components/edition-badge";
 
 export default function Vault() {
@@ -9,8 +9,6 @@ export default function Vault() {
   const { data, isLoading } = useListArtifacts(params, {
     query: { queryKey: getListArtifactsQueryKey(params) },
   });
-
-  const isAudio = (type: string) => type === "audio" || type === "music";
 
   return (
     <div className="space-y-8">
@@ -43,20 +41,11 @@ export default function Vault() {
                 data-testid={`vault-artifact-${artifact.id}`}
               >
                 <div className="aspect-square bg-secondary overflow-hidden relative">
-                  {isAudio(artifact.artifactType) && artifact.thumbnailUrl && !artifact.thumbnailUrl.includes("suno.ai") ? (
-                    <img src={artifact.thumbnailUrl} alt={artifact.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                  ) : isAudio(artifact.artifactType) ? (
-                    <AudioCover title={artifact.title} />
-                  ) : (
-                    <img
-                      src={artifact.publicUrl}
-                      alt={artifact.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${artifact.id}/600/600`;
-                      }}
-                    />
-                  )}
+                  <ArtifactCover
+                    artifact={artifact}
+                    className="w-full h-full"
+                    imgClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
                   <div className="absolute top-2 left-2">
                     <EditionBadge
                       editionType={artifact.editionType}

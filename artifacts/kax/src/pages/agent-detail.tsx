@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ArtifactCover } from "@/components/artifact-cover";
 
 export default function AgentDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -165,13 +166,10 @@ export default function AgentDetail() {
                     className="aspect-square relative overflow-hidden bg-secondary group cursor-pointer"
                     data-testid={`agent-artifact-${a.id}`}
                   >
-                    <img
-                      src={a.thumbnailUrl ?? a.publicUrl}
-                      alt={a.title}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://picsum.photos/seed/${a.id}/200/200`;
-                      }}
+                    <ArtifactCover
+                      artifact={a}
+                      className="w-full h-full"
+                      imgClassName="w-full h-full object-cover transition-transform group-hover:scale-105"
                     />
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background to-transparent p-2">
                       <p className="text-xs truncate font-medium">{a.title}</p>

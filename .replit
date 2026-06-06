@@ -38,3 +38,4 @@ KANNAKA_OWNER_EMAIL = "nikolaiflaukowski@gmail.com"
 [userenv.production]
 KAX_CLAIM_FROM_USER_ID = "39143452"
 KAX_CLAIM_TO_WALLET = "0x5c2fff175128addd8b982ecf87fb4f61150095aa"
+KAX_REPAIR_ATTRIBUTION = "1"
