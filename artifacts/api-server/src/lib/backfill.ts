@@ -638,6 +638,35 @@ async function resolveOnboardedAgentBotIds(): Promise<void> {
  * the flag is removed. Re-running is a near no-op (only rows that still differ
  * are written).
  */
+/** Heuristic: is this a transient DB connection error worth retrying? */
+function isTransientDbError(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err).toLowerCase();
+  return (
+    msg.includes("connection terminated") ||
+    msg.includes("connection timeout") ||
+    msg.includes("timeout exceeded") ||
+    msg.includes("econnreset") ||
+    msg.includes("connection ended") ||
+    msg.includes("too many clients")
+  );
+}
+
+/** Run a DB op, retrying transient connection failures with backoff. */
+async function withDbRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientDbError(err) || i === attempts - 1) throw err;
+      // Give the pool time to recover before retrying.
+      await new Promise((r) => setTimeout(r, 500 * 2 ** i + Math.floor(Math.random() * 250)));
+    }
+  }
+  throw lastErr;
+}
+
 export async function repairCreatorAttribution(): Promise<void> {
   if ((process.env["KAX_REPAIR_ATTRIBUTION"] ?? "").trim() !== "1") return;
   logger.info("repairCreatorAttribution: starting one-time attribution repair");
@@ -646,65 +675,112 @@ export async function repairCreatorAttribution(): Promise<void> {
 
   const dir = await buildFullCreatorDirectory();
 
-  const rows = await db
-    .select({
-      id: artifactsTable.id,
-      externalId: artifactsTable.externalId,
-      obcArtifactUuid: artifactsTable.obcArtifactUuid,
-      agentId: artifactsTable.agentId,
-      creatorBotId: artifactsTable.creatorBotId,
-    })
-    .from(artifactsTable);
+  // Resumable: only touch rows not yet attributed. Every successful row sets
+  // `creator_bot_id`, so a crash/restart simply continues with what remains —
+  // and re-running after completion is a no-op (zero rows selected). This is
+  // what lets the repair converge across multiple boots even if a single pass
+  // is cut short by rate limits or DB pressure.
+  const rows = await withDbRetry(() =>
+    db
+      .select({
+        id: artifactsTable.id,
+        externalId: artifactsTable.externalId,
+        obcArtifactUuid: artifactsTable.obcArtifactUuid,
+        agentId: artifactsTable.agentId,
+        creatorBotId: artifactsTable.creatorBotId,
+      })
+      .from(artifactsTable)
+      .where(isNull(artifactsTable.creatorBotId)),
+  );
+
+  // Bound per-run partner usage: stragglers absent from the gallery fall back
+  // to a per-uuid partner lookup, but we cap it so a huge unresolved set can't
+  // exhaust the partner budget in one boot. Remaining rows are picked up on the
+  // next run (gallery coverage usually grows too).
+  const MAX_PARTNER_LOOKUPS = 2_000;
+  let partnerBudget = MAX_PARTNER_LOOKUPS;
 
   const agentCache = new Map<string, ResolvedAgent>();
   let resolved = 0;
   let viaPartner = 0;
   let unresolved = 0;
   let updated = 0;
+  let failed = 0;
+  let processed = 0;
 
   for (const row of rows) {
-    const uuid = row.obcArtifactUuid ?? row.externalId;
-    let botId = (uuid ? dir.creatorByArtifact.get(uuid) : undefined) ?? row.creatorBotId ?? null;
-    if (!botId && uuid && partnerApiAvailable()) {
-      try {
-        const pa = await getPartnerArtifact(uuid);
-        botId = pa?.creator_bot_id ?? null;
-        if (botId) viaPartner++;
-      } catch (err) {
-        logger.warn({ err, uuid }, "repair: per-uuid partner lookup failed; continuing");
+    try {
+      const uuid = row.obcArtifactUuid ?? row.externalId;
+      let botId = (uuid ? dir.creatorByArtifact.get(uuid) : undefined) ?? row.creatorBotId ?? null;
+      if (!botId && uuid && partnerApiAvailable() && partnerBudget > 0) {
+        partnerBudget--;
+        try {
+          const pa = await getPartnerArtifact(uuid);
+          botId = pa?.creator_bot_id ?? null;
+          if (botId) viaPartner++;
+        } catch (err) {
+          logger.warn({ err, uuid }, "repair: per-uuid partner lookup failed; continuing");
+        }
+      }
+      if (!botId) {
+        unresolved++;
+        continue;
+      }
+      resolved++;
+
+      let agent = agentCache.get(botId);
+      if (!agent) {
+        const info: CreatorInfo | undefined = dir.creatorById.get(botId);
+        agent = await withDbRetry(() =>
+          findOrCreateAgentByBotUuid(
+            botId!,
+            info ? { name: info.displayName, avatarUrl: info.avatarUrl } : undefined,
+          ),
+        );
+        agentCache.set(botId, agent);
+      }
+
+      if (row.agentId === agent.id && row.creatorBotId === botId) continue;
+      await withDbRetry(() =>
+        db
+          .update(artifactsTable)
+          .set({
+            agentId: agent.id,
+            ownerId: agent.ownerId,
+            creatorName: agent.displayName,
+            creatorBotId: botId,
+          })
+          .where(eq(artifactsTable.id, row.id)),
+      );
+      updated++;
+    } catch (err) {
+      // Per-row isolation: a single persistent failure (e.g. the DB pool
+      // briefly unavailable) must not abort the entire repair the way it did
+      // before. Count it and move on; the row stays NULL and is retried next
+      // run.
+      failed++;
+      logger.warn({ err, id: row.id }, "repair: row failed; continuing");
+    } finally {
+      processed++;
+      // Periodic breather so the long sequential sweep doesn't starve the
+      // request-serving connection pool.
+      if (processed % 200 === 0) {
+        await new Promise((r) => setTimeout(r, 50));
       }
     }
-    if (!botId) {
-      unresolved++;
-      continue;
-    }
-    resolved++;
-
-    let agent = agentCache.get(botId);
-    if (!agent) {
-      const info: CreatorInfo | undefined = dir.creatorById.get(botId);
-      agent = await findOrCreateAgentByBotUuid(
-        botId,
-        info ? { name: info.displayName, avatarUrl: info.avatarUrl } : undefined,
-      );
-      agentCache.set(botId, agent);
-    }
-
-    if (row.agentId === agent.id && row.creatorBotId === botId) continue;
-    await db
-      .update(artifactsTable)
-      .set({
-        agentId: agent.id,
-        ownerId: agent.ownerId,
-        creatorName: agent.displayName,
-        creatorBotId: botId,
-      })
-      .where(eq(artifactsTable.id, row.id));
-    updated++;
   }
 
   logger.info(
-    { total: rows.length, resolved, viaPartner, unresolved, updated, distinctCreators: agentCache.size },
+    {
+      candidates: rows.length,
+      resolved,
+      viaPartner,
+      unresolved,
+      updated,
+      failed,
+      distinctCreators: agentCache.size,
+      partnerBudgetLeft: partnerBudget,
+    },
     "repairCreatorAttribution: complete",
   );
 }

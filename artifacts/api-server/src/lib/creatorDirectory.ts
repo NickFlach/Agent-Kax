@@ -26,6 +26,24 @@ import { logger } from "./logger";
 
 const PUBLIC_API_BASE = "https://api.openbotcity.com";
 const PAGE_LIMIT = 100;
+/** Max attempts per page before giving up (covers 429 / 5xx / network blips). */
+const MAX_FETCH_ATTEMPTS = 6;
+/** Polite delay between successful catalog pages to avoid tripping rate limits. */
+const GALLERY_PAGE_DELAY_MS = 300;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Parse a `Retry-After` header (delta-seconds or HTTP-date) into ms. */
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return null;
+}
 
 export interface CreatorInfo {
   displayName: string;
@@ -58,29 +76,55 @@ interface GalleryPage {
 
 async function fetchGalleryPage(offset: number): Promise<GalleryPage> {
   const url = `${PUBLIC_API_BASE}/gallery/public?limit=${PAGE_LIMIT}&offset=${offset}`;
-  // Bound the request: the full-catalog walk makes ~120 sequential page
-  // fetches, so a single hung connection must not stall the whole walk (and,
-  // by extension, the backgrounded attribution repair) indefinitely.
-  const res = await fetch(url, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) {
-    throw new Error(`public gallery ${res.status} at offset ${offset}`);
-  }
-  const json = (await res.json()) as RawGalleryResponse;
-  const arts = json.data?.artifacts ?? [];
-  const artifactToCreator: GalleryPage["artifactToCreator"] = [];
-  for (const a of arts) {
-    const creatorId = a.creator?.id;
-    if (!creatorId) continue;
-    artifactToCreator.push({ artifactId: a.id, creatorId });
-    const name = a.creator?.display_name?.trim();
-    if (name && !nameCache.has(creatorId)) {
-      nameCache.set(creatorId, { displayName: name, avatarUrl: a.creator?.avatar_url ?? null });
+  // The public gallery aggressively rate-limits (HTTP 429) the long
+  // full-catalog walk. Retry transient failures (429 / 5xx / network blip)
+  // with exponential backoff + jitter, honoring Retry-After when present, so a
+  // single 429 doesn't abort the entire walk (and, by extension, the
+  // backgrounded attribution repair). Each attempt is independently bounded by
+  // a 20s timeout so a hung connection can't stall indefinitely.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_FETCH_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      const backoff = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
+      await sleep(backoff + Math.floor(Math.random() * 500));
     }
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (err) {
+      lastErr = err; // network error / timeout — retry
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) {
+      lastErr = new Error(`public gallery ${res.status} at offset ${offset}`);
+      const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
+      if (retryAfter != null) await sleep(Math.min(retryAfter, 60_000));
+      continue;
+    }
+    if (!res.ok) {
+      // Non-retryable client error (e.g. 400/404) — fail fast.
+      throw new Error(`public gallery ${res.status} at offset ${offset}`);
+    }
+    const json = (await res.json()) as RawGalleryResponse;
+    const arts = json.data?.artifacts ?? [];
+    const artifactToCreator: GalleryPage["artifactToCreator"] = [];
+    for (const a of arts) {
+      const creatorId = a.creator?.id;
+      if (!creatorId) continue;
+      artifactToCreator.push({ artifactId: a.id, creatorId });
+      const name = a.creator?.display_name?.trim();
+      if (name && !nameCache.has(creatorId)) {
+        nameCache.set(creatorId, { displayName: name, avatarUrl: a.creator?.avatar_url ?? null });
+      }
+    }
+    return { artifactToCreator, total: json.data?.total ?? 0, returned: arts.length };
   }
-  return { artifactToCreator, total: json.data?.total ?? 0, returned: arts.length };
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(`public gallery failed after ${MAX_FETCH_ATTEMPTS} attempts at offset ${offset}`);
 }
 
 /**
@@ -143,6 +187,8 @@ export async function buildFullCreatorDirectory(): Promise<CreatorDirectory> {
     }
     offset += res.returned;
     if (offset >= total) break;
+    // Pace the walk to stay under the gallery's rate limit.
+    await sleep(GALLERY_PAGE_DELAY_MS);
   }
   const creatorById = new Map(nameCache);
   logger.info(

@@ -55,3 +55,24 @@ disambiguating obc_bot_id vs slug). Never trust the partner feed's filter params
 - The public gallery walk's completeness depends on the external OBC API's live behavior
   (it can return an empty `total` / early-stop under load); the per-uuid partner fallback
   and the repair's re-runnable idempotence cover stragglers across deploys.
+
+## Prod failure: the repair must survive 429s AND DB pool timeouts (else it does ~nothing)
+
+First prod run fixed only 147 of ~12k rows, then aborted. Two compounding causes, both now fixed:
+1. **The public gallery aggressively rate-limits (HTTP 429)** — it returns only ~12 artifacts
+   per page (ignores `limit=100`) and 429s after ~240 items. The old `fetchGalleryPage` threw
+   on the first 429, so `buildFullCreatorDirectory` stopped the entire walk → creator map had
+   240/12k entries → almost nothing resolved.
+2. **A single DB connection-pool timeout aborted the whole step.** The long sequential sweep
+   under live traffic exhausted the pool; one "Connection terminated due to connection timeout"
+   inside `findOrCreateAgentByBotUuid` threw all the way out of `repairCreatorAttribution`.
+
+**Rules for any long external-API + bulk-DB background job here (`**Why:**` above):**
+- `fetchGalleryPage` must retry 429/5xx/network with exponential backoff honoring `Retry-After`;
+  pace the walk (~300ms/page). Only non-retryable 4xx fails fast.
+- The repair must be **resumable**: select only `creator_bot_id IS NULL` so every UPDATE shrinks
+  the work set, partial runs compound across boots, and a completed run is a no-op.
+- **Per-row try/catch** + a `withDbRetry` wrapper (retries transient connection errors by message
+  heuristic) so one DB hiccup is counted and skipped, never fatal. Cap per-uuid partner lookups
+  per run (2000) so stragglers can't exhaust the partner budget in one boot.
+- It converges across redeploys; it does NOT have to finish in one boot.
