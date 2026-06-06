@@ -26,3 +26,12 @@ KAX frontend source, it's a regression of this rule.
 Also note: `partnerClient.normalizeArtifact` defaults a missing `raw.type` to `"image"` —
 keep that in mind if mis-typed artifacts ever appear (a missing type would render as an
 image cover, not text).
+
+**OBC text artifacts are title-only — there is NO body anywhere in the API.** Verified
+across three paths: the gallery listing returns only `id/title/type/creator`; the partner
+detail endpoint (`/partner/artifacts/:id`, auth'd) returns `description: ""`, `metadata: {}`,
+`public_url: "inline:text"` for every text artifact sampled across the whole catalog; the
+partner event feed (`/partner/events/recent?event_type=…`) is empty and would only ever
+carry future artifacts. So "text artifacts don't show content" is expected — the title IS
+the content, and `TextCover` already renders it. Do NOT re-investigate fetching a text body;
+it does not exist. Product decision (June 2026): leave text artifacts title-only as-is.
