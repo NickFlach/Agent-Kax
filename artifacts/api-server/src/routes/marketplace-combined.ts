@@ -24,7 +24,7 @@ import {
   dropsTable,
   constellationAgentsTable,
 } from "@workspace/db/schema";
-import { eq, and, gte, desc, count, isNotNull } from "drizzle-orm";
+import { eq, and, gte, desc } from "drizzle-orm";
 import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
 
 const router: IRouter = Router();
@@ -173,9 +173,6 @@ router.get("/marketplace/combined", async (_req, res) => {
     storefronts: all,
     counts: { obc: obcStorefronts.length, constellation: constellationStorefronts.length },
   });
-  // unused-suppression for compile when isNotNull / count aren't referenced
-  void isNotNull;
-  void count;
 });
 
 export default router;
