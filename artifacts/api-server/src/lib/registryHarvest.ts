@@ -11,7 +11,6 @@
 
 import { db } from "@workspace/db";
 import { artifactsTable } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
 import { logger } from "./logger";
 import { enabledConnectors, findConnector } from "../connectors/registry";
 import type { ArtifactQuery, ConnectorArtifact } from "../connectors/types";
@@ -103,22 +102,16 @@ export async function runRegistryHarvest(opts: RegistryHarvestOpts): Promise<Reg
       for (const a of page.artifacts) {
         harvested++;
         try {
-          const existing = await db
-            .select({ id: artifactsTable.id })
-            .from(artifactsTable)
-            .where(
-              and(
-                eq(artifactsTable.connectorId, c.id),
-                eq(artifactsTable.externalId, a.externalId),
-              ),
-            )
-            .limit(1);
-          if (existing.length > 0) {
+          const inserted = await db
+            .insert(artifactsTable)
+            .values(rowFor(c.id, a, opts.ownerId))
+            .onConflictDoNothing()
+            .returning({ id: artifactsTable.id });
+          if (inserted.length > 0) {
+            newArtifacts++;
+          } else {
             duplicates++;
-            continue;
           }
-          await db.insert(artifactsTable).values(rowFor(c.id, a, opts.ownerId));
-          newArtifacts++;
         } catch (err) {
           errors.push(`${a.externalId}: ${(err as Error).message}`);
         }
