@@ -313,6 +313,7 @@ router.post("/admin/seed-music-drop", requireAdmin, async (req, res) => {
           dropId,
           status: "dropped",
           artifactType: "audio",
+          publicUrl: t.publicUrl,
           thumbnailUrl: coverUrl,
           title: t.title,
           creatorName,
