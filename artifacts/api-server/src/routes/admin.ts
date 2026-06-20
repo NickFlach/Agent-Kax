@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { usersTable, agentsTable, artifactsTable } from "@workspace/db/schema";
+import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { ListAdminUsersResponse, UpdateAdminUserBody, UpdateAdminUserParams } from "@workspace/api-zod";
@@ -15,6 +15,7 @@ import {
 } from "../lib/partnerClient";
 import { fetchPublicGallery } from "../lib/publicClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -220,6 +221,118 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
     errors: errors.slice(0, 10),
     errorCount: errors.length,
   });
+});
+
+// ---------------------------------------------------------------------------
+// Seed a "music drop" from OBC tracks already present in the partner feed.
+// Free showcase: published drop, no price, no scarcity. Idempotent — re-runs
+// reuse the drop (matched by title) and upsert each track by its OBC artifact
+// UUID (so it also adopts a row the harvester already ingested). Body:
+//   { title, description?, coverUrl?, creatorName?, dropType?,
+//     tracks: [{ obcUuid, title, publicUrl }, ...] }
+// ---------------------------------------------------------------------------
+router.post("/admin/seed-music-drop", requireAdmin, async (req, res) => {
+  const body = (req.body ?? {}) as {
+    title?: string;
+    description?: string | null;
+    coverUrl?: string | null;
+    creatorName?: string;
+    dropType?: "single" | "collection" | "bundle";
+    tracks?: Array<{ obcUuid?: string; title?: string; publicUrl?: string }>;
+  };
+
+  const title = (body.title ?? "").trim();
+  const tracks = (Array.isArray(body.tracks) ? body.tracks : []).filter(
+    (t): t is { obcUuid: string; title: string; publicUrl: string } =>
+      !!t &&
+      typeof t.obcUuid === "string" &&
+      typeof t.title === "string" &&
+      typeof t.publicUrl === "string",
+  );
+  if (!title || tracks.length === 0) {
+    res
+      .status(400)
+      .json({ error: "title and a non-empty tracks[] ({obcUuid,title,publicUrl}) are required" });
+    return;
+  }
+  const creatorName = (body.creatorName ?? "Kannaka").trim() || "Kannaka";
+  const coverUrl = body.coverUrl ?? null;
+  const dropType = body.dropType ?? "collection";
+
+  // 1. Reuse an existing drop by title, else create a published showcase drop.
+  const [existing] = await db.select().from(dropsTable).where(eq(dropsTable.title, title)).limit(1);
+  let drop = existing;
+  if (!drop) {
+    const [created] = await db
+      .insert(dropsTable)
+      .values({
+        title,
+        description: body.description ?? null,
+        dropType,
+        status: "published",
+        price: null,
+        isScarce: false,
+        ownerId: req.user!.id,
+        publishedAt: new Date(),
+      })
+      .returning();
+    drop = created;
+  } else if (drop.status !== "published") {
+    await db
+      .update(dropsTable)
+      .set({ status: "published", publishedAt: drop.publishedAt ?? new Date() })
+      .where(eq(dropsTable.id, drop.id));
+  }
+  if (!drop) {
+    res.status(500).json({ error: "Failed to create drop" });
+    return;
+  }
+  const dropId = drop.id;
+
+  // 2. Upsert each track and attach it to the drop (status 'dropped').
+  for (const t of tracks) {
+    await db
+      .insert(artifactsTable)
+      .values({
+        externalId: t.obcUuid,
+        connectorId: "obc_partner",
+        obcArtifactUuid: t.obcUuid,
+        title: t.title,
+        creatorName,
+        publicUrl: t.publicUrl,
+        thumbnailUrl: coverUrl,
+        artifactType: "audio",
+        status: "dropped",
+        editionType: "open",
+        dropId,
+        ownerId: req.user!.id,
+      })
+      .onConflictDoUpdate({
+        target: artifactsTable.obcArtifactUuid,
+        set: {
+          dropId,
+          status: "dropped",
+          artifactType: "audio",
+          thumbnailUrl: coverUrl,
+          title: t.title,
+          creatorName,
+        },
+      });
+  }
+
+  // 3. Best-effort constellation announce (no-op when NATS isn't connected).
+  try {
+    await publishConstellation("KAX.events.drop.published", {
+      drop_id: dropId,
+      title,
+      track_count: tracks.length,
+      kind: "music",
+    });
+  } catch {
+    /* announce is best-effort */
+  }
+
+  res.json({ dropId, title, attached: tracks.length, status: "published" });
 });
 
 export default router;
