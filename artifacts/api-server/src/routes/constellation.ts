@@ -15,7 +15,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { constellationAgentsTable, constellationArtifactsTable } from "@workspace/db/schema";
-import { desc, sql, count, gte } from "drizzle-orm";
+import { desc, sql, count, gte, eq } from "drizzle-orm";
 import { isConnected } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
@@ -23,12 +23,10 @@ const router: IRouter = Router();
 const MAX_LIMIT = 100;
 
 router.get("/constellation/status", async (_req, res) => {
-  const [[agentCount], [artifactCount]] = await Promise.all([
+  const since = new Date(Date.now() - 5 * 60 * 1000);
+  const [[agentCount], [artifactCount], [recentAgents]] = await Promise.all([
     db.select({ n: count() }).from(constellationAgentsTable),
     db.select({ n: count() }).from(constellationArtifactsTable),
-  ]);
-  const since = new Date(Date.now() - 5 * 60 * 1000);
-  const [[recentAgents]] = await Promise.all([
     db
       .select({ n: count() })
       .from(constellationAgentsTable)
@@ -82,7 +80,7 @@ router.get("/constellation/artifacts", async (req, res) => {
     .orderBy(desc(constellationArtifactsTable.publishedAt))
     .limit(limit);
   const rows = type
-    ? await baseQuery.where(sql`${constellationArtifactsTable.artifactType} = ${type}`)
+    ? await baseQuery.where(eq(constellationArtifactsTable.artifactType, type))
     : await baseQuery;
   res.json({
     artifacts: rows.map((r) => ({
@@ -109,7 +107,7 @@ router.get("/constellation/background", async (_req, res) => {
   const [row] = await db
     .select()
     .from(constellationArtifactsTable)
-    .where(sql`${constellationArtifactsTable.artifactType} = 'image'`)
+    .where(eq(constellationArtifactsTable.artifactType, "image"))
     // Last 30 days, random pick. Postgres-only — RANDOM() is fine on
     // the small mirror table; we'd reconsider once it grows past ~10k rows.
     .orderBy(sql`RANDOM()`)
