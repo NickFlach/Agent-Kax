@@ -1,7 +1,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { ethers } from "ethers";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import {
   db,
   usersTable,
