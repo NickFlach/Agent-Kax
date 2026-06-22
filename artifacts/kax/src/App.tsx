@@ -203,7 +203,7 @@ function RequireAuth({ children, adminOnly = false }: { children: React.ReactNod
         <Button
           onClick={() => {
             const target = `/login?returnTo=${encodeURIComponent(location)}`;
-            window.location.href = `${import.meta.env.BASE_URL.replace(/\/+$/, "")}${target}` || target;
+            window.location.href = `${import.meta.env.BASE_URL.replace(/\/+$/, "")}${target}`;
           }}
           data-testid="button-login-gate"
         >
@@ -386,7 +386,7 @@ function AppCrashFallback({ reset, error }: { reset: () => void; error: Error })
   const goHome = () => {
     reset();
     const base = import.meta.env.BASE_URL.replace(/\/+$/, "");
-    window.location.href = `${base}/` || "/";
+    window.location.href = `${base}/`;
   };
   return (
     <div
