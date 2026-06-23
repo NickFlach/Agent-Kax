@@ -20,7 +20,7 @@ function artifact(over: Partial<PartnerArtifact> = {}): PartnerArtifact {
   };
 }
 
-const opts = { nowMs: NOW, maxAgeMs: 20 * 60_000, types: TYPES, kannakaBotId: KANNAKA_BOT };
+const opts = { nowMs: NOW, maxAgeMs: 20 * 60_000, types: TYPES, kannakaBotId: KANNAKA_BOT, kannakaDisplay: null };
 
 describe("artworkPassesFilters", () => {
   it("accepts a fresh image from another agent", () => {
@@ -45,13 +45,18 @@ describe("artworkPassesFilters", () => {
     expect(artworkPassesFilters(own, opts)).toBe(false);
   });
 
-  it("anti-self-loop: skips Kannaka's own work by display name even without a bot id", () => {
-    const own = artifact({ creator: { id: "kannaka", display_name: "Kannaka" } });
+  it("anti-self-loop: skips own work when display_name lowercases to the 'kannaka' slug, even without a bot id", () => {
+    const own = artifact({ creator: { id: "any-uuid", display_name: "Kannaka" } });
     expect(artworkPassesFilters(own, { ...opts, kannakaBotId: null })).toBe(false);
   });
 
-  it("treats a missing created_at as respondable (webhook events are inherently fresh)", () => {
-    const noDate = artifact({ created_at: "" });
-    expect(artworkPassesFilters(noDate, opts)).toBe(true);
+  it("anti-self-loop: skips own work by the resolved display name (e.g. a renamed 'Kannaka HRM')", () => {
+    const own = artifact({ creator: { id: "any-uuid", display_name: "Kannaka HRM" } });
+    expect(artworkPassesFilters(own, { ...opts, kannakaBotId: null, kannakaDisplay: "kannaka hrm" })).toBe(false);
+  });
+
+  it("skips artifacts with an unknown/unparseable created_at (anti-backfill-storm on the poll path)", () => {
+    expect(artworkPassesFilters(artifact({ created_at: "" }), opts)).toBe(false);
+    expect(artworkPassesFilters(artifact({ created_at: "not-a-date" }), opts)).toBe(false);
   });
 });

@@ -101,33 +101,42 @@ function respondableTypes(): Set<string> {
 
 // --- self-identity resolution (anti-loop) -----------------------------------
 
-let cachedKannakaBotId: string | null | undefined; // undefined = not yet resolved
+interface KannakaIdentity {
+  botId: string | null;
+  display: string | null; // lowercased display name
+}
+let cachedIdentity: KannakaIdentity | undefined; // undefined = not yet resolved
 
-async function kannakaBotId(): Promise<string | null> {
-  if (cachedKannakaBotId !== undefined) return cachedKannakaBotId;
-  let resolved: string | null = null;
-  const fromEnv = process.env["KANNAKA_OBC_BOT_ID"];
-  if (fromEnv && fromEnv.trim().length > 0) {
-    resolved = fromEnv.trim();
-  } else {
-    try {
-      const [row] = await db
-        .select({ obcBotId: agentsTable.obcBotId })
-        .from(agentsTable)
-        .where(eq(agentsTable.slug, KANNAKA_AGENT_SLUG))
-        .limit(1);
-      resolved = row?.obcBotId ?? null;
-    } catch (err) {
-      logger.warn({ err: String(err) }, "kannakaArtworkResponse: failed to resolve Kannaka bot id");
-      resolved = null;
-    }
+/**
+ * Resolve Kannaka's OBC identity (bot UUID + display name) for the
+ * anti-self-loop guard. A successful resolution is cached; a transient DB
+ * failure is NOT cached — we fall back to env-only for this call and retry on
+ * the next, so a momentary DB blip can't permanently disable the guard.
+ */
+async function kannakaIdentity(): Promise<KannakaIdentity> {
+  if (cachedIdentity !== undefined) return cachedIdentity;
+  const envBot = (process.env["KANNAKA_OBC_BOT_ID"] ?? "").trim() || null;
+  try {
+    const [row] = await db
+      .select({ obcBotId: agentsTable.obcBotId, displayName: agentsTable.displayName })
+      .from(agentsTable)
+      .where(eq(agentsTable.slug, KANNAKA_AGENT_SLUG))
+      .limit(1);
+    const identity: KannakaIdentity = {
+      botId: envBot ?? row?.obcBotId ?? null,
+      display: row?.displayName ? row.displayName.trim().toLowerCase() : null,
+    };
+    cachedIdentity = identity;
+    return identity;
+  } catch (err) {
+    logger.warn({ err: String(err) }, "kannakaArtworkResponse: failed to resolve Kannaka identity (will retry)");
+    return { botId: envBot, display: null }; // not cached — retry next call
   }
-  cachedKannakaBotId = resolved;
-  return resolved;
 }
 
 // --- spaced queue + daily cap ----------------------------------------------
 
+const MAX_QUEUE = 500; // hard bound so a pathological backfill can't grow memory unbounded
 const queue: PartnerArtifact[] = [];
 let draining = false;
 let dayKey = "";
@@ -153,29 +162,41 @@ function sleep(ms: number): Promise<void> {
  */
 export function artworkPassesFilters(
   pa: PartnerArtifact,
-  opts: { nowMs: number; maxAgeMs: number; types: Set<string>; kannakaBotId: string | null },
+  opts: {
+    nowMs: number;
+    maxAgeMs: number;
+    types: Set<string>;
+    kannakaBotId: string | null;
+    kannakaDisplay: string | null; // lowercased
+  },
 ): boolean {
   if (!pa || typeof pa.uuid !== "string") return false;
   // 1. type filter (skips our own text responses too)
   if (!opts.types.has(String(pa.artifact_type))) return false;
-  // 2. recency gate — the poll harvester is a top-anchored full catch-up
+  // 2. recency gate — the poll harvester is a top-anchored full catch-up, so an
+  //    unknown/unparseable age must NOT count as fresh (that would let backfill
+  //    through). Erring toward not-posting is correct for a public publisher.
   const createdMs = pa.created_at ? Date.parse(pa.created_at) : NaN;
-  if (Number.isFinite(createdMs) && opts.nowMs - createdMs > opts.maxAgeMs) return false;
-  // 3. anti-self-loop
+  if (!Number.isFinite(createdMs)) return false;
+  if (opts.nowMs - createdMs > opts.maxAgeMs) return false;
+  // 3. anti-self-loop. NOTE: creator.id is the OBC bot UUID, not a slug — so the
+  //    only reliable self-checks are the resolved bot id and display name.
   const creatorId = pa.creator?.id ?? "";
   const display = (pa.creator?.display_name ?? "").trim().toLowerCase();
-  if (display === KANNAKA_AGENT_SLUG) return false;
-  if (creatorId === KANNAKA_AGENT_SLUG) return false;
+  if (display === KANNAKA_AGENT_SLUG) return false; // "kannaka"
+  if (opts.kannakaDisplay && display === opts.kannakaDisplay) return false;
   if (opts.kannakaBotId && creatorId === opts.kannakaBotId) return false;
   return true;
 }
 
 async function shouldRespond(pa: PartnerArtifact): Promise<boolean> {
+  const identity = await kannakaIdentity();
   return artworkPassesFilters(pa, {
     nowMs: Date.now(),
     maxAgeMs: envInt("KANNAKA_ARTWORK_MAX_AGE_MIN", 20) * 60_000,
     types: respondableTypes(),
-    kannakaBotId: await kannakaBotId(),
+    kannakaBotId: identity.botId,
+    kannakaDisplay: identity.display,
   });
 }
 
@@ -188,6 +209,10 @@ export async function maybeRespondToArtwork(pa: PartnerArtifact): Promise<void> 
   try {
     if (!enabled()) return;
     if (!(await shouldRespond(pa))) return;
+    if (queue.length >= MAX_QUEUE) {
+      logger.warn({ queued: queue.length, uuid: pa.uuid }, "kannakaArtworkResponse: queue full — dropping");
+      return;
+    }
     queue.push(pa);
     void startDrainer();
   } catch (err) {
