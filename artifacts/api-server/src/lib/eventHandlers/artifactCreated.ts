@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PartnerArtifact } from "../partnerClient";
 import { KANNAKA_SYSTEM_USER_ID } from "../backfill";
 import { runTasteEngineFor } from "../tasteEngine";
+import { maybeRespondToArtwork } from "../kannakaArtworkResponse";
 import type { EventHandler } from "../eventDispatcher";
 
 export const handleArtifactCreated: EventHandler = async (data, { log }) => {
@@ -89,4 +90,9 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
   } catch (err) {
     log.error({ err, id: inserted[0].id }, "Auto-score after artifact.created failed");
   }
+
+  // Autonomous artwork responder — off unless KANNAKA_ARTWORK_RESPONSE === "on".
+  // Fires once per genuinely-new artifact (this branch only runs on a real
+  // insert); guards + spacing live inside. Never blocks ingestion.
+  void maybeRespondToArtwork(pa);
 };

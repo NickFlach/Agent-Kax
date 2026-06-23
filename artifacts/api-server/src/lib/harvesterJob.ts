@@ -15,6 +15,7 @@ import {
   type PartnerArtifact,
 } from "./partnerClient";
 import { logger } from "./logger";
+import { maybeRespondToArtwork } from "./kannakaArtworkResponse";
 import { dispatchPartnerEvent, getRegisteredEventTypes } from "./eventDispatcher";
 import {
   findOrCreateAgentByBotUuid,
@@ -159,6 +160,11 @@ export async function runPartnerHarvest(opts: {
           perAgentNew.set(agent.id, (perAgentNew.get(agent.id) ?? 0) + 1);
           perOwnerNew.set(agent.ownerId, (perOwnerNew.get(agent.ownerId) ?? 0) + 1);
         }
+        // Poll-path trigger for the artwork responder (off unless enabled).
+        // Idempotent vs the webhook path: only ONE path ever sees a given
+        // artifact as "new", and the responder's recency gate keeps the
+        // top-anchored backfill from firing at historical work.
+        void maybeRespondToArtwork(pa);
       } else {
         duplicates++;
       }
