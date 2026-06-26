@@ -3,3 +3,4 @@
 - [OBC inline:text sentinel & no-random-photo rule](obc-inline-text-sentinel.md) — text/non-visual OBC artifacts use non-http `inline:text` urls; never render as <img>; route all covers through ArtifactCover; picsum random-photo fallbacks are banned.
 - [OBC creator attribution (Model B)](obc-creator-attribution.md) — partner API IGNORES the creator filter; attribute each artifact by creator_bot_id, auto-create placeholder agents, harvest is one global pass (admin-only manual triggers).
 - [OBC partner `since` semantics](obc-partner-since-semantics.md) — /partner/artifacts is newest-first; `since=<id>` returns OLDER items (paginate-down, not "newer than"). Harvest must top-anchor each run, uncapped.
+- [Kannaka artwork responder](kannaka-artwork-responder.md) — once-a-day reservoir pick, in-memory single-instance by design (no per-day DB lease); day rollover must stay monotonic to survive the midnight intake/flush race.

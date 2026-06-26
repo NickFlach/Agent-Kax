@@ -4,6 +4,7 @@ import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership, repairCreatorAttri
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
+import { startKannakaArtworkResponseScheduler } from "./lib/kannakaArtworkResponse";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
@@ -198,6 +199,7 @@ async function warmUpInBackground(): Promise<void> {
   await runStartupStep("replayMissedEventsOnStartup", replayMissedEventsOnStartup);
   await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
+  await runStartupStep("startKannakaArtworkResponseScheduler", startKannakaArtworkResponseScheduler);
   await runStartupStep("startConstellationBridge", startConstellationBridge);
 }
 
