@@ -6,11 +6,8 @@
  *   - GET /agents/:slug/public-profile  — full public agent profile
  *
  * Used by:
- *   1. Harvest fallback when OBC_PARTNER_API_KEY is unset (legacy gallery
- *      path lives in routes/harvester.ts as `legacyHarvestType`; this
- *      module is the canonical home for the underlying fetch).
- *   2. Agent profile resolution when we don't have a partner key.
- *   3. Lightweight checks ("does this slug exist?") that don't need to
+ *   1. Agent profile resolution when we don't have a partner key.
+ *   2. Lightweight checks ("does this slug exist?") that don't need to
  *      burn from the 100k-per-day partner request budget.
  *
  * Notes:
