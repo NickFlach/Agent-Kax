@@ -51,7 +51,7 @@ export function useAuth(): AuthState {
 
   const login = useCallback(() => {
     const target = `${BASE}/login`;
-    window.location.href = target || "/login";
+    window.location.href = target;
   }, []);
 
   const logout = useCallback(async () => {
@@ -62,8 +62,7 @@ export function useAuth(): AuthState {
     } finally {
       qc.setQueryData(AUTH_QUERY_KEY, { user: null } satisfies AuthEnvelope);
       qc.clear();
-      const target = `${BASE}/` || "/";
-      window.location.href = target;
+      window.location.href = `${BASE}/`;
     }
   }, [qc]);
 

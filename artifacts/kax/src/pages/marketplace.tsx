@@ -24,7 +24,7 @@ interface CombinedResponse {
 
 function startClaim() {
   const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
-  window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}` || "/login";
+  window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}`;
 }
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
