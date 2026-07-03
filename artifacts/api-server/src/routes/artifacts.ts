@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { artifactsTable, activitiesTable } from "@workspace/db/schema";
+import { artifactsTable, activitiesTable, dropsTable } from "@workspace/db/schema";
 import { eq, desc, gte, ilike, sql, and, count, inArray } from "drizzle-orm";
 import {
   ListArtifactsQueryParams,
@@ -11,7 +11,6 @@ import {
 import { canMutate, requireAuth, getOwnerScope, getOptionalAuth } from "../middlewares/requireAuth";
 import { computeScore } from "../lib/tasteEngine";
 import { isArtifactPublic } from "../lib/visibility";
-import { dropsTable } from "@workspace/db/schema";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
