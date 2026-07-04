@@ -299,7 +299,7 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
               // dropId being on a published drop isn't enough — owners
               // can attach + stamp 'dropped' on raw/scored artifacts
               // without going through narrate.
-              inArray(artifactsTable.status, ["narrated", "dropped"] as const),
+              inArray(artifactsTable.status, [...PUBLISHABLE_STATUSES]),
             ),
           )
           .orderBy(desc(artifactsTable.kannakaScore))
@@ -394,7 +394,7 @@ router.get("/storefront/by-agent/:slug/hot", async (req, res) => {
         gte(artifactsTable.lastReactionAt, hourAgo),
         // Publishable-status floor (#9): raw/scored back-doors with
         // recent reactions shouldn't appear on the public hot list.
-        inArray(artifactsTable.status, ["narrated", "dropped"] as const),
+        inArray(artifactsTable.status, [...PUBLISHABLE_STATUSES]),
       ),
     )
     .groupBy(artifactsTable.id)
