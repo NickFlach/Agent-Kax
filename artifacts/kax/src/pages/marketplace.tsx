@@ -1,6 +1,9 @@
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { useStorefrontSeo } from "@/lib/storefront-seo";
 
 interface UnifiedStorefront {
   source: "obc" | "constellation";
@@ -26,9 +29,6 @@ function startClaim() {
   const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
   window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}`;
 }
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { useStorefrontSeo } from "@/lib/storefront-seo";
 
 export default function Marketplace() {
   const { user } = useAuth();
