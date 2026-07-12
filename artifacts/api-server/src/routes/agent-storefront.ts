@@ -142,7 +142,7 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
   }
 
   if (body.accentColor != null && body.accentColor !== "" && !HEX_COLOR.test(body.accentColor)) {
-    res.status(400).json({ error: "accentColor must be a hex color like #7C3AED" });
+    res.status(400).json({ error: "accentColor must be a hex color like #E8A33D" });
     return;
   }
 

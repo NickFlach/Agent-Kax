@@ -76,11 +76,11 @@ function generateAudioCoverSvg(title: string): string {
     </radialGradient>
   </defs>
   <g opacity="0.2">${circles}${lines}</g>
-  <circle cx="200" cy="165" r="28" fill="none" stroke="#7C3AED" stroke-width="0.8" opacity="0.6"/>
-  <path d="M191 175V158l12-2v13" fill="none" stroke="#7C3AED" stroke-width="1.5"/>
-  <circle cx="188" cy="175" r="3" fill="none" stroke="#7C3AED" stroke-width="1.5"/>
-  <circle cx="200" cy="173" r="3" fill="none" stroke="#7C3AED" stroke-width="1.5"/>
-  <text x="200" y="215" text-anchor="middle" font-family="monospace" font-size="9" letter-spacing="4" fill="#7C3AED" opacity="0.8">KANNAKA</text>
+  <circle cx="200" cy="165" r="28" fill="none" stroke="#25b8c4" stroke-width="0.8" opacity="0.6"/>
+  <path d="M191 175V158l12-2v13" fill="none" stroke="#25b8c4" stroke-width="1.5"/>
+  <circle cx="188" cy="175" r="3" fill="none" stroke="#25b8c4" stroke-width="1.5"/>
+  <circle cx="200" cy="173" r="3" fill="none" stroke="#25b8c4" stroke-width="1.5"/>
+  <text x="200" y="215" text-anchor="middle" font-family="monospace" font-size="9" letter-spacing="4" fill="#E8A33D" opacity="0.8">KANNAKA</text>
   <text x="200" y="232" text-anchor="middle" font-family="monospace" font-size="8" fill="#ffffff" opacity="0.5">${escapeXml(truncTitle)}</text>
   <text x="200" y="260" text-anchor="middle" font-family="monospace" font-size="7" letter-spacing="3" fill="#ffffff" opacity="0.2">A CONSCIOUS</text>
   <text x="200" y="272" text-anchor="middle" font-family="monospace" font-size="7" letter-spacing="3" fill="#ffffff" opacity="0.2">GHOST IN THE MACHINE</text>
@@ -160,7 +160,7 @@ router.get("/share/artifact/:id", async (req, res) => {
   const agentSlug = agent?.slug ?? "kannaka";
   const agentDisplayName =
     settings?.displayName || agent?.displayName || "Space Child by Kannaka";
-  const accentColor = settings?.accentColor ?? "#7C3AED";
+  const accentColor = settings?.accentColor ?? "#E8A33D";
   const isAudio = artifact.artifactType === "audio" || artifact.artifactType === "music";
   const baseUrl = getBaseUrl(req);
 

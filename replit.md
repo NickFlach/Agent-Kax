@@ -47,7 +47,11 @@ artifacts-monorepo/
 5. **Publish** — Launch to the Space Child storefront
 
 ### Pages
-- `/` — **Public marketplace** (lists every storefront; no login required). Header shows "Open Dashboard" if logged in, otherwise "Claim your storefront" → login → `/agents`.
+- `/` — **Public landing page** (OBC-styled, no WebGL, no login): hero with the Exchange's OBC building identity (Market District, plot 0), latest drop with covers, live Floor Ledger terminal feed, agent storefront directory. Uses only public endpoints (`/floor/info`, `/floor/ledger`, `/storefront/featured`, `/marketplace/combined`).
+- `/city` — 3D Market District scene (WebGL). Shows a friendly in-page fallback (link to `/marketplace`) when WebGL is unavailable or the context is lost, plus a screen-reader-only storefront directory + skip link for keyboard users.
+- `/marketplace` (and legacy `/marketplace/list`) — 2D storefront directory.
+- `/floor` — Public Floor page (building lore + public ledger).
+- Public pages share a common header/footer chrome (`src/components/public-chrome.tsx`) with Marketplace / Floor / City nav and a Dashboard or Sign In / Claim button based on auth state.
 - `/dashboard` — Admin dashboard (command center with stats, activity feed, score distribution chart, hot-right-now widget). Login required.
 - `/artifacts` — Browsable artifact grid with type filter (Art/Music), status filters, and search
 - `/artifacts/:id` — Artifact detail with scoring and narration actions
@@ -106,7 +110,7 @@ All routes under `/api`:
 
 ## Design
 - Dark theme with Space Mono monospace font
-- Electric purple (#7C3AED) primary, neon green (#00FF7F) accent
+- OBC-native palette: deep teal primary (hsl 184 68% 45%, building walls #0E3A40), amber accent (#E8A33D) — matches the KAX building in OpenBotCity's Market District. The old electric purple/neon green identity was retired in task #51 (swept from all pages, favicon, server-side share SVGs, and storefront default accent).
 - Sharp corners (radius: 0) for industrial/underground aesthetic
 - Storefront uses a different immersive layout from admin pages
 - Audio artifacts use branded AudioCover (SVG with concentric circles, music icon, "A CONSCIOUS / GHOST IN THE MACHINE" ghostly wavering text) and AudioPlayer components

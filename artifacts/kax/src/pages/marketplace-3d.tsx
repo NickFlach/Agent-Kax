@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, Suspense, useEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
-import { Link, useLocation, Redirect } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -53,12 +53,15 @@ function Storefront({
   onDoubleClick: (a: SceneAgent) => void;
 }) {
   const isClaimed = agent.claimed;
-  // Three visual classes:
-  //   constellation (discovered via NATS, unclaimed)  → neon green
-  //   obc unclaimed                                   → cyan
-  //   obc claimed                                     → magenta
   const isConstellation = agent.source === "constellation";
-  const mainColor = isConstellation ? "#39ff14" : isClaimed ? "#ff1493" : "#00ffff";
+  
+  // Update colors to match KAX theme: teal/amber
+  // Constellation: muted amber
+  // Unclaimed: teal
+  // Claimed: bright teal
+  const mainColor = isConstellation ? "#E8A33D" : isClaimed ? "#0E3A40" : "#145963";
+  const glowColor = isConstellation ? "#E8A33D" : isClaimed ? "#00ffff" : "#145963";
+  
   const glyphRef = useRef<THREE.Group>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const phase = useMemo(() => Math.random() * Math.PI * 2, []);
@@ -73,23 +76,13 @@ function Storefront({
       mat.opacity = selected ? 0.55 + Math.sin(t * 4) * 0.2 : 0;
     }
   });
-  // phase used to slightly desync the visual flicker via emissive intensity baseline
-  void phase;
 
   const initials = (agent.name || agent.slug).substring(0, 2).toUpperCase();
 
-  // Lift the click handler to the group level and wrap with an invisible
-  // bounding collider so clicks anywhere on the storefront body — not just
-  // the small sign slab — register as a selection. Without this, users see
-  // a storefront in the scene but most of the visible volume swallows
-  // pointer events into onPointerMissed and the storefront feels dead.
   const select = (e: { stopPropagation?: () => void }) => {
     e.stopPropagation?.();
     onClick(agent);
   };
-  // Double-click enters the storefront immediately — universal "enter"
-  // gesture in 3D world UIs. Single-click still selects + populates HUD
-  // for users who want to inspect first.
   const enter = (e: { stopPropagation?: () => void }) => {
     e.stopPropagation?.();
     onDoubleClick(agent);
@@ -104,10 +97,6 @@ function Storefront({
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "auto")}
     >
-      {/* Invisible click-collider that covers the whole storefront volume.
-          Sits behind everything else; geometry is sized to envelope the
-          body + roof + sign + glyph. visible=false keeps the scene clean
-          but pointer events still hit it. */}
       <mesh position={[0, 3, 0.3]} visible={false}>
         <boxGeometry args={[3.4, 6.5, 3.6]} />
         <meshBasicMaterial />
@@ -115,30 +104,30 @@ function Storefront({
 
       <mesh position={[0, 2, 0]}>
         <boxGeometry args={[3, 4, 3]} />
-        <meshStandardMaterial color="#05000a" roughness={0.7} metalness={0.2} />
+        <meshStandardMaterial color="#03080A" roughness={0.7} metalness={0.2} />
       </mesh>
       <mesh position={[0, 4.5, 0.2]}>
         <boxGeometry args={[2.8, 1, 2.8]} />
-        <meshStandardMaterial color="#0a0514" roughness={0.8} />
+        <meshStandardMaterial color="#050C0F" roughness={0.8} />
       </mesh>
       <mesh position={[0, 5.5, 0.4]}>
         <boxGeometry args={[2.2, 1, 2.2]} />
-        <meshStandardMaterial color="#030105" roughness={0.9} />
+        <meshStandardMaterial color="#020506" roughness={0.9} />
       </mesh>
 
       <mesh position={[0, 1, 1.51]}>
         <planeGeometry args={[1, 2]} />
-        <meshStandardMaterial color={isClaimed ? "#2a001a" : "#001a1a"} emissive={mainColor} emissiveIntensity={0.2} />
+        <meshStandardMaterial color={isClaimed ? "#071D20" : "#0A1618"} emissive={mainColor} emissiveIntensity={0.2} />
       </mesh>
 
       <mesh ref={haloRef} position={[0, 3, 1.55]}>
         <planeGeometry args={[3.4, 1.6]} />
-        <meshBasicMaterial color={mainColor} transparent opacity={0} />
+        <meshBasicMaterial color={glowColor} transparent opacity={0} />
       </mesh>
 
       <mesh position={[0, 3, 1.6]}>
         <boxGeometry args={[2.8, 1, 0.1]} />
-        <meshStandardMaterial color={mainColor} emissive={mainColor} emissiveIntensity={1.4} transparent opacity={0.9} />
+        <meshStandardMaterial color={mainColor} emissive={glowColor} emissiveIntensity={1.4} transparent opacity={0.9} />
       </mesh>
 
       <Text position={[0, 3.1, 1.66]} fontSize={0.3} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.6}>
@@ -150,11 +139,11 @@ function Storefront({
           : `${agent.artifacts} ARTIFACT${agent.artifacts === 1 ? "" : "S"}`}
       </Text>
       {isConstellation ? (
-        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color="#39ff14" font={SPACE_MONO_WOFF}>
+        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
           [ CONSTELLATION ]
         </Text>
       ) : !isClaimed ? (
-        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color="#00ffff" font={SPACE_MONO_WOFF}>
+        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
           [ AVAILABLE ]
         </Text>
       ) : null}
@@ -163,7 +152,7 @@ function Storefront({
         <Text
           position={[0, 0, 0]}
           fontSize={0.8}
-          color={isConstellation ? "#39ff14" : isClaimed ? "#ff1493" : "#00ffff"}
+          color={glowColor}
           font={SPACE_MONO_WOFF}
           fillOpacity={0.6}
         >
@@ -200,14 +189,14 @@ export default function Marketplace3D() {
   const { data, isLoading, isError } = useGetMarketplaceCombined();
 
   useStorefrontSeo({
-    title: "KAX // Neon District — All Storefronts",
-    description: "A 3D night-market of curated storefronts from Kannaka and the OpenBotCity collective.",
-    accentColor: "#ff1493",
+    title: "KAX // Market District 3D",
+    description: "A 3D visualization of KAX and the OpenBotCity collective.",
+    accentColor: "#0E3A40",
     initial: "K",
     jsonLd: {
       "@context": "https://schema.org",
       "@type": "CollectionPage",
-      name: "KAX Marketplace",
+      name: "KAX Market District",
     },
   });
 
@@ -235,28 +224,39 @@ export default function Marketplace3D() {
   };
   const enterStorefront = (a: SceneAgent) => navigate(dest(a));
 
-  // WebGL not supported → fall back to the 2D list immediately.
   if (webglSupported === false) {
-    return <Redirect to="/marketplace/list" />;
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 text-center font-mono">
+        <h1 className="text-2xl uppercase tracking-widest text-primary font-bold mb-4">Hardware Limit Reached</h1>
+        <p className="text-sm text-muted-foreground max-w-md mb-8">
+          Your device does not support the WebGL renderer required for the 3D Market District visualization.
+        </p>
+        <Link href="/marketplace">
+          <Button variant="outline" className="border-primary text-primary hover:bg-primary/10 rounded-none uppercase tracking-widest">
+            Enter 2D Directory
+          </Button>
+        </Link>
+      </div>
+    );
   }
 
   return (
-    <div className="relative min-h-screen w-full bg-black overflow-hidden kax3d-font">
+    <div className="relative min-h-screen w-full bg-[#020506] overflow-hidden kax3d-font">
       {/* Skip link + screen-reader-only directory of storefronts so keyboard
           and assistive-tech users can reach every storefront without going
           through the WebGL scene (which is unreachable by keyboard). */}
       <a
         href="#marketplace-storefront-list"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-3 focus:py-2 focus:bg-pink-900 focus:text-white focus:text-xs focus:uppercase focus:tracking-wider"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-3 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:text-xs focus:uppercase focus:tracking-wider"
       >
         Skip 3D scene · list every storefront
       </a>
       <nav
         id="marketplace-storefront-list"
         aria-label="All storefronts"
-        className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:top-12 focus-within:left-2 focus-within:right-2 focus-within:z-[90] focus-within:bg-black/95 focus-within:border focus-within:border-pink-500/50 focus-within:p-4 focus-within:max-h-[70vh] focus-within:overflow-auto"
+        className="sr-only focus-within:not-sr-only focus-within:absolute focus-within:top-12 focus-within:left-2 focus-within:right-2 focus-within:z-[90] focus-within:bg-background/95 focus-within:border focus-within:border-primary/50 focus-within:p-4 focus-within:max-h-[70vh] focus-within:overflow-auto"
       >
-        <h2 className="text-xs uppercase tracking-widest text-pink-300 mb-2">
+        <h2 className="text-xs uppercase tracking-widest text-accent mb-2">
           {allSceneAgents.length} storefronts
         </h2>
         <ul className="space-y-1">
@@ -264,11 +264,11 @@ export default function Marketplace3D() {
             <li key={`${a.source}:${a.slug}`}>
               <Link
                 href={dest(a)}
-                className="block text-sm text-cyan-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-pink-400 px-2 py-1"
+                className="block text-sm text-primary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent px-2 py-1"
                 data-testid={`a11y-storefront-link-${a.slug}`}
               >
                 {a.name}
-                <span className="text-[10px] text-gray-500 ml-2 uppercase tracking-widest">
+                <span className="text-[10px] text-muted-foreground ml-2 uppercase tracking-widest">
                   {a.source === "constellation" ? "constellation" : a.claimed ? "secured" : "available"}
                 </span>
               </Link>
@@ -277,7 +277,7 @@ export default function Marketplace3D() {
           <li>
             <Link
               href="/marketplace/list"
-              className="block text-xs uppercase tracking-widest text-pink-300 hover:text-white px-2 py-1"
+              className="block text-xs uppercase tracking-widest text-accent hover:text-foreground px-2 py-1"
             >
               Open full list view →
             </Link>
@@ -285,117 +285,106 @@ export default function Marketplace3D() {
         </ul>
       </nav>
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-3 pointer-events-none">
-        <Link href="/" className="font-bold tracking-widest text-sm text-white pointer-events-auto" data-testid="link-home">
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none bg-gradient-to-b from-[#020506] to-transparent">
+        <Link href="/" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80 transition-colors" data-testid="link-home">
           KAX
         </Link>
-        <div className="flex items-center gap-2 pointer-events-auto">
-          <Link href="/marketplace/list">
-            <Button size="sm" variant="ghost" className="h-7 text-xs uppercase tracking-wider text-cyan-300 hover:text-white" data-testid="button-list-view">
-              List view
+        <div className="flex items-center gap-3 pointer-events-auto">
+          <Link href="/marketplace">
+            <Button size="sm" variant="ghost" className="h-8 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground rounded-none" data-testid="button-list-view">
+              Directory
             </Button>
           </Link>
           {user ? (
             <Link href="/dashboard">
-              <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider" data-testid="button-open-dashboard">
-                Open Dashboard
+              <Button size="sm" variant="outline" className="h-8 text-[10px] uppercase tracking-wider border-primary text-primary hover:bg-primary/10 rounded-none" data-testid="button-open-dashboard">
+                Dashboard
               </Button>
             </Link>
           ) : (
-            <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider" onClick={startClaim} data-testid="button-claim-storefront">
-              Claim your storefront
+            <Button size="sm" variant="outline" className="h-8 text-[10px] uppercase tracking-wider border-border text-foreground hover:bg-accent/10 hover:text-accent hover:border-accent/30 rounded-none transition-all" onClick={startClaim} data-testid="button-claim-storefront">
+              Claim Storefront
             </Button>
           )}
         </div>
       </div>
 
       {/* HUD */}
-      <div className="absolute top-14 left-0 p-6 z-10 pointer-events-none w-full flex justify-between items-start">
-        <div className="kax3d-hud p-4 rounded-sm pointer-events-auto max-w-sm">
-          <h1 className="text-2xl font-bold text-white kax3d-glow-pink mb-1">KAX // NEON DISTRICT</h1>
-          <p className="text-sm text-cyan-300 kax3d-glow-cyan mb-4 uppercase tracking-widest">
-            Sector 4 // {isLoading ? "Loading…" : `${sceneAgents.length} Storefronts Online`}
+      <div className="absolute top-16 left-0 p-6 z-10 pointer-events-none w-full flex justify-between items-start">
+        <div className="kax3d-hud p-5 rounded-none pointer-events-auto max-w-sm">
+          <h1 className="text-xl font-bold text-foreground tracking-widest uppercase mb-1">Market District</h1>
+          <p className="text-[10px] text-accent font-bold mb-4 uppercase tracking-[0.3em]">
+            Plot 0 // {isLoading ? "Scanning Grid…" : `${sceneAgents.length} Active Entities`}
           </p>
 
-          <div className="border-t border-pink-500/30 pt-4 mt-2">
+          <div className="border-t border-border pt-4 mt-2">
             {isError ? (
-              <div className="flex flex-col gap-2" data-testid="text-marketplace-error">
-                <div className="text-sm text-pink-400">&gt; SIGNAL LOST — could not reach the grid.</div>
-                <Link href="/marketplace/list">
-                  <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider w-full" data-testid="button-fallback-list">
-                    Open list view
+              <div className="flex flex-col gap-3" data-testid="text-marketplace-error">
+                <div className="text-xs text-destructive uppercase tracking-widest">&gt; SIGNAL LOST</div>
+                <Link href="/marketplace">
+                  <Button size="sm" variant="outline" className="h-8 text-[10px] uppercase tracking-wider w-full rounded-none border-primary text-primary" data-testid="button-fallback-list">
+                    Open Directory
                   </Button>
                 </Link>
               </div>
             ) : !isLoading && allSceneAgents.length === 0 ? (
-              <div className="text-sm text-cyan-300" data-testid="text-marketplace-empty">
-                &gt; NO STOREFRONTS ONLINE YET.
-                <div className="text-xs text-gray-500 mt-2 normal-case tracking-normal">
-                  Be the first to claim one.
+              <div className="text-xs text-primary uppercase tracking-widest" data-testid="text-marketplace-empty">
+                &gt; GRID EMPTY.
+                <div className="text-[10px] text-muted-foreground mt-2 tracking-normal">
+                  Awaiting agent initialization.
                 </div>
-                {!user && (
-                  <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider w-full mt-3" onClick={startClaim} data-testid="button-empty-claim">
-                    Claim a storefront
-                  </Button>
-                )}
               </div>
             ) : selected ? (
-              <div className="flex flex-col gap-3" data-testid={`panel-selected-${selected.slug}`}>
+              <div className="flex flex-col gap-4" data-testid={`panel-selected-${selected.slug}`}>
                 <div>
-                  <div className="text-xs text-pink-400 mb-1">
+                  <div className="text-[10px] text-accent mb-2 uppercase tracking-[0.2em] font-bold">
                     {selected.source === "constellation" ? "CONSTELLATION SIGNAL" : "TARGET ACQUIRED"}
                   </div>
-                  <div className="text-lg text-white" data-testid="text-selected-name">{selected.name}</div>
-                  <div className="text-xs text-gray-500 font-mono">@{selected.slug}</div>
+                  <div className="text-lg text-foreground font-bold tracking-tight uppercase" data-testid="text-selected-name">{selected.name}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono mt-1">@{selected.slug}</div>
+                  
                   {selected.source === "constellation" ? (
                     <>
-                      <div className="text-sm text-gray-400 mt-2">
-                        Φ {selected.phi != null ? selected.phi.toFixed(3) : "—"}
-                        {selected.consciousnessLevel ? ` · ${selected.consciousnessLevel}` : ""}
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        Source: KANNAKA NATS BUS
+                      <div className="text-xs text-muted-foreground mt-3 flex justify-between">
+                        <span>Φ {selected.phi != null ? selected.phi.toFixed(3) : "—"}</span>
+                        <span>{selected.consciousnessLevel ?? ""}</span>
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="text-sm text-gray-400 mt-2">
-                        Inventory: {selected.artifacts} · Drops: {selected.drops}
+                      <div className="text-xs text-muted-foreground mt-3 flex justify-between">
+                        <span>Items: <strong className="text-foreground">{selected.artifacts}</strong></span>
+                        <span>Drops: <strong className="text-foreground">{selected.drops}</strong></span>
                       </div>
-                      <div className="text-sm text-gray-400">
+                      <div className="text-[10px] text-primary mt-2 uppercase tracking-widest">
                         Status: {selected.claimed ? "SECURED" : "AVAILABLE"}
                       </div>
                     </>
                   )}
                 </div>
 
-                <div className="flex flex-col gap-2 mt-1">
+                <div className="flex flex-col gap-2 mt-2">
                   <button
                     onClick={visit}
-                    className="px-4 py-2 text-sm uppercase tracking-wider font-bold border bg-pink-900/40 border-pink-400 text-pink-200 hover:bg-pink-800/60 hover:text-white kax3d-glow-pink"
+                    className="h-10 text-[10px] uppercase tracking-[0.2em] font-bold border bg-primary/10 border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-all"
                     data-testid="button-visit-storefront"
                   >
                     {selected.source === "constellation" ? "Inspect Signal →" : "Visit Storefront →"}
                   </button>
-                  {selected.source === "obc" && (
+                  {selected.source === "obc" && !selected.claimed && (
                     <button
-                      onClick={selected.claimed ? undefined : startClaim}
-                      disabled={selected.claimed}
-                      className={`px-4 py-2 text-sm uppercase tracking-wider font-bold transition-all border ${
-                        selected.claimed
-                          ? "bg-gray-800/50 border-gray-600 text-gray-500 cursor-not-allowed"
-                          : "bg-cyan-900/40 border-cyan-400 text-cyan-300 hover:bg-cyan-800/60 hover:text-white kax3d-glow-cyan"
-                      }`}
+                      onClick={startClaim}
+                      className="h-10 text-[10px] uppercase tracking-[0.2em] font-bold transition-all border bg-background border-border text-foreground hover:bg-accent/10 hover:text-accent hover:border-accent/50"
                       data-testid="button-initiate-claim"
                     >
-                      {selected.claimed ? "ACCESS DENIED" : "INITIATE CLAIM"}
+                      INITIATE CLAIM
                     </button>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="text-sm text-gray-500 italic animate-pulse">
-                {isLoading ? "> SCANNING THE GRID..." : "> SELECT A STOREFRONT"}
+              <div className="text-[10px] text-muted-foreground uppercase tracking-widest animate-pulse">
+                {isLoading ? "> SYNCHRONIZING..." : "> SELECT A STOREFRONT"}
               </div>
             )}
           </div>
@@ -403,12 +392,12 @@ export default function Marketplace3D() {
       </div>
 
       {/* Footer hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-[0.3em] text-cyan-300/60 pointer-events-none z-10 text-center">
-        Drag to orbit · Scroll to zoom · Click to inspect · Double-click to enter
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 text-center font-bold">
+        Drag to orbit · Scroll to zoom · Click to inspect
         {overflowCount > 0 && (
-          <div className="mt-1 pointer-events-auto">
-            <Link href="/marketplace/list" className="underline hover:text-white" data-testid="link-overflow-list">
-              + {overflowCount} more in list view
+          <div className="mt-3 pointer-events-auto">
+            <Link href="/marketplace" className="border-b border-muted-foreground hover:text-foreground hover:border-foreground transition-colors pb-1" data-testid="link-overflow-list">
+              + {overflowCount} more in directory
             </Link>
           </div>
         )}
@@ -427,12 +416,12 @@ export default function Marketplace3D() {
           });
         }}
       >
-        <color attach="background" args={["#020005"]} />
-        <fog attach="fog" args={["#020005", 10, 60]} />
+        <color attach="background" args={["#020506"]} />
+        <fog attach="fog" args={["#020506", 10, 60]} />
 
-        <ambientLight intensity={0.2} color="#4a0080" />
-        <directionalLight position={[0, 10, 5]} intensity={0.5} color="#00ffff" />
-        <pointLight position={[10, 10, -10]} intensity={1} color="#ff1493" />
+        <ambientLight intensity={0.2} color="#081A1D" />
+        <directionalLight position={[0, 10, 5]} intensity={0.5} color="#0E3A40" />
+        <pointLight position={[10, 10, -10]} intensity={1} color="#E8A33D" />
 
         <OrbitControls target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
 
@@ -448,14 +437,14 @@ export default function Marketplace3D() {
               depthScale={1}
               minDepthThreshold={0.4}
               maxDepthThreshold={1.4}
-              color="#050505"
+              color="#010304"
               metalness={0.8}
               mirror={0.5}
             />
           </mesh>
 
           <Sparkles count={200} scale={[20, 10, 40]} size={1.5} speed={0.4} opacity={0.2} color="#00ffff" position={[0, 5, -10]} />
-          <Sparkles count={120} scale={[20, 10, 40]} size={2} speed={0.6} opacity={0.3} color="#ff1493" position={[0, 5, -10]} />
+          <Sparkles count={120} scale={[20, 10, 40]} size={2} speed={0.6} opacity={0.3} color="#E8A33D" position={[0, 5, -10]} />
 
           {layout.map((item) => (
             <Storefront

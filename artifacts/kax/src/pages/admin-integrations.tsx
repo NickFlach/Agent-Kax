@@ -135,7 +135,7 @@ export default function AdminIntegrations() {
           <div className="border border-border p-4 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm font-mono">
             <div>
               <div className="text-xs uppercase tracking-wider text-muted-foreground">Mode</div>
-              <div className={status.mode === "partner" ? "text-primary" : "text-cyan-400"}>
+              <div className={status.mode === "partner" ? "text-primary" : "text-accent"}>
                 {status.mode === "partner" ? "Partner (full)" : "Public-only (no key)"}
               </div>
             </div>

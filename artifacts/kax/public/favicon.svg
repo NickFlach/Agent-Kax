@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" fill="#0a0a0a"/>
-  <circle cx="32" cy="32" r="24" fill="none" stroke="#7C3AED" stroke-width="1" opacity="0.4"/>
-  <circle cx="32" cy="32" r="18" fill="none" stroke="#7C3AED" stroke-width="0.8" opacity="0.3"/>
-  <circle cx="32" cy="32" r="12" fill="none" stroke="#7C3AED" stroke-width="0.6" opacity="0.5"/>
-  <text x="32" y="38" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="24" fill="#7C3AED">K</text>
-  <line x1="8" y1="8" x2="16" y2="16" stroke="#00FF7F" stroke-width="1" opacity="0.5"/>
-  <line x1="56" y1="8" x2="48" y2="16" stroke="#00FF7F" stroke-width="1" opacity="0.5"/>
-  <line x1="8" y1="56" x2="16" y2="48" stroke="#00FF7F" stroke-width="1" opacity="0.5"/>
-  <line x1="56" y1="56" x2="48" y2="48" stroke="#00FF7F" stroke-width="1" opacity="0.5"/>
+  <rect width="64" height="64" fill="#081418"/>
+  <circle cx="32" cy="32" r="24" fill="none" stroke="#25b8c4" stroke-width="1" opacity="0.4"/>
+  <circle cx="32" cy="32" r="18" fill="none" stroke="#25b8c4" stroke-width="0.8" opacity="0.3"/>
+  <circle cx="32" cy="32" r="12" fill="none" stroke="#25b8c4" stroke-width="0.6" opacity="0.5"/>
+  <text x="32" y="38" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="24" fill="#25b8c4">K</text>
+  <line x1="8" y1="8" x2="16" y2="16" stroke="#E8A33D" stroke-width="1" opacity="0.5"/>
+  <line x1="56" y1="8" x2="48" y2="16" stroke="#E8A33D" stroke-width="1" opacity="0.5"/>
+  <line x1="8" y1="56" x2="16" y2="48" stroke="#E8A33D" stroke-width="1" opacity="0.5"/>
+  <line x1="56" y1="56" x2="48" y2="48" stroke="#E8A33D" stroke-width="1" opacity="0.5"/>
 </svg>

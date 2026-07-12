@@ -18,7 +18,7 @@ export function useStorefrontSeo(opts: StorefrontSeoOptions | null) {
     setMeta("og:title", title);
     setMeta("og:description", description);
     if (image) setMeta("og:image", image);
-    setFavicon(initial ?? (title.charAt(0) || "K"), accentColor ?? "#7C3AED");
+    setFavicon(initial ?? (title.charAt(0) || "K"), accentColor ?? "#E8A33D");
     if (jsonLd) setLdJson(jsonLd);
   }, [opts]);
 }
@@ -47,7 +47,7 @@ function setLdJson(data: Record<string, unknown>) {
 
 function setFavicon(letter: string, accent: string) {
   const safeLetter = (letter || "K").charAt(0).toUpperCase();
-  const safeAccent = /^#[0-9a-fA-F]{3,8}$/.test(accent) ? accent : "#7C3AED";
+  const safeAccent = /^#[0-9a-fA-F]{3,8}$/.test(accent) ? accent : "#E8A33D";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${safeAccent}"/><text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="monospace" font-weight="bold" font-size="42" fill="#000">${escapeXml(safeLetter)}</text></svg>`;
   const href = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   document.querySelectorAll('link[rel~="icon"][data-storefront]').forEach((n) => n.remove());

@@ -147,7 +147,7 @@ export default function StorefrontSettings() {
               <div className="flex gap-2">
                 <input
                   type="color"
-                  value={draft.accentColor ?? "#7C3AED"}
+                  value={draft.accentColor ?? "#E8A33D"}
                   onChange={(e) => setField("accentColor", e.target.value)}
                   className="h-9 w-12 bg-transparent border border-border"
                   data-testid="input-accent-color"
@@ -155,7 +155,7 @@ export default function StorefrontSettings() {
                 <Input
                   value={draft.accentColor ?? ""}
                   onChange={(e) => setField("accentColor", e.target.value || null)}
-                  placeholder="#7C3AED"
+                  placeholder="#E8A33D"
                 />
               </div>
             </Field>

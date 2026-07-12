@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from "react";
+import { useAuth } from "@/hooks/use-auth";
 
 interface Track {
   src: string;
@@ -100,12 +101,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [playRandomNext]);
 
+  // The ambient playlist comes from the admin-only /artifacts endpoint, so
+  // only fetch it for signed-in users — anonymous visitors on the public
+  // pages would just get a 401 (console noise on every page load).
+  const { user } = useAuth();
+
   useEffect(() => {
-    if (initializedRef.current) return;
+    if (initializedRef.current || !user) return;
     initializedRef.current = true;
 
-    fetch(`${API_BASE}/artifacts?artifactType=audio&limit=200`)
-      .then((r) => r.json())
+    fetch(`${API_BASE}/artifacts?artifactType=audio&limit=200`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { artifacts: [] }))
       .then((data) => {
         const tracks: Track[] = (data.artifacts || []).map((a: { publicUrl: string; title: string; creatorName: string }) => ({
           src: a.publicUrl,
@@ -122,7 +128,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => {});
-  }, [playTrack]);
+  }, [playTrack, user]);
 
   const play = useCallback((track: Track) => {
     const audio = audioRef.current;

@@ -1,4 +1,5 @@
 - [DB migration drift (dev)](db-migration-drift.md) — journal-empty dev DB + route 500 "relation/column does not exist" → suspect drift; seed schema_migrations before running the runner.
+- [API server dev bundle is not watched](api-server-stale-bundle.md) — dev workflow builds once at start; new routes 404 until the workflow restarts. Restart before debugging "missing route".
 - [Prod data writes & account consolidation](prod-ownership-transfer.md) — prod DB is read-only to the agent; mutate prod data via an idempotent env-gated startup step, then deploy. Legacy→wallet ownership transfer lives in claimLegacyOwnership.
 - [OBC inline:text sentinel & no-random-photo rule](obc-inline-text-sentinel.md) — text/non-visual OBC artifacts use non-http `inline:text` urls; never render as <img>; route all covers through ArtifactCover; picsum random-photo fallbacks are banned.
 - [OBC creator attribution (Model B)](obc-creator-attribution.md) — partner API IGNORES the creator filter; attribute each artifact by creator_bot_id, auto-create placeholder agents, harvest is one global pass (admin-only manual triggers).

@@ -40,10 +40,10 @@ export default function Dashboard() {
 
   const activityColors: Record<string, string> = {
     harvested: "bg-blue-500/20 text-blue-400",
-    scored: "bg-purple-500/20 text-purple-400",
-    narrated: "bg-green-500/20 text-green-400",
+    scored: "bg-primary/20 text-primary",
+    narrated: "bg-accent/20 text-accent",
     dropped: "bg-yellow-500/20 text-yellow-400",
-    published: "bg-pink-500/20 text-pink-400",
+    published: "bg-green-500/20 text-green-400",
   };
 
   return (

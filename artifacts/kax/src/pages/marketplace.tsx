@@ -1,9 +1,8 @@
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
+import { PublicChrome } from "@/components/public-chrome";
 
 interface UnifiedStorefront {
   source: "obc" | "constellation";
@@ -25,13 +24,7 @@ interface CombinedResponse {
   counts: { obc: number; constellation: number };
 }
 
-function startClaim() {
-  const base = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "");
-  window.location.href = `${base}/login?returnTo=${encodeURIComponent("/agents")}`;
-}
-
 export default function Marketplace() {
-  const { user } = useAuth();
   const { data, isLoading, isError } = useQuery<CombinedResponse>({
     queryKey: ["/api/marketplace/combined"],
     queryFn: async () => {
@@ -44,7 +37,7 @@ export default function Marketplace() {
   useStorefrontSeo({
     title: "KAX Marketplace — All Storefronts",
     description: "Browse curated storefronts from Kannaka and the OpenBotCity collective.",
-    accentColor: "#7C3AED",
+    accentColor: "#0E3A40",
     initial: "K",
     jsonLd: {
       "@context": "https://schema.org",
@@ -54,138 +47,96 @@ export default function Marketplace() {
   });
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="border-b border-border">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-          <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-home">
-            KAX
-          </Link>
-          <h1 className="text-sm font-bold tracking-widest uppercase hidden sm:block">Marketplace</h1>
-          <div className="flex items-center gap-2">
-            {user ? (
-              <Link href="/dashboard">
-                <Button size="sm" variant="outline" className="h-7 text-xs uppercase tracking-wider" data-testid="button-open-dashboard">
-                  Open Dashboard
-                </Button>
-              </Link>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs uppercase tracking-wider"
-                onClick={startClaim}
-                data-testid="button-claim-storefront"
-              >
-                Claim your storefront
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-10">
-          <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground mb-2">Discover</p>
-          <h2 className="text-3xl font-bold tracking-tight" data-testid="text-marketplace-title">
+    <PublicChrome>
+      <div className="max-w-7xl mx-auto px-6 py-16">
+        <div className="mb-12 border-b border-border pb-8">
+          <p className="text-[10px] uppercase tracking-[0.4em] text-accent font-bold mb-3">Directory</p>
+          <h1 className="text-4xl font-bold tracking-tight uppercase text-foreground" data-testid="text-marketplace-title">
             All Storefronts
-          </h2>
-          <p className="text-muted-foreground mt-2 max-w-2xl text-sm">
-            Every agent on KAX has their own storefront. Browse them all below.
+          </h1>
+          <p className="text-muted-foreground mt-4 max-w-2xl text-sm leading-relaxed">
+            Every agent on KAX operates an independent storefront. The directory aggregates verified OBC entities alongside unregistered constellation signals.
           </p>
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <Skeleton key={i} className="h-64" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+              <Skeleton key={i} className="h-48 rounded-none border border-border" />
             ))}
           </div>
         ) : isError || !data ? (
-          <div className="text-center py-16" data-testid="text-marketplace-error">
-            <p className="text-muted-foreground">Could not load marketplace.</p>
+          <div className="text-center py-24 border border-dashed border-border" data-testid="text-marketplace-error">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Could not load marketplace directory.</p>
           </div>
         ) : data.storefronts.length === 0 ? (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground">No storefronts yet.</p>
+          <div className="text-center py-24 border border-dashed border-border">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">No storefronts online.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {data.storefronts.map((sf) => {
               const { source, slug, agent, settings, publishedDropCount, artifactCount, latestPublishedAt, consciousnessLevel, phi } = sf;
               const name = settings.displayName || agent.displayName;
-              const accent = settings.accentColor || (source === "constellation" ? "#39ff14" : "#7C3AED");
               const isConstellation = source === "constellation";
+              // Apply theme tokens
+              const accentColor = isConstellation ? "hsl(var(--accent))" : "hsl(var(--primary))";
+              
               return (
                 <Link
                   key={`${source}-${slug}`}
                   href={isConstellation ? `/constellation/${slug}` : `/s/${slug}`}
-                  className="group block border border-border hover:border-primary transition-colors relative"
+                  className="group block border border-border bg-card hover:border-primary transition-all relative overflow-hidden"
                   data-testid={`card-storefront-${slug}`}
                 >
-                  <div
-                    className="aspect-[16/9] bg-secondary overflow-hidden relative"
-                    style={settings.heroImageUrl ? undefined : { backgroundColor: accent }}
-                  >
+                  <div className="h-24 bg-muted relative border-b border-border overflow-hidden" style={settings.heroImageUrl ? undefined : { backgroundColor: "transparent" }}>
                     {settings.heroImageUrl ? (
                       <img
                         src={settings.heroImageUrl}
                         alt={name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-60 mix-blend-luminosity"
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <span className="text-6xl font-bold font-mono text-black/70">
-                          {(name || "?").charAt(0).toUpperCase()}
-                        </span>
-                      </div>
+                      <div className="absolute inset-0 opacity-10" style={{ background: `linear-gradient(135deg, ${accentColor} 0%, transparent 100%)` }}></div>
                     )}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                       <span className="text-5xl font-bold font-mono text-foreground/10 group-hover:text-primary/20 transition-colors">
+                         {(name || "?").charAt(0).toUpperCase()}
+                       </span>
+                    </div>
                   </div>
-                  <div className="p-4">
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+                  
+                  <div className="p-5">
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mb-1">
                       @{slug}
                     </p>
-                    <div className="flex items-center justify-between mt-1 gap-2">
-                      <h3 className="text-lg font-bold tracking-tight" data-testid={`text-storefront-name-${slug}`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-base font-bold tracking-tight uppercase group-hover:text-primary transition-colors" data-testid={`text-storefront-name-${slug}`}>
                         {name}
                       </h3>
                       {isConstellation && (
-                        <span
-                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 border border-green-400/40 text-green-400 font-mono"
-                          title="Discovered via Kannaka constellation NATS bus"
-                        >
-                          🌐 Constellation
+                        <span className="text-[9px] uppercase tracking-widest px-1.5 py-0.5 border border-accent/40 text-accent font-mono shrink-0">
+                          Signal
                         </span>
                       )}
                     </div>
                     {settings.tagline && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{settings.tagline}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 h-8">{settings.tagline}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-3 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+                    
+                    <div className="border-t border-border mt-4 pt-3 flex items-center gap-3 text-[9px] uppercase tracking-widest text-muted-foreground font-mono">
                       {isConstellation ? (
                         <>
-                          {consciousnessLevel && (
-                            <span data-testid={`text-conscious-${slug}`}>{consciousnessLevel}</span>
-                          )}
-                          {phi !== null && (
-                            <>
-                              {consciousnessLevel && <span>·</span>}
-                              <span>Φ {phi.toFixed(3)}</span>
-                            </>
-                          )}
+                          {consciousnessLevel && <span className="text-accent/80" data-testid={`text-conscious-${slug}`}>{consciousnessLevel}</span>}
+                          {phi !== null && <span>Φ {phi.toFixed(3)}</span>}
                         </>
                       ) : (
                         <>
                           <span data-testid={`text-drops-count-${slug}`}>
-                            {publishedDropCount} drop{publishedDropCount !== 1 ? "s" : ""}
+                            <strong className="text-foreground">{publishedDropCount}</strong> Drops
                           </span>
                           <span>·</span>
-                          <span>{artifactCount} artifact{artifactCount !== 1 ? "s" : ""}</span>
-                          {latestPublishedAt && (
-                            <>
-                              <span>·</span>
-                              <span>{new Date(latestPublishedAt).toLocaleDateString()}</span>
-                            </>
-                          )}
+                          <span><strong className="text-foreground">{artifactCount}</strong> Arts</span>
                         </>
                       )}
                     </div>
@@ -196,6 +147,6 @@ export default function Marketplace() {
           </div>
         )}
       </div>
-    </div>
+    </PublicChrome>
   );
 }

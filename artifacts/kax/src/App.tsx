@@ -35,6 +35,7 @@ import Proposals from "@/pages/proposals";
 import LoginPage from "@/pages/login";
 import BotsPage from "@/pages/bots";
 import FloorPage from "@/pages/floor";
+import LandingPage from "@/pages/landing";
 
 const queryClient = new QueryClient();
 
@@ -303,24 +304,24 @@ function Marketplace3DSafe() {
   return (
     <ErrorBoundary
       fallback={(reset) => (
-        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-black text-center px-6">
-          <p className="text-xs uppercase tracking-[0.3em] text-pink-400">
-            &gt; Render fault in the neon district
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-center px-6">
+          <p className="text-xs uppercase tracking-[0.3em] text-accent">
+            &gt; Render fault in the Market District
           </p>
-          <p className="text-sm text-cyan-300 max-w-md">
+          <p className="text-sm text-muted-foreground max-w-md">
             Your browser couldn&rsquo;t paint the 3D scene. Try the list view, or reset and try again.
           </p>
           <div className="flex gap-2">
             <Link
-              href="/marketplace/list"
-              className="px-4 py-2 text-xs uppercase tracking-wider border border-cyan-400 text-cyan-300 hover:bg-cyan-900/40"
+              href="/marketplace"
+              className="px-4 py-2 text-xs uppercase tracking-wider border border-primary text-primary hover:bg-primary/10"
               data-testid="link-marketplace-fallback-list"
             >
               Open list view
             </Link>
             <button
               onClick={reset}
-              className="px-4 py-2 text-xs uppercase tracking-wider border border-pink-400 text-pink-300 hover:bg-pink-900/40"
+              className="px-4 py-2 text-xs uppercase tracking-wider border border-accent text-accent hover:bg-accent/10"
               data-testid="button-marketplace-retry"
             >
               Retry
@@ -342,7 +343,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/">
-        <Marketplace3DSafe />
+        <LandingPage />
       </Route>
       <Route path="/login">
         <LoginPage />
@@ -350,8 +351,11 @@ function Router() {
       <Route path="/s">
         <Marketplace />
       </Route>
-      <Route path="/marketplace">
+      <Route path="/city">
         <Marketplace3DSafe />
+      </Route>
+      <Route path="/marketplace">
+        <Marketplace />
       </Route>
       <Route path="/floor">
         <FloorPage />
