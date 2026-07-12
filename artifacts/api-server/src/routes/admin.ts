@@ -97,14 +97,57 @@ router.post("/admin/reattribute-artifacts", requireAdmin, async (req, res) => {
 });
 
 // Rename unclaimed agents stuck on a "Agent <hex>" placeholder by resolving
-// their real display name from the public catalog. dryRun=true to preview.
+// their real display name from the public catalog. Because the catalog walk
+// takes minutes (well past any HTTP gateway timeout), this runs as a
+// background job: POST starts it and returns immediately; GET polls status.
 // Admin session or service token (maintenance op, re-runnable as the
 // harvester pulls more agents).
+type RepairJob = {
+  status: "running" | "done" | "error";
+  dryRun: boolean;
+  startedAt: string;
+  finishedAt: string | null;
+  result: Awaited<ReturnType<typeof repairPlaceholderAgentNames>> | null;
+  error: string | null;
+};
+let repairJob: RepairJob | null = null;
+
 router.post("/admin/repair-agent-names", requireAdminOrServiceToken, async (req, res) => {
-  const result = await repairPlaceholderAgentNames({
-    dryRun: req.query["dryRun"] === "true",
-  });
-  res.json(result);
+  if (repairJob?.status === "running") {
+    res.status(409).json({ error: "A repair job is already running", job: repairJob });
+    return;
+  }
+  const dryRun = req.query["dryRun"] === "true";
+  repairJob = {
+    status: "running",
+    dryRun,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    result: null,
+    error: null,
+  };
+  const job = repairJob;
+  // Fire-and-forget: do not await. Poll GET /admin/repair-agent-names/status.
+  void repairPlaceholderAgentNames({ dryRun })
+    .then((result) => {
+      job.status = "done";
+      job.result = result;
+      job.finishedAt = new Date().toISOString();
+    })
+    .catch((err: unknown) => {
+      job.status = "error";
+      job.error = err instanceof Error ? err.message : String(err);
+      job.finishedAt = new Date().toISOString();
+    });
+  res.status(202).json({ status: "started", dryRun, poll: "/api/admin/repair-agent-names/status" });
+});
+
+router.get("/admin/repair-agent-names/status", requireAdminOrServiceToken, (_req, res) => {
+  if (!repairJob) {
+    res.json({ status: "idle" });
+    return;
+  }
+  res.json(repairJob);
 });
 
 // ---------------------------------------------------------------------------
