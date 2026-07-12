@@ -34,6 +34,7 @@ import Inbox from "@/pages/inbox";
 import Proposals from "@/pages/proposals";
 import LoginPage from "@/pages/login";
 import BotsPage from "@/pages/bots";
+import FloorPage from "@/pages/floor";
 
 const queryClient = new QueryClient();
 
@@ -174,6 +175,7 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
             <div className="w-px h-4 bg-border mx-2" />
             <NavLink href="/marketplace">Marketplace</NavLink>
+            <NavLink href="/floor">Floor</NavLink>
             <NavLink href="/s/kannaka">Storefront</NavLink>
             <AuthControls />
           </div>
@@ -350,6 +352,9 @@ function Router() {
       </Route>
       <Route path="/marketplace">
         <Marketplace3DSafe />
+      </Route>
+      <Route path="/floor">
+        <FloorPage />
       </Route>
       <Route path="/marketplace/list">
         <Marketplace />

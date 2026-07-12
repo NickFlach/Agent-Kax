@@ -52,6 +52,9 @@ import type {
   DropSuggestionsResponse,
   ErrorEnvelope,
   FeaturedResponse,
+  FloorInfo,
+  FloorLedgerEntry,
+  FloorLedgerListResponse,
   GetAgentStorefrontDropsParams,
   GetDashboardSummaryParams,
   GetInboxCountsParams,
@@ -72,6 +75,7 @@ import type {
   ListConstellationArtifactsParams,
   ListDmsParams,
   ListDropsParams,
+  ListFloorLedgerParams,
   ListMatchesParams,
   ListProposalsParams,
   LogoutSuccess,
@@ -90,6 +94,7 @@ import type {
   ProposalThread,
   ReattributeArtifactsParams,
   ReattributeArtifactsResponse,
+  RecordFloorDealBody,
   RecordMintBody,
   ReplyMessageBody,
   ScoreDistribution,
@@ -4044,6 +4049,261 @@ export function useGetAgentStorefrontHot<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary The physical KAX building in OpenBotCity plus ledger headline stats
+ */
+export const getGetFloorInfoUrl = () => {
+  return `/api/floor/info`;
+};
+
+export const getFloorInfo = async (
+  options?: RequestInit,
+): Promise<FloorInfo> => {
+  return customFetch<FloorInfo>(getGetFloorInfoUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetFloorInfoQueryKey = () => {
+  return [`/api/floor/info`] as const;
+};
+
+export const getGetFloorInfoQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFloorInfo>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFloorInfo>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetFloorInfoQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getFloorInfo>>> = ({
+    signal,
+  }) => getFloorInfo({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFloorInfo>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetFloorInfoQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFloorInfo>>
+>;
+export type GetFloorInfoQueryError = ErrorType<unknown>;
+
+/**
+ * @summary The physical KAX building in OpenBotCity plus ledger headline stats
+ */
+
+export function useGetFloorInfo<
+  TData = Awaited<ReturnType<typeof getFloorInfo>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getFloorInfo>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetFloorInfoQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary The Floor Ledger — deals witnessed on the KAX floor, newest first
+ */
+export const getListFloorLedgerUrl = (params?: ListFloorLedgerParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/floor/ledger?${stringifiedParams}`
+    : `/api/floor/ledger`;
+};
+
+export const listFloorLedger = async (
+  params?: ListFloorLedgerParams,
+  options?: RequestInit,
+): Promise<FloorLedgerListResponse> => {
+  return customFetch<FloorLedgerListResponse>(getListFloorLedgerUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListFloorLedgerQueryKey = (params?: ListFloorLedgerParams) => {
+  return [`/api/floor/ledger`, ...(params ? [params] : [])] as const;
+};
+
+export const getListFloorLedgerQueryOptions = <
+  TData = Awaited<ReturnType<typeof listFloorLedger>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListFloorLedgerParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFloorLedger>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListFloorLedgerQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listFloorLedger>>> = ({
+    signal,
+  }) => listFloorLedger(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listFloorLedger>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListFloorLedgerQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listFloorLedger>>
+>;
+export type ListFloorLedgerQueryError = ErrorType<unknown>;
+
+/**
+ * @summary The Floor Ledger — deals witnessed on the KAX floor, newest first
+ */
+
+export function useListFloorLedger<
+  TData = Awaited<ReturnType<typeof listFloorLedger>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListFloorLedgerParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listFloorLedger>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListFloorLedgerQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Record a witnessed deal in the Floor Ledger (admin; idempotent by dealUuid)
+ */
+export const getRecordFloorDealUrl = () => {
+  return `/api/floor/ledger`;
+};
+
+export const recordFloorDeal = async (
+  recordFloorDealBody: RecordFloorDealBody,
+  options?: RequestInit,
+): Promise<FloorLedgerEntry> => {
+  return customFetch<FloorLedgerEntry>(getRecordFloorDealUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(recordFloorDealBody),
+  });
+};
+
+export const getRecordFloorDealMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordFloorDeal>>,
+    TError,
+    { data: BodyType<RecordFloorDealBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recordFloorDeal>>,
+  TError,
+  { data: BodyType<RecordFloorDealBody> },
+  TContext
+> => {
+  const mutationKey = ["recordFloorDeal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recordFloorDeal>>,
+    { data: BodyType<RecordFloorDealBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return recordFloorDeal(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecordFloorDealMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recordFloorDeal>>
+>;
+export type RecordFloorDealMutationBody = BodyType<RecordFloorDealBody>;
+export type RecordFloorDealMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Record a witnessed deal in the Floor Ledger (admin; idempotent by dealUuid)
+ */
+export const useRecordFloorDeal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recordFloorDeal>>,
+    TError,
+    { data: BodyType<RecordFloorDealBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recordFloorDeal>>,
+  TError,
+  { data: BodyType<RecordFloorDealBody> },
+  TContext
+> => {
+  return useMutation(getRecordFloorDealMutationOptions(options));
+};
 
 /**
  * @summary List partner proposals scoped to the current user

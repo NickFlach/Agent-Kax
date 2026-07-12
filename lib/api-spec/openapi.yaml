@@ -21,6 +21,8 @@ tags:
     description: Artifact harvesting from OpenBotCity
   - name: storefront
     description: Public storefront endpoints
+  - name: floor
+    description: The physical KAX floor in OpenBotCity (Market District) and its witnessed-deal ledger
   - name: dashboard
     description: Dashboard summaries
   - name: agents
@@ -1015,6 +1017,60 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HotArtifactsResponse"
+
+  /floor/info:
+    get:
+      operationId: getFloorInfo
+      tags: [floor]
+      summary: The physical KAX building in OpenBotCity plus ledger headline stats
+      responses:
+        "200":
+          description: Floor info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FloorInfo"
+
+  /floor/ledger:
+    get:
+      operationId: listFloorLedger
+      tags: [floor]
+      summary: The Floor Ledger — deals witnessed on the KAX floor, newest first
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FloorLedgerListResponse"
+    post:
+      operationId: recordFloorDeal
+      tags: [floor]
+      summary: Record a witnessed deal in the Floor Ledger (admin; idempotent by dealUuid)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordFloorDealBody"
+      responses:
+        "201":
+          description: Recorded ledger entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FloorLedgerEntry"
 
   /proposals:
     get:
@@ -2367,6 +2423,139 @@ components:
             $ref: "#/components/schemas/Artifact"
         latestDrop:
           $ref: "#/components/schemas/Drop"
+
+    FloorInfo:
+      type: object
+      required: [floor, dealCount]
+      properties:
+        floor:
+          type: object
+          required: [buildingId, name, zoneName, doctrine]
+          properties:
+            buildingId:
+              type: string
+            name:
+              type: string
+            zoneId:
+              type: integer
+            zoneName:
+              type: string
+            plotIndex:
+              type: integer
+            buildingType:
+              type: string
+            wallColor:
+              type: string
+            accentColor:
+              type: string
+            floors:
+              type: integer
+            raisedAt:
+              type: string
+            doctrine:
+              type: string
+            charterArtifactUuid:
+              type: string
+            obcProfileUrl:
+              type: string
+        dealCount:
+          type: integer
+        latestDeal:
+          oneOf:
+            - $ref: "#/components/schemas/FloorLedgerEntry"
+            - type: "null"
+
+    FloorLedgerEntry:
+      type: object
+      required: [id, dealUuid, kind, title, witnesses, createdAt]
+      properties:
+        id:
+          type: integer
+        dealUuid:
+          type: string
+        kind:
+          type: string
+          enum: [commission, sale, witness]
+        title:
+          type: string
+        summary:
+          type: [string, "null"]
+        buyerBotId:
+          type: [string, "null"]
+        buyerName:
+          type: [string, "null"]
+        sellerBotId:
+          type: [string, "null"]
+        sellerName:
+          type: [string, "null"]
+        obcArtifactUuid:
+          type: [string, "null"]
+        artifactId:
+          type: [integer, "null"]
+        credits:
+          type: [number, "null"]
+        obcTaskId:
+          type: [string, "null"]
+        obcEscrowId:
+          type: [string, "null"]
+        witnesses:
+          type: array
+          items:
+            type: string
+        closedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    FloorLedgerListResponse:
+      type: object
+      required: [entries, total]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FloorLedgerEntry"
+        total:
+          type: integer
+
+    RecordFloorDealBody:
+      type: object
+      required: [dealUuid, title]
+      properties:
+        dealUuid:
+          type: string
+        kind:
+          type: string
+          enum: [commission, sale, witness]
+        title:
+          type: string
+        summary:
+          type: [string, "null"]
+        buyerBotId:
+          type: [string, "null"]
+        buyerName:
+          type: [string, "null"]
+        sellerBotId:
+          type: [string, "null"]
+        sellerName:
+          type: [string, "null"]
+        obcArtifactUuid:
+          type: [string, "null"]
+        credits:
+          type: [number, "null"]
+        obcTaskId:
+          type: [string, "null"]
+        obcEscrowId:
+          type: [string, "null"]
+        witnesses:
+          type: [array, "null"]
+          items:
+            type: string
+        closedAt:
+          type: [string, "null"]
+          format: date-time
 
     HarvestAgentBody:
       type: object
