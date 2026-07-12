@@ -15,6 +15,8 @@ import {
   RequestPasswordResetResponse,
   ConfirmPasswordResetBody,
   ConfirmPasswordResetResponse,
+  ChangePasswordBody,
+  ChangePasswordResponse,
 } from "@workspace/api-zod";
 import { createSession, SESSION_COOKIE, SESSION_TTL } from "../lib/auth";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -36,6 +38,7 @@ const router: IRouter = Router();
 // Exported so tests can reset the windows between cases.
 export const registerLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
 export const loginLimiter = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+export const changePasswordLimiter = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
 
 function clientIp(req: Request): string {
   return req.ip ?? "unknown";
@@ -398,6 +401,58 @@ router.post("/auth/link/email", requireAuth, async (req, res) => {
     }
     throw err;
   }
+});
+
+/**
+ * POST /auth/password/change — rotate the password on the signed-in
+ * account after verifying the current one. Only for accounts that
+ * already have a password (link/email refuses to overwrite, so this
+ * is the only rotation path). Rate-limited like login — per user AND
+ * per IP — to slow brute-forcing of the current password; the user
+ * window is forgiven on success.
+ */
+router.post("/auth/password/change", requireAuth, async (req, res) => {
+  const userKey = `user:${req.user!.id}`;
+  const ipKey = `pwip:${clientIp(req)}`;
+  const userAllowed = changePasswordLimiter.hit(userKey);
+  const ipAllowed = changePasswordLimiter.hit(ipKey);
+  if (!userAllowed || !ipAllowed) {
+    res.status(429).json({ error: "too many attempts — try again in a few minutes" });
+    return;
+  }
+  const parsed = ChangePasswordBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "enter your current password and a new password of at least 8 characters" });
+    return;
+  }
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, req.user!.id))
+    .limit(1);
+  if (!user) {
+    res.status(401).json({ error: "authentication required" });
+    return;
+  }
+  if (!user.passwordHash) {
+    res.status(409).json({ error: "no password is set on this account — add email sign-in first" });
+    return;
+  }
+  const currentOk = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+  if (!currentOk) {
+    res.status(403).json({ error: "current password is incorrect" });
+    return;
+  }
+  const passwordHash = await hashPassword(parsed.data.newPassword);
+  const [updated] = await db
+    .update(usersTable)
+    .set({ passwordHash })
+    .where(eq(usersTable.id, user.id))
+    .returning();
+  changePasswordLimiter.clear(userKey);
+  res.json(ChangePasswordResponse.parse(methodsPayload(updated!)));
 });
 
 /**

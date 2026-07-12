@@ -6,7 +6,11 @@ import { ethers } from "ethers";
 import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db/schema";
-import authEmailRouter, { registerLimiter, loginLimiter } from "./auth-email";
+import authEmailRouter, {
+  registerLimiter,
+  loginLimiter,
+  changePasswordLimiter,
+} from "./auth-email";
 import authWalletRouter from "./auth-wallet";
 import { authMiddleware } from "../middlewares/authMiddleware";
 import { SESSION_COOKIE } from "../lib/auth";
@@ -58,6 +62,7 @@ describe("auth-email", () => {
     app = buildApp();
     registerLimiter.reset();
     loginLimiter.reset();
+    changePasswordLimiter.reset();
   });
 
   afterEach(async () => {
@@ -69,6 +74,7 @@ describe("auth-email", () => {
     });
     registerLimiter.reset();
     loginLimiter.reset();
+    changePasswordLimiter.reset();
   });
 
   async function registerUser(email = makeEmail(), password = PASSWORD) {
@@ -278,6 +284,129 @@ describe("auth-email", () => {
         .set("Cookie", cookie)
         .send({ email, password: "another-password" });
       expect(res.status).toBe(409);
+    });
+  });
+
+  describe("POST /auth/password/change", () => {
+    const NEW_PASSWORD = "brand-new-password-1";
+
+    async function registeredSession() {
+      const { res, email } = await registerUser();
+      expect(res.status).toBe(200);
+      const cookie = sessionCookie(res);
+      trackedSids.push(decodeURIComponent(cookie.split("=")[1] ?? ""));
+      return { cookie, email };
+    }
+
+    it("requires authentication", async () => {
+      const res = await request(app)
+        .post("/auth/password/change")
+        .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(res.status).toBe(401);
+    });
+
+    it("changes the password after verifying the current one", async () => {
+      const { cookie, email } = await registeredSession();
+      const res = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ email, hasPassword: true });
+
+      // old password no longer works, new one does
+      const oldLogin = await request(app)
+        .post("/auth/email/login")
+        .send({ email, password: PASSWORD });
+      expect(oldLogin.status).toBe(401);
+      const newLogin = await request(app)
+        .post("/auth/email/login")
+        .send({ email, password: NEW_PASSWORD });
+      expect(newLogin.status).toBe(200);
+      const newCookie = sessionCookie(newLogin);
+      trackedSids.push(decodeURIComponent(newCookie.split("=")[1] ?? ""));
+    });
+
+    it("403s when the current password is wrong and the old password keeps working", async () => {
+      const { cookie, email } = await registeredSession();
+      const res = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: "definitely-wrong", newPassword: NEW_PASSWORD });
+      expect(res.status).toBe(403);
+
+      const login = await request(app)
+        .post("/auth/email/login")
+        .send({ email, password: PASSWORD });
+      expect(login.status).toBe(200);
+      const loginCookie = sessionCookie(login);
+      trackedSids.push(decodeURIComponent(loginCookie.split("=")[1] ?? ""));
+    });
+
+    it("400s when the new password is too short", async () => {
+      const { cookie } = await registeredSession();
+      const res = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: PASSWORD, newPassword: "short" });
+      expect(res.status).toBe(400);
+    });
+
+    it("409s for a wallet-only account with no password set", async () => {
+      const wallet = await createWalletUser();
+      trackedUserIds.push(wallet.id);
+      trackedSids.push(wallet.sid);
+      const res = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", `${SESSION_COOKIE}=${wallet.sid}`)
+        .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(res.status).toBe(409);
+    });
+
+    it("rate-limits per user and forgives the window on success", async () => {
+      const { cookie } = await registeredSession();
+      const key = `pwip:${((await request(app).get("/__test/ip")).body as { ip: string }).ip}`;
+      // 9 failed attempts (stay under the 10-hit user window)
+      for (let i = 0; i < 9; i++) {
+        changePasswordLimiter.clear(key);
+        const res = await request(app)
+          .post("/auth/password/change")
+          .set("Cookie", cookie)
+          .send({ currentPassword: "wrong", newPassword: NEW_PASSWORD });
+        expect(res.status).toBe(403);
+      }
+      changePasswordLimiter.clear(key);
+      // 10th hit succeeds → user window forgiven
+      const okRes = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(okRes.status).toBe(200);
+
+      changePasswordLimiter.clear(key);
+      const again = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: "wrong", newPassword: NEW_PASSWORD });
+      expect(again.status).toBe(403); // not 429 — user window was forgiven
+    });
+
+    it("429s once the user window is exhausted", async () => {
+      const { cookie } = await registeredSession();
+      const key = `pwip:${((await request(app).get("/__test/ip")).body as { ip: string }).ip}`;
+      for (let i = 0; i < 10; i++) {
+        changePasswordLimiter.clear(key);
+        await request(app)
+          .post("/auth/password/change")
+          .set("Cookie", cookie)
+          .send({ currentPassword: "wrong", newPassword: NEW_PASSWORD });
+      }
+      changePasswordLimiter.clear(key);
+      const res = await request(app)
+        .post("/auth/password/change")
+        .set("Cookie", cookie)
+        .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
+      expect(res.status).toBe(429);
     });
   });
 

@@ -40,6 +40,7 @@ export * from "./authorizationSessionHeaderParameter";
 export * from "./authUser";
 export * from "./authUserEnvelope";
 export * from "./authUserRole";
+export * from "./changePasswordRequest";
 export * from "./connectorAgentLookupResponse";
 export * from "./connectorAgentProfile";
 export * from "./connectorAgentProfileRaw";

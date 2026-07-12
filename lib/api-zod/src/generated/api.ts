@@ -343,6 +343,37 @@ export const LinkEmailResponse = zod.object({
 });
 
 /**
+ * Verifies the current password, then stores the new one. Only
+available on accounts that already have a password set (use
+/auth/link/email to add one first). Rate-limited like login to
+slow brute-forcing of the current password.
+
+ * @summary Change the password on the signed-in account
+ */
+export const changePasswordBodyCurrentPasswordMax = 128;
+
+export const changePasswordBodyNewPasswordMin = 8;
+export const changePasswordBodyNewPasswordMax = 128;
+
+export const ChangePasswordBody = zod.object({
+  currentPassword: zod
+    .string()
+    .min(1)
+    .max(changePasswordBodyCurrentPasswordMax),
+  newPassword: zod
+    .string()
+    .min(changePasswordBodyNewPasswordMin)
+    .max(changePasswordBodyNewPasswordMax)
+    .describe("8-128 characters. Capped to bound scrypt CPU cost."),
+});
+
+export const ChangePasswordResponse = zod.object({
+  email: zod.string().nullable(),
+  walletAddress: zod.string().nullable(),
+  hasPassword: zod.boolean(),
+});
+
+/**
  * @summary Mint a verification phrase the user must publish from an OBC bot
  */
 export const CreateAgentChallengeBody = zod.object({

@@ -14,7 +14,7 @@ import {
  * link the missing one. One users row, both methods.
  */
 export function SignInMethodsCard() {
-  const { user, linkWallet, linkEmail } = useAuth();
+  const { user, linkWallet, linkEmail, changePassword } = useAuth();
 
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -24,6 +24,13 @@ export function SignInMethodsCard() {
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+
+  const [showChangeForm, setShowChangeForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [changeBusy, setChangeBusy] = useState(false);
+  const [changeError, setChangeError] = useState<string | null>(null);
+  const [changeDone, setChangeDone] = useState(false);
 
   if (!user) return null;
 
@@ -44,6 +51,32 @@ export function SignInMethodsCard() {
       setWalletError(friendlyWalletError(e));
     } finally {
       setWalletBusy(false);
+    }
+  }
+
+  async function handleChangePassword(e: FormEvent) {
+    e.preventDefault();
+    setChangeError(null);
+    setChangeDone(false);
+    if (!currentPassword) {
+      setChangeError("Enter your current password.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setChangeError("New password must be at least 8 characters.");
+      return;
+    }
+    setChangeBusy(true);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setShowChangeForm(false);
+      setCurrentPassword("");
+      setNewPassword("");
+      setChangeDone(true);
+    } catch (err) {
+      setChangeError(err instanceof Error ? err.message : "Could not change the password.");
+    } finally {
+      setChangeBusy(false);
     }
   }
 
@@ -124,7 +157,22 @@ export function SignInMethodsCard() {
             </p>
           </div>
           {emailLinked ? (
-            <span className="text-[10px] uppercase tracking-widest text-primary">Linked</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] uppercase tracking-widest text-primary">Linked</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-[10px] uppercase tracking-widest"
+                onClick={() => {
+                  setChangeError(null);
+                  setChangeDone(false);
+                  setShowChangeForm((v) => !v);
+                }}
+                data-testid="button-show-change-password"
+              >
+                {showChangeForm ? "Cancel" : "Change password"}
+              </Button>
+            </div>
           ) : (
             <Button
               size="sm"
@@ -137,6 +185,76 @@ export function SignInMethodsCard() {
             </Button>
           )}
         </div>
+
+        {emailLinked && changeDone && !showChangeForm && (
+          <p
+            className="text-xs text-primary border border-primary/40 px-3 py-2"
+            data-testid="text-change-password-success"
+          >
+            Password changed.
+          </p>
+        )}
+
+        {emailLinked && showChangeForm && (
+          <form
+            onSubmit={handleChangePassword}
+            className="space-y-3 border border-border px-4 py-4"
+          >
+            <div>
+              <label
+                htmlFor="current-password"
+                className="block text-[10px] uppercase tracking-widest text-muted-foreground mb-1"
+              >
+                Current password
+              </label>
+              <Input
+                id="current-password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Your current password"
+                className="h-10 text-sm"
+                data-testid="input-current-password"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="new-password"
+                className="block text-[10px] uppercase tracking-widest text-muted-foreground mb-1"
+              >
+                New password
+              </label>
+              <Input
+                id="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="8+ characters"
+                className="h-10 text-sm"
+                data-testid="input-new-password"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="sm"
+              className="text-[10px] uppercase tracking-widest"
+              disabled={changeBusy}
+              data-testid="button-change-password"
+            >
+              {changeBusy ? "Saving…" : "Change password"}
+            </Button>
+            {changeError && (
+              <p
+                className="text-xs text-destructive border border-destructive/40 px-3 py-2"
+                data-testid="text-change-password-error"
+              >
+                {changeError}
+              </p>
+            )}
+          </form>
+        )}
 
         {!emailLinked && showEmailForm && (
           <form onSubmit={handleLinkEmail} className="space-y-3 border border-border px-4 py-4">

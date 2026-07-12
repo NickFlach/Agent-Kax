@@ -25,6 +25,8 @@ interface AuthState {
   linkWallet: () => Promise<void>;
   /** Set email + password on the signed-in account. */
   linkEmail: (email: string, password: string) => Promise<void>;
+  /** Rotate the password on the signed-in account (verifies the current one). */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -193,6 +195,17 @@ export function useAuth(): AuthState {
     [refetch],
   );
 
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<void> => {
+      const res = await postJson("/api/auth/password/change", { currentPassword, newPassword });
+      if (!res.ok) {
+        throw new Error(await readError(res, "Could not change the password. Please try again."));
+      }
+      await refetch();
+    },
+    [refetch],
+  );
+
   return {
     user,
     isLoading,
@@ -204,6 +217,7 @@ export function useAuth(): AuthState {
     registerWithEmail,
     linkWallet,
     linkEmail,
+    changePassword,
     refresh,
   };
 }

@@ -109,6 +109,20 @@ export interface PasswordResetAcceptedResponse {
   ok: boolean;
 }
 
+export interface ChangePasswordRequest {
+  /**
+   * @minLength 1
+   * @maxLength 128
+   */
+  currentPassword: string;
+  /**
+   * 8-128 characters. Capped to bound scrypt CPU cost.
+   * @minLength 8
+   * @maxLength 128
+   */
+  newPassword: string;
+}
+
 export interface AuthMethodsResponse {
   /** @nullable */
   email: string | null;

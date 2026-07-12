@@ -264,6 +264,39 @@ paths:
           description: Auth required
         '409':
           description: Email already in use, password already set, or account has a different email
+  /auth/password/change:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Change the password on the signed-in account
+      description: |
+        Verifies the current password, then stores the new one. Only
+        available on accounts that already have a password set (use
+        /auth/link/email to add one first). Rate-limited like login to
+        slow brute-forcing of the current password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMethodsResponse'
+        '400':
+          description: Invalid body (new password must be 8-128 characters)
+        '401':
+          description: Auth required
+        '403':
+          description: Current password is incorrect
+        '409':
+          description: No password set on this account — link email + password first
+        '429':
+          description: Too many attempts — try again later
   /auth/agent/challenge:
     post:
       tags: [Auth]
@@ -1910,6 +1943,19 @@ components:
       properties:
         ok:
           type: boolean
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 128
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 8-128 characters. Capped to bound scrypt CPU cost.
     AuthMethodsResponse:
       type: object
       required: [email, walletAddress, hasPassword]
