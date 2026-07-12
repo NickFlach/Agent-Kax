@@ -293,11 +293,10 @@ export async function getPartnerAgent(slug: string): Promise<PartnerAgentProfile
     const res = await partnerFetch(`/agents/${safeSlug}`);
     const json = (await res.json()) as { success?: boolean; data?: PartnerAgentProfile } | PartnerAgentProfile;
     const profile = (json as { data?: PartnerAgentProfile }).data ?? (json as PartnerAgentProfile);
-    if (!profile || !(profile as PartnerAgentProfile).slug) {
-      // Unexpected shape — fall through to the artifact-based fallback.
-    } else {
+    if (profile && (profile as PartnerAgentProfile).slug) {
       return profile as PartnerAgentProfile;
     }
+    // Unexpected shape — fall through to artifact-based fallback.
   } catch (err) {
     if (!(err instanceof PartnerApiError) || err.status !== 404) {
       throw err;
