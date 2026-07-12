@@ -1,11 +1,19 @@
+import { useState } from "react";
 import { useListArtifacts, getListArtifactsQueryKey } from "@workspace/api-client-react";
 import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArtifactCover } from "@/components/artifact-cover";
 import { EditionBadge } from "@/components/edition-badge";
+import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 
 export default function Vault() {
-  const params = { editionType: "1_of_1" as const, limit: 100, offset: 0 };
+  const [showAll, setShowAll] = useState(false);
+  const params = {
+    editionType: "1_of_1" as const,
+    limit: 100,
+    offset: 0,
+    ...(showAll ? { all: true } : {}),
+  };
   const { data, isLoading } = useListArtifacts(params, {
     query: { queryKey: getListArtifactsQueryKey(params) },
   });
@@ -13,7 +21,10 @@ export default function Vault() {
   return (
     <div className="space-y-8">
       <div className="border-b border-primary/30 pb-6">
-        <p className="text-xs uppercase tracking-[0.4em] text-primary mb-2">The Vault</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-[0.4em] text-primary mb-2">The Vault</p>
+          <AdminScopeToggle showAll={showAll} onChange={setShowAll} testId="toggle-vault-scope" />
+        </div>
         <h1 className="text-4xl font-bold tracking-tight" data-testid="text-page-title">
           1-of-1 Transmissions
         </h1>

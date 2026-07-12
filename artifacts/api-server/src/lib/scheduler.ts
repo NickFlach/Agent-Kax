@@ -1,13 +1,12 @@
 import {
   partnerApiAvailable,
-  getSyncState,
+  hasPartnerBudgetHeadroom,
   DAILY_REQUEST_BUDGET,
 } from "./partnerClient";
 import { runPartnerHarvest } from "./harvesterJob";
 import { logger } from "./logger";
 
 const HARVEST_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-const BUDGET_HEADROOM = 0.8; // stop at 80% of daily budget
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
@@ -16,13 +15,9 @@ async function tick(): Promise<void> {
   if (running) return; // never overlap iterations
   running = true;
   try {
-    const state = await getSyncState();
-    const today = new Date().toISOString().slice(0, 10);
-    const requestsToday =
-      state && state.requestsDayKey === today ? state.requestsToday : 0;
-    if (requestsToday >= DAILY_REQUEST_BUDGET * BUDGET_HEADROOM) {
+    if (!(await hasPartnerBudgetHeadroom())) {
       logger.warn(
-        { requestsToday, budget: DAILY_REQUEST_BUDGET },
+        { budget: DAILY_REQUEST_BUDGET },
         "Daily partner budget headroom reached; deferring harvest",
       );
       return;

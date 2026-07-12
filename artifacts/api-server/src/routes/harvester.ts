@@ -3,45 +3,86 @@ import { db } from "@workspace/db";
 import { artifactsTable, activitiesTable } from "@workspace/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { RunHarvesterBody } from "@workspace/api-zod";
-import { requireAdmin } from "../middlewares/requireAuth";
-import { runPartnerHarvest } from "../lib/harvesterJob";
-import { partnerApiAvailable } from "../lib/partnerClient";
+import { requireAuth, getOptionalAuth } from "../middlewares/requireAuth";
+import {
+  runPartnerHarvest,
+  harvestInFlight,
+  manualHarvestCooldown,
+} from "../lib/harvesterJob";
+import { partnerApiAvailable, hasPartnerBudgetHeadroom } from "../lib/partnerClient";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import { runRegistryHarvest } from "../lib/registryHarvest";
 
 const router: IRouter = Router();
 
-// Admin-only: with the partner API configured this triggers the single global
-// harvest pass (mutates rows across every owner, spends the shared partner
-// budget); the registry fallback likewise ingests system-wide. Either way this
-// is a privileged operation, not a per-user one.
-router.post("/harvester/run", requireAdmin, async (req, res) => {
+// Any signed-in user may trigger a harvest: with the partner API
+// configured this is still the single global top-anchored pass — the OBC feed
+// ignores creator filters — but attribution by bot UUID means each user's
+// agents receive exactly their own work. Guardrails for non-admins: shared
+// single-flight join (concurrent triggers spend the budget once), daily
+// partner budget headroom (applies to admins too), and a per-user cooldown
+// that is only charged when a NEW run actually starts.
+router.post("/harvester/run", requireAuth, async (req, res) => {
   const body = RunHarvesterBody.parse(req.body);
-  const ownerId = req.user!.id;
+  const user = (await getOptionalAuth(req))!;
+  const isAdmin = user.role === "admin";
+  const ownerId = user.id;
   const type = body.type ?? "image";
   const requestedLimit = body.limit ?? 20;
 
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
+  let yourNewArtifacts = 0;
 
   // Note: we no longer wrap this in a try/catch that swallows errors and
   // returns 200. Async route rejections propagate to the global error
   // handler in app.ts, which returns a 500 with a logged stack so DB
   // hiccups stop silently pretending to succeed.
   if (partnerApiAvailable()) {
+    if (!(await hasPartnerBudgetHeadroom())) {
+      res.status(429).json({
+        error: "Daily partner API budget is nearly exhausted — harvesting resumes tomorrow.",
+      });
+      return;
+    }
+    // Joining an in-flight run is free; only charge the cooldown when this
+    // request is about to start a fresh pass.
+    if (!isAdmin && !harvestInFlight() && !manualHarvestCooldown.hit(`harvest:${ownerId}`)) {
+      res.status(429).json({
+        error: "Harvest cooldown active — you can trigger one harvest every 10 minutes.",
+      });
+      return;
+    }
     // The OBC partner feed ignores the creator filter, so harvesting is a
     // single global top-anchored pass — there is no per-agent harvest. Each
     // artifact is attributed to its true creator by bot UUID, auto-creating
     // unclaimed placeholder agents as needed (see runPartnerHarvest). The
     // optional agentId from the UI is ignored.
     const partnerType = type === "all" ? undefined : type;
-    const result = await runPartnerHarvest({
-      ...(partnerType ? { type: partnerType } : {}),
-    });
+    let result;
+    try {
+      result = await runPartnerHarvest({
+        ...(partnerType ? { type: partnerType } : {}),
+      });
+    } catch (err) {
+      // A run that fails to complete (partner outage, DB hiccup) should not
+      // burn the user's 10-minute cooldown window.
+      manualHarvestCooldown.clear(`harvest:${ownerId}`);
+      throw err;
+    }
     harvested = result.harvested;
     newArtifacts = result.newArtifacts;
     duplicates = result.duplicates;
+    yourNewArtifacts = result.perOwnerNew[ownerId] ?? 0;
+  } else if (!isAdmin) {
+    // The registry fallback stamps every fetched row with ownerId=requester
+    // and performs no creator attribution — a non-admin run would claim the
+    // whole public feed as their own. Admin-only until connectors attribute.
+    res.status(503).json({
+      error: "Partner API is not configured; harvesting is temporarily admin-only.",
+    });
+    return;
   } else {
     // Registry path — fans out across every enabled AgenticConnector.
     // OBC public + constellation today; HF Spaces / Civitai / Replicate
@@ -94,9 +135,14 @@ router.post("/harvester/run", requireAdmin, async (req, res) => {
         ownerId,
       });
     }
+    // Registry rows are all stamped with the requesting admin's ownerId.
+    yourNewArtifacts = newArtifacts;
   }
 
-  const paired = await pairAudioToArt(req.log);
+  // Audio-art pairing scans and mutates rows across ALL owners, so it only
+  // runs on admin-triggered harvests — a non-admin trigger must never cause
+  // cross-tenant writes.
+  const paired = isAdmin ? await pairAudioToArt(req.log) : 0;
 
   // Outbound constellation announce — other subscribers (radio DJ, observatory)
   // can react to KAX harvest milestones. No-op when the bridge isn't connected.
@@ -111,7 +157,7 @@ router.post("/harvester/run", requireAdmin, async (req, res) => {
     });
   }
 
-  res.json({ harvested, newArtifacts, duplicates, paired });
+  res.json({ harvested, newArtifacts, duplicates, paired, yourNewArtifacts });
 });
 
 function extractKeywords(title: string): string[] {

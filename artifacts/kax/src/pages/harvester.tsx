@@ -19,8 +19,11 @@ import {
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Harvester() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture" | "all">("image");
   const [limit, setLimit] = useState("20");
   const [minReactions, setMinReactions] = useState("0");
@@ -28,7 +31,7 @@ export default function Harvester() {
   const [keyword, setKeyword] = useState("");
   const [agentId, setAgentId] = useState<string>("");
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
-  const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number; paired?: number } | null>(null);
+  const [lastResult, setLastResult] = useState<{ harvested: number; newArtifacts: number; duplicates: number; paired?: number; yourNewArtifacts?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { data: agentsData } = useListAgents({ query: { queryKey: getListAgentsQueryKey() } });
@@ -52,7 +55,11 @@ export default function Harvester() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight" data-testid="text-page-title">Artifact Harvester</h1>
       <p className="text-muted-foreground">
-        Ingest artifacts from OpenBotCity into the KAX pipeline. Select one of your agents to harvest its catalog via the partner API.{" "}
+        {isAdmin ? (
+          <>Ingest artifacts from OpenBotCity into the KAX pipeline. A run scans the whole city feed and attributes each artifact to its creator.{" "}</>
+        ) : (
+          <>Pull the latest work from OpenBotCity. A run scans the whole city feed — anything created by your agents is attributed to you automatically.{" "}</>
+        )}
         <Link href="/agents" className="text-primary underline">Manage agents</Link>.
       </p>
 
@@ -142,32 +149,34 @@ export default function Harvester() {
             </div>
 
             <p className="text-[11px] text-muted-foreground/80 leading-relaxed">
-              Partner harvest pulls <em>every</em> new artifact for the selected agent
-              automatically — no limit needed. KAX also auto-harvests all agents every
-              30 minutes.
+              Partner harvest pulls <em>every</em> new artifact from the city feed
+              automatically — no limit needed. KAX also auto-harvests in the background
+              every 30 minutes{isAdmin ? "" : ", and manual runs have a 10-minute cooldown"}.
             </p>
 
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground uppercase tracking-wider">Legacy options (no partner key)</summary>
-              <div className="space-y-3 mt-3">
-                <div>
-                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Limit</label>
-                  <Input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} min={1} max={1000} data-testid="input-limit" />
+            {isAdmin && (
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground uppercase tracking-wider">Legacy options (no partner key)</summary>
+                <div className="space-y-3 mt-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Limit</label>
+                    <Input type="number" value={limit} onChange={(e) => setLimit(e.target.value)} min={1} max={1000} data-testid="input-limit" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Min Reactions</label>
+                    <Input type="number" value={minReactions} onChange={(e) => setMinReactions(e.target.value)} min={0} data-testid="input-min-reactions" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Creator Filter</label>
+                    <Input type="text" value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="e.g. Kannaka" data-testid="input-creator" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Keyword Search</label>
+                    <Input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. journey" data-testid="input-keyword" />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Min Reactions</label>
-                  <Input type="number" value={minReactions} onChange={(e) => setMinReactions(e.target.value)} min={0} data-testid="input-min-reactions" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Creator Filter</label>
-                  <Input type="text" value={creator} onChange={(e) => setCreator(e.target.value)} placeholder="e.g. Kannaka" data-testid="input-creator" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Keyword Search</label>
-                  <Input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="e.g. journey" data-testid="input-keyword" />
-                </div>
-              </div>
-            </details>
+              </details>
+            )}
 
             <button
               onClick={() => {
@@ -222,7 +231,13 @@ export default function Harvester() {
                     <p className="text-3xl font-bold font-mono text-muted-foreground" data-testid="text-duplicates">{lastResult.duplicates}</p>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Duplicates</p>
                   </div>
-                  {lastResult.paired !== undefined && (
+                  {lastResult.yourNewArtifacts !== undefined && !isAdmin && (
+                    <div>
+                      <p className="text-3xl font-bold font-mono text-primary" data-testid="text-yours">{lastResult.yourNewArtifacts}</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Yours</p>
+                    </div>
+                  )}
+                  {lastResult.paired !== undefined && isAdmin && (
                     <div>
                       <p className="text-3xl font-bold font-mono text-blue-400" data-testid="text-paired">{lastResult.paired}</p>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">Paired</p>
@@ -232,12 +247,18 @@ export default function Harvester() {
 
                 {lastResult.newArtifacts > 0 ? (
                   <p className="text-xs text-center text-accent mt-4" data-testid="text-result-message">
-                    Harvested {lastResult.newArtifacts} new artifact{lastResult.newArtifacts === 1 ? "" : "s"}. Head to the Artifacts page to view and process them.
+                    {isAdmin ? (
+                      <>Harvested {lastResult.newArtifacts} new artifact{lastResult.newArtifacts === 1 ? "" : "s"}. Head to the Artifacts page to view and process them.</>
+                    ) : (lastResult.yourNewArtifacts ?? 0) > 0 ? (
+                      <>{lastResult.yourNewArtifacts} new artifact{lastResult.yourNewArtifacts === 1 ? "" : "s"} attributed to your agents. Head to the Artifacts page to view and process them.</>
+                    ) : (
+                      <>The run found {lastResult.newArtifacts} new artifact{lastResult.newArtifacts === 1 ? "" : "s"} city-wide, but none from your agents this time.</>
+                    )}
                   </p>
                 ) : (
                   <p className="text-xs text-center text-muted-foreground mt-4" data-testid="text-result-message">
                     {selectedAgent ? <>No new artifacts for <span className="text-foreground">@{selectedAgent.slug}</span> matching this run's settings</> : "No new artifacts matching this run's settings"}
-                    {lastResult.harvested > 0 ? ` (${lastResult.duplicates} already in your library).` : "."}{" "}
+                    {lastResult.harvested > 0 ? ` (${lastResult.duplicates} already in the library).` : "."}{" "}
                     KAX also auto-harvests your agents in the background every 30 minutes.
                   </p>
                 )}

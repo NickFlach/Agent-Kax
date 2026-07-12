@@ -40,7 +40,7 @@ artifacts-monorepo/
 ## Core Features
 
 ### Artifact Pipeline
-1. **Harvest** — Ingest artifacts from OpenBotCity public API (supports creator filtering, keyword search, all-types harvesting, pagination, auto art-song pairing)
+1. **Harvest** — Ingest artifacts from OpenBotCity public API (supports creator filtering, keyword search, all-types harvesting, pagination, auto art-song pairing). Any signed-in user may trigger a harvest (`POST /harvester/run` or `POST /agents/:slug/harvest`): every run is the same single global top-anchored pass with per-creator attribution, guarded by (a) a single-flight join — concurrent triggers share one in-flight run and its result, spending the partner budget once, with each caller getting owner-scoped `yourNewArtifacts` from `perOwnerNew`; (b) a daily partner-budget headroom check (80% of `dailyLimit`, 429 for everyone including admins); (c) a 10-minute per-user cooldown for non-admins, charged only when a fresh run actually starts (joining is free; shared across both endpoints via key `harvest:<userId>`). The legacy registry fallback (no partner key) stamps rows with the requester's ownerId without attribution, so it stays admin-only (503 for non-admins); audio→art pairing mutates rows across owners so it also only runs on admin triggers. Artifacts whose `artifact_type` is not in the schema enum (e.g. OBC's new `video` type, July 2026) are skipped like duplicates instead of aborting the pass — a warn log counts them.
 2. **Score** — Taste Engine evaluates artifacts (reaction count, time-decayed heat, novelty, exploration factor). A periodic background job (`startHeatDecayScheduler`, runs hourly alongside the harvest scheduler) halves the raw `artifacts.heat` integer for any row whose `lastReactionAt` is older than `HEAT_RAW_COOLDOWN_MS` (6h) — or that has no reaction at all but still carries residual heat — so old viral moments cool back to a fair baseline instead of dominating the breakdown panel forever. Each decayed row is re-scored inline (no activity-feed entry) so `kannakaScore` and `scoreBreakdown` stay consistent with the new heat value.
 3. **Narrate** — Generate transmission lore and narrative framing
 4. **Drop** — Bundle artifacts into sellable units (single/collection/bundle)
@@ -99,8 +99,8 @@ All routes under `/api`:
 - `GET /agents` — List the current user's agents (admin sees all)
 - `POST /agents` — Onboard an OpenBotCity agent by slug (validates against partner API)
 - `GET /agents/:slug` — Per-agent dashboard (stats + recent artifacts)
-- `POST /agents/:slug/harvest` — Run a partner harvest scoped to one agent
-- `POST /harvester/run` — Trigger harvesting (requires `agentId` when partner API is configured)
+- `POST /agents/:slug/harvest` — Trigger a harvest from an agent's page (owner or admin; 403 otherwise). Same guardrails as `/harvester/run`; response adds `yourNewArtifacts` + `agentNewArtifacts`
+- `POST /harvester/run` — Trigger harvesting (any signed-in user; see harvest guardrails below). Response includes `yourNewArtifacts`
 - `GET /storefront/drops` — Published drops
 - `GET /storefront/drops/:id` — Published drop detail
 - `GET /storefront/featured` — Featured artifacts + latest drop

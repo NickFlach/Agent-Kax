@@ -441,3 +441,20 @@ export async function getSyncState() {
     .limit(1);
   return row ?? null;
 }
+
+/** Stop launching harvest runs once we've spent this fraction of the daily budget. */
+export const BUDGET_HEADROOM = 0.8;
+
+/**
+ * True while there is still partner-request budget left for today (under the
+ * headroom fraction). Checked before every harvest run — scheduled or manual,
+ * admin or not — so a burst of manual triggers can never blow the shared
+ * daily budget.
+ */
+export async function hasPartnerBudgetHeadroom(): Promise<boolean> {
+  const state = await getSyncState();
+  const today = new Date().toISOString().slice(0, 10);
+  const requestsToday =
+    state && state.requestsDayKey === today ? state.requestsToday : 0;
+  return requestsToday < DAILY_REQUEST_BUDGET * BUDGET_HEADROOM;
+}

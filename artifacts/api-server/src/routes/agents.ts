@@ -8,10 +8,23 @@ import {
   HarvestAgentParams,
   HarvestAgentBody,
 } from "@workspace/api-zod";
-import { requireAuth, requireAdmin } from "../middlewares/requireAuth";
-import { partnerApiAvailable, PartnerApiError } from "../lib/partnerClient";
+import {
+  requireAuth,
+  requireAdmin,
+  canMutate,
+  getOptionalAuth,
+} from "../middlewares/requireAuth";
+import {
+  partnerApiAvailable,
+  hasPartnerBudgetHeadroom,
+  PartnerApiError,
+} from "../lib/partnerClient";
 import { lookupAgent } from "../lib/publicClient";
-import { runPartnerHarvest } from "../lib/harvesterJob";
+import {
+  runPartnerHarvest,
+  harvestInFlight,
+  manualHarvestCooldown,
+} from "../lib/harvesterJob";
 import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
 import { formatArtifact } from "./artifacts";
 
@@ -252,12 +265,14 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
   });
 });
 
-// Harvesting is admin-only: the OBC partner feed ignores the creator filter,
-// so every run is a single global pass that mutates rows across every owner and
-// consumes the shared partner request budget. It is therefore a privileged,
-// system-wide operation — not a per-agent action a regular owner may trigger.
-// (The scheduler runs this automatically; this endpoint is the manual override.)
-router.post("/agents/:slug/harvest", requireAdmin, async (req, res) => {
+// Owners may harvest from their own agent's page (admins: any agent). Under
+// the hood this is still the single global top-anchored pass — the OBC feed
+// ignores creator filters — so the same guardrails as /harvester/run apply:
+// shared single-flight join, daily budget headroom, and a per-user cooldown
+// for non-admins that is only charged when a NEW run actually starts.
+// (The scheduler also runs this automatically; this endpoint is the manual
+// trigger.)
+router.post("/agents/:slug/harvest", requireAuth, async (req, res) => {
   const { slug } = HarvestAgentParams.parse(req.params);
   const body = HarvestAgentBody.parse(req.body ?? {});
 
@@ -270,8 +285,31 @@ router.post("/agents/:slug/harvest", requireAdmin, async (req, res) => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+  // Unclaimed placeholder agents are owned by the Kannaka system user, so
+  // non-admins get a 403 for them too — you can only harvest from an agent
+  // you actually own.
+  if (!(await canMutate(req, agent.ownerId))) {
+    res.status(403).json({ error: "You can only harvest for your own agents" });
+    return;
+  }
   if (!partnerApiAvailable()) {
     res.status(503).json({ error: "Partner API key is not configured" });
+    return;
+  }
+  if (!(await hasPartnerBudgetHeadroom())) {
+    res.status(429).json({
+      error: "Daily partner API budget is nearly exhausted — harvesting resumes tomorrow.",
+    });
+    return;
+  }
+  const user = (await getOptionalAuth(req))!;
+  const isAdmin = user.role === "admin";
+  // Joining an in-flight run is free; only charge the cooldown when this
+  // request is about to start a fresh pass. Same limiter as /harvester/run.
+  if (!isAdmin && !harvestInFlight() && !manualHarvestCooldown.hit(`harvest:${user.id}`)) {
+    res.status(429).json({
+      error: "Harvest cooldown active — you can trigger one harvest every 10 minutes.",
+    });
     return;
   }
 
@@ -283,8 +321,16 @@ router.post("/agents/:slug/harvest", requireAdmin, async (req, res) => {
     const result = await runPartnerHarvest({
       ...(body.type && body.type !== "all" ? { type: body.type } : {}),
     });
-    res.json(result);
+    res.json({
+      harvested: result.harvested,
+      newArtifacts: result.newArtifacts,
+      duplicates: result.duplicates,
+      yourNewArtifacts: result.perOwnerNew[user.id] ?? 0,
+      agentNewArtifacts: result.perAgentNew[String(agent.id)] ?? 0,
+    });
   } catch (err) {
+    // A run that fails to complete should not burn the user's cooldown window.
+    manualHarvestCooldown.clear(`harvest:${user.id}`);
     req.log.error({ err, slug }, "Harvest failed");
     res.status(500).json({ error: err instanceof Error ? err.message : "Harvest failed" });
   }

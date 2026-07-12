@@ -15,6 +15,7 @@ import {
   type PartnerArtifact,
 } from "./partnerClient";
 import { logger } from "./logger";
+import { createRateLimiter } from "./rateLimit";
 import { maybeRespondToArtwork } from "./kannakaArtworkResponse";
 import { dispatchPartnerEvent, getRegisteredEventTypes } from "./eventDispatcher";
 import {
@@ -27,6 +28,14 @@ export interface HarvestRunResult {
   harvested: number;
   newArtifacts: number;
   duplicates: number;
+  /**
+   * New-artifact counts from this run keyed by owner user id. Lets callers
+   * report a caller-scoped count ("your agents gained N") even when they
+   * merely joined a run someone else started.
+   */
+  perOwnerNew: Record<string, number>;
+  /** New-artifact counts from this run keyed by (stringified) agent id. */
+  perAgentNew: Record<string, number>;
 }
 
 interface Attribution {
@@ -35,6 +44,17 @@ interface Attribution {
   creatorName: string;
   creatorBotId: string | null;
 }
+
+// Artifact types our schema enum supports. OBC occasionally ships new types
+// (e.g. "video" appeared in July 2026); anything unknown is skipped instead
+// of aborting the whole harvest pass with an enum-violation DB error.
+const SUPPORTED_ARTIFACT_TYPES = new Set([
+  "image",
+  "audio",
+  "music",
+  "text",
+  "furniture",
+]);
 
 async function upsertPartnerArtifact(
   pa: PartnerArtifact,
@@ -104,7 +124,42 @@ async function upsertPartnerArtifact(
  * MAX_PAGES safety bound only): each pass ingests the whole contiguous new
  * region in one go, and idempotent inserts keep steady state cheap.
  */
+// Single-flight guard: only one global pass may run at a time. Concurrent
+// callers (scheduler tick, /harvester/run, /agents/:slug/harvest) JOIN the
+// in-flight run and share its result — the partner budget is spent once and
+// every joiner still gets its owner-scoped counts from perOwnerNew. A joiner
+// may receive a run that was started with a different `type` filter; that is
+// acceptable because every pass is the same top-anchored attribution sweep.
+let inFlightRun: Promise<HarvestRunResult> | null = null;
+
+/** True while a global harvest pass is running (callers about to join it). */
+export function harvestInFlight(): boolean {
+  return inFlightRun !== null;
+}
+
+/**
+ * Manual-trigger cooldown for non-admin users: one started run per user per
+ * window, shared by /harvester/run and /agents/:slug/harvest. Routes must
+ * only `hit()` this when they are about to START a run — joining an
+ * in-flight run is free (it spends no extra partner budget).
+ */
+export const manualHarvestCooldown = createRateLimiter({
+  limit: 1,
+  windowMs: 10 * 60 * 1000,
+});
+
 export async function runPartnerHarvest(opts: {
+  type?: string;
+} = {}): Promise<HarvestRunResult> {
+  if (inFlightRun) return inFlightRun;
+  const run = doRunPartnerHarvest(opts).finally(() => {
+    inFlightRun = null;
+  });
+  inFlightRun = run;
+  return run;
+}
+
+async function doRunPartnerHarvest(opts: {
   type?: string;
 } = {}): Promise<HarvestRunResult> {
   if (!partnerApiAvailable()) {
@@ -118,6 +173,7 @@ export async function runPartnerHarvest(opts: {
   let harvested = 0;
   let newArtifacts = 0;
   let duplicates = 0;
+  let skippedUnsupported = 0;
   let pageIdx = 0;
 
   // Cache bot id -> resolved agent within a run; also tally new artifacts per
@@ -138,6 +194,16 @@ export async function runPartnerHarvest(opts: {
     let pageNew = 0;
     for (const pa of page.artifacts) {
       harvested++;
+      // Unsupported types are treated like duplicates for pagination: the
+      // cursor advances past them but nothing is inserted. (If OBC ever tops
+      // the feed with 50+ consecutive unsupported items this could stop
+      // catch-up early — acceptable until the schema learns the new type.)
+      if (!SUPPORTED_ARTIFACT_TYPES.has(pa.artifact_type)) {
+        skippedUnsupported++;
+        duplicates++;
+        cursor = pa.uuid;
+        continue;
+      }
       const botId = pa.creator?.id || null;
       let agent: ResolvedAgent | null = null;
       if (botId) {
@@ -195,6 +261,13 @@ export async function runPartnerHarvest(opts: {
       .where(eq(agentsTable.id, agentId));
   }
 
+  if (skippedUnsupported > 0) {
+    logger.warn(
+      { skippedUnsupported },
+      "Partner harvest skipped artifacts with unsupported artifact types (schema enum does not include them yet)",
+    );
+  }
+
   await recordPollSuccess(newestSeen);
 
   // One activity-feed entry per owner that gained artifacts, so a claimed
@@ -209,7 +282,15 @@ export async function runPartnerHarvest(opts: {
     });
   }
 
-  return { harvested, newArtifacts, duplicates };
+  return {
+    harvested,
+    newArtifacts,
+    duplicates,
+    perOwnerNew: Object.fromEntries(perOwnerNew),
+    perAgentNew: Object.fromEntries(
+      [...perAgentNew].map(([agentId, n]) => [String(agentId), n]),
+    ),
+  };
 }
 
 export async function replayMissedEventsOnStartup(): Promise<void> {

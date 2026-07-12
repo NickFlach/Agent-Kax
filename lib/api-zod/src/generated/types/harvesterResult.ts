@@ -11,4 +11,8 @@ export interface HarvesterResult {
   newArtifacts: number;
   duplicates: number;
   paired?: number;
+  /** New artifacts from this run attributed to the calling user's agents */
+  yourNewArtifacts?: number;
+  /** New artifacts from this run attributed to the requested agent (agent-scoped harvest only) */
+  agentNewArtifacts?: number;
 }

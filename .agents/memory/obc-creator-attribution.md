@@ -31,7 +31,10 @@ aren't onboarded, auto-create a **placeholder agent** owned by `KANNAKA_SYSTEM_U
   rather than erroring on the slug-unique constraint.
 - Harvest is now a single GLOBAL top-anchored pass (`runPartnerHarvest`), run once by the
   scheduler — NOT per-agent. Manual triggers (`POST /agents/:slug/harvest`,
-  `POST /harvester/run`) are now **admin-only** (deliberate behavior change).
+  `POST /harvester/run`) are open to any signed-in user as of July 2026, guarded by
+  budget headroom, a 10-min non-admin cooldown, and a single-flight join (concurrent
+  triggers share one run; responses are owner-scoped via `perOwnerNew`). The
+  registry fallback and cross-owner audio pairing remain admin-only.
 
 **Why:** lets a real creator later claim a pre-populated storefront; nothing is deleted.
 

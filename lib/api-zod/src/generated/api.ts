@@ -739,6 +739,18 @@ export const HarvestAgentResponse = zod.object({
   newArtifacts: zod.number(),
   duplicates: zod.number(),
   paired: zod.number().optional(),
+  yourNewArtifacts: zod
+    .number()
+    .optional()
+    .describe(
+      "New artifacts from this run attributed to the calling user's agents",
+    ),
+  agentNewArtifacts: zod
+    .number()
+    .optional()
+    .describe(
+      "New artifacts from this run attributed to the requested agent (agent-scoped harvest only)",
+    ),
 });
 
 /**
@@ -1428,6 +1440,18 @@ export const RunHarvesterResponse = zod.object({
   newArtifacts: zod.number(),
   duplicates: zod.number(),
   paired: zod.number().optional(),
+  yourNewArtifacts: zod
+    .number()
+    .optional()
+    .describe(
+      "New artifacts from this run attributed to the calling user's agents",
+    ),
+  agentNewArtifacts: zod
+    .number()
+    .optional()
+    .describe(
+      "New artifacts from this run attributed to the requested agent (agent-scoped harvest only)",
+    ),
 });
 
 /**

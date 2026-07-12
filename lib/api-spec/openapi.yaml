@@ -2734,6 +2734,12 @@ components:
           type: integer
         paired:
           type: integer
+        yourNewArtifacts:
+          type: integer
+          description: New artifacts from this run attributed to the calling user's agents
+        agentNewArtifacts:
+          type: integer
+          description: New artifacts from this run attributed to the requested agent (agent-scoped harvest only)
       required:
         - harvested
         - newArtifacts
