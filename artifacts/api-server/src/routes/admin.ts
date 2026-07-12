@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
-import { requireAdmin } from "../middlewares/requireAuth";
+import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { ListAdminUsersResponse, UpdateAdminUserBody, UpdateAdminUserParams } from "@workspace/api-zod";
 import { reattributeArtifactsByCreator, repairPlaceholderAgentNames } from "../lib/backfill";
 import {
@@ -98,7 +98,9 @@ router.post("/admin/reattribute-artifacts", requireAdmin, async (req, res) => {
 
 // Rename unclaimed agents stuck on a "Agent <hex>" placeholder by resolving
 // their real display name from the public catalog. dryRun=true to preview.
-router.post("/admin/repair-agent-names", requireAdmin, async (req, res) => {
+// Admin session or service token (maintenance op, re-runnable as the
+// harvester pulls more agents).
+router.post("/admin/repair-agent-names", requireAdminOrServiceToken, async (req, res) => {
   const result = await repairPlaceholderAgentNames({
     dryRun: req.query["dryRun"] === "true",
   });
