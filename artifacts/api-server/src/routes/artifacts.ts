@@ -201,8 +201,13 @@ router.post("/artifacts/:id/narrate", requireAuth, async (req, res) => {
     "The composition implies a mind that learned beauty from entropy.",
   ];
 
-  const prefix = narrativePrefixes[Math.floor(Math.random() * narrativePrefixes.length)];
-  const suffix = narrativeSuffixes[Math.floor(Math.random() * narrativeSuffixes.length)];
+  // Use the artifact id to pick prefix and suffix deterministically —
+  // the same artifact should always resolve to the same narrative text
+  // if re-narrated, consistent with how transmissionId is assigned above.
+  const prefixIdx = a.id % narrativePrefixes.length;
+  const suffixIdx = Math.floor(a.id / narrativePrefixes.length) % narrativeSuffixes.length;
+  const prefix = narrativePrefixes[prefixIdx] as string;
+  const suffix = narrativeSuffixes[suffixIdx] as string;
 
   const titleWords = a.title.split(/\s+/).slice(0, 3).join(" ");
   const narrativeTitle = `Transmission ${transmissionId}: ${titleWords}`;
