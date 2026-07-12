@@ -2587,7 +2587,7 @@ components:
 
     Agent:
       type: object
-      required: [id, slug, displayName, ownerId, artifactsHarvested, createdAt]
+      required: [id, slug, displayName, artifactsHarvested, createdAt]
       properties:
         id:
           type: integer
@@ -2597,8 +2597,6 @@ components:
           type: string
         avatarUrl:
           type: [string, "null"]
-        ownerId:
-          type: string
         artifactsHarvested:
           type: integer
         lastSyncAt:

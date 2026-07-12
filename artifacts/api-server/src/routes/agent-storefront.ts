@@ -91,7 +91,6 @@ function formatAgent(a: Agent) {
     slug: a.slug,
     displayName: a.displayName,
     avatarUrl: a.avatarUrl,
-    ownerId: a.ownerId,
     artifactsHarvested: a.artifactsHarvested,
     lastSyncAt: a.lastSyncAt?.toISOString() ?? null,
     lastArtifactCursor: a.lastArtifactCursor,
