@@ -1924,6 +1924,12 @@ export const GetAgentStorefrontResponse = zod.object({
         .nullish(),
     }),
   ),
+  workCount: zod
+    .number()
+    .optional()
+    .describe(
+      "Total harvested works attributed to this agent (the store's real inventory).",
+    ),
   latestDrop: zod
     .object({
       id: zod.number(),
@@ -2119,6 +2125,70 @@ export const GetStorefrontMarketplaceResponse = zod.object({
         ),
     }),
   ),
+});
+
+/**
+ * @summary The agent's full harvested body of work (no status floor) - the store's real shelves
+ */
+export const GetAgentStorefrontWorksParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const getAgentStorefrontWorksQueryLimitDefault = 24;
+export const getAgentStorefrontWorksQueryOffsetDefault = 0;
+
+export const GetAgentStorefrontWorksQueryParams = zod.object({
+  limit: zod.coerce.number().default(getAgentStorefrontWorksQueryLimitDefault),
+  offset: zod.coerce
+    .number()
+    .default(getAgentStorefrontWorksQueryOffsetDefault),
+});
+
+export const GetAgentStorefrontWorksResponse = zod.object({
+  artifacts: zod.array(
+    zod.object({
+      id: zod.number(),
+      externalId: zod.string(),
+      title: zod.string(),
+      creatorName: zod.string(),
+      publicUrl: zod.string(),
+      thumbnailUrl: zod.string().nullish(),
+      reactionCount: zod.number(),
+      artifactType: zod.enum(["image", "music", "text", "audio", "furniture"]),
+      status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+      kannakaScore: zod.number().nullish(),
+      rarityScore: zod.number().nullish(),
+      narrative: zod.string().nullish(),
+      narrativeTitle: zod.string().nullish(),
+      transmissionId: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      ingestedAt: zod.coerce.date(),
+      scoredAt: zod.coerce.date().nullish(),
+      narratedAt: zod.coerce.date().nullish(),
+      dropId: zod.number().nullish(),
+      ownerId: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      agentId: zod.number().nullish(),
+      editionType: zod.enum(["open", "limited", "1_of_1"]),
+      editionTotal: zod.number().nullish(),
+      editionSerial: zod.number().nullish(),
+      heat: zod.number().optional(),
+      lastReactionAt: zod.coerce.date().nullish(),
+      scoreBreakdown: zod
+        .object({
+          reactionSignal: zod.number(),
+          heatSignal: zod.number().optional(),
+          novelty: zod.number(),
+          exploration: zod.number(),
+          baseScore: zod.number(),
+          scarcityMultiplier: zod.number(),
+          editionType: zod.string(),
+          finalScore: zod.number(),
+        })
+        .nullish(),
+    }),
+  ),
+  total: zod.number(),
 });
 
 /**

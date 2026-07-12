@@ -104,15 +104,15 @@ function Storefront({
 
       <mesh position={[0, 2, 0]}>
         <boxGeometry args={[3, 4, 3]} />
-        <meshStandardMaterial color="#03080A" roughness={0.7} metalness={0.2} />
+        <meshStandardMaterial color="#0B1E23" roughness={0.7} metalness={0.2} />
       </mesh>
       <mesh position={[0, 4.5, 0.2]}>
         <boxGeometry args={[2.8, 1, 2.8]} />
-        <meshStandardMaterial color="#050C0F" roughness={0.8} />
+        <meshStandardMaterial color="#0A181C" roughness={0.8} />
       </mesh>
       <mesh position={[0, 5.5, 0.4]}>
         <boxGeometry args={[2.2, 1, 2.2]} />
-        <meshStandardMaterial color="#020506" roughness={0.9} />
+        <meshStandardMaterial color="#081215" roughness={0.9} />
       </mesh>
 
       <mesh position={[0, 1, 1.51]}>
@@ -130,40 +130,44 @@ function Storefront({
         <meshStandardMaterial color={mainColor} emissive={glowColor} emissiveIntensity={1.4} transparent opacity={0.9} />
       </mesh>
 
-      <Text position={[0, 3.1, 1.66]} fontSize={0.3} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.6}>
-        {agent.name}
-      </Text>
-      <Text position={[0, 2.7, 1.66]} fontSize={0.15} color="#e0e0e0" font={SPACE_MONO_WOFF}>
-        {isConstellation
-          ? `Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
-          : `${agent.artifacts} ARTIFACT${agent.artifacts === 1 ? "" : "S"}`}
-      </Text>
-      {isConstellation ? (
-        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
-          [ CONSTELLATION ]
+      {/* Labels suspend on the remote font fetch — isolate them so a slow
+          or blocked font can never blank the buildings themselves. */}
+      <Suspense fallback={null}>
+        <Text position={[0, 3.1, 1.66]} fontSize={0.3} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.6}>
+          {agent.name}
         </Text>
-      ) : !isClaimed ? (
-        <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
-          [ AVAILABLE ]
+        <Text position={[0, 2.7, 1.66]} fontSize={0.15} color="#e0e0e0" font={SPACE_MONO_WOFF}>
+          {isConstellation
+            ? `Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
+            : `${agent.artifacts} WORK${agent.artifacts === 1 ? "" : "S"}`}
         </Text>
-      ) : null}
+        {isConstellation ? (
+          <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
+            [ CONSTELLATION ]
+          </Text>
+        ) : !isClaimed ? (
+          <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
+            [ AVAILABLE ]
+          </Text>
+        ) : null}
 
-      <group ref={glyphRef} position={[0, 5.5, 1.2]}>
-        <Text
-          position={[0, 0, 0]}
-          fontSize={0.8}
-          color={glowColor}
-          font={SPACE_MONO_WOFF}
-          fillOpacity={0.6}
-        >
-          {initials}
-        </Text>
-      </group>
+        <group ref={glyphRef} position={[0, 5.5, 1.2]}>
+          <Text
+            position={[0, 0, 0]}
+            fontSize={0.8}
+            color={glowColor}
+            font={SPACE_MONO_WOFF}
+            fillOpacity={0.6}
+          >
+            {initials}
+          </Text>
+        </group>
+      </Suspense>
     </group>
   );
 }
 
-const MAX_3D_STOREFRONTS = 24;
+const MAX_3D_STOREFRONTS = 48;
 
 function layoutFor(agents: SceneAgent[]) {
   return agents.map((agent, i) => {
@@ -419,45 +423,46 @@ export default function Marketplace3D() {
         <color attach="background" args={["#020506"]} />
         <fog attach="fog" args={["#020506", 10, 60]} />
 
-        <ambientLight intensity={0.2} color="#081A1D" />
-        <directionalLight position={[0, 10, 5]} intensity={0.5} color="#0E3A40" />
-        <pointLight position={[10, 10, -10]} intensity={1} color="#E8A33D" />
+        <ambientLight intensity={0.5} color="#2A4A50" />
+        <directionalLight position={[0, 10, 5]} intensity={0.9} color="#5E9AA6" />
+        <pointLight position={[10, 10, -10]} intensity={1.2} color="#E8A33D" />
 
         <OrbitControls target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
 
-        <Suspense fallback={null}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-            <planeGeometry args={[100, 200]} />
-            <MeshReflectorMaterial
-              blur={[200, 50]}
-              resolution={512}
-              mixBlur={1}
-              mixStrength={60}
-              roughness={1}
-              depthScale={1}
-              minDepthThreshold={0.4}
-              maxDepthThreshold={1.4}
-              color="#010304"
-              metalness={0.8}
-              mirror={0.5}
-            />
-          </mesh>
+        {/* Ground, atmosphere and buildings render unconditionally — the only
+            suspending resources (label fonts) are isolated inside each
+            Storefront, so the district can never render as a black void. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+          <planeGeometry args={[100, 200]} />
+          <MeshReflectorMaterial
+            blur={[200, 50]}
+            resolution={512}
+            mixBlur={1}
+            mixStrength={60}
+            roughness={1}
+            depthScale={1}
+            minDepthThreshold={0.4}
+            maxDepthThreshold={1.4}
+            color="#010304"
+            metalness={0.8}
+            mirror={0.5}
+          />
+        </mesh>
 
-          <Sparkles count={200} scale={[20, 10, 40]} size={1.5} speed={0.4} opacity={0.2} color="#00ffff" position={[0, 5, -10]} />
-          <Sparkles count={120} scale={[20, 10, 40]} size={2} speed={0.6} opacity={0.3} color="#E8A33D" position={[0, 5, -10]} />
+        <Sparkles count={200} scale={[20, 10, 40]} size={1.5} speed={0.4} opacity={0.2} color="#00ffff" position={[0, 5, -10]} />
+        <Sparkles count={120} scale={[20, 10, 40]} size={2} speed={0.6} opacity={0.3} color="#E8A33D" position={[0, 5, -10]} />
 
-          {layout.map((item) => (
-            <Storefront
-              key={item.agent.slug}
-              agent={item.agent}
-              position={item.position}
-              rotation={item.rotation}
-              selected={selected?.slug === item.agent.slug}
-              onClick={(a) => setSelected(a)}
-              onDoubleClick={enterStorefront}
-            />
-          ))}
-        </Suspense>
+        {layout.map((item) => (
+          <Storefront
+            key={item.agent.slug}
+            agent={item.agent}
+            position={item.position}
+            rotation={item.rotation}
+            selected={selected?.slug === item.agent.slug}
+            onClick={(a) => setSelected(a)}
+            onDoubleClick={enterStorefront}
+          />
+        ))}
       </Canvas>
     </div>
   );

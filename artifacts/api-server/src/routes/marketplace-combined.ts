@@ -17,15 +17,9 @@
 
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import {
-  agentsTable,
-  agentStorefrontSettingsTable,
-  artifactsTable,
-  dropsTable,
-  constellationAgentsTable,
-} from "@workspace/db/schema";
-import { eq, and, gte, desc } from "drizzle-orm";
-import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
+import { constellationAgentsTable } from "@workspace/db/schema";
+import { gte, desc } from "drizzle-orm";
+import { listObcStorefronts } from "../lib/storefrontDirectory";
 
 const router: IRouter = Router();
 
@@ -56,45 +50,10 @@ interface UnifiedStorefront {
 }
 
 router.get("/marketplace/combined", async (_req, res) => {
-  // ── OBC storefronts (same shape /storefront/marketplace returns) ─────
-  const obcRows = await db
-    .select({
-      agent: agentsTable,
-      settings: agentStorefrontSettingsTable,
-      dropId: dropsTable.id,
-      publishedAt: dropsTable.publishedAt,
-      artifactId: artifactsTable.id,
-    })
-    .from(artifactsTable)
-    .innerJoin(agentsTable, eq(artifactsTable.agentId, agentsTable.id))
-    .innerJoin(
-      dropsTable,
-      and(eq(dropsTable.id, artifactsTable.dropId), eq(dropsTable.status, "published")),
-    )
-    .leftJoin(
-      agentStorefrontSettingsTable,
-      eq(agentStorefrontSettingsTable.agentId, agentsTable.id),
-    );
-
-  const obcByAgent = new Map<number, {
-    agent: typeof agentsTable.$inferSelect;
-    settings: typeof agentStorefrontSettingsTable.$inferSelect | null;
-    drops: Set<number>;
-    artifacts: Set<number>;
-    latest: Date | null;
-  }>();
-  for (const r of obcRows) {
-    let e = obcByAgent.get(r.agent.id);
-    if (!e) {
-      e = { agent: r.agent, settings: r.settings, drops: new Set(), artifacts: new Set(), latest: null };
-      obcByAgent.set(r.agent.id, e);
-    }
-    e.drops.add(r.dropId);
-    e.artifacts.add(r.artifactId);
-    if (r.publishedAt && (!e.latest || r.publishedAt > e.latest)) e.latest = r.publishedAt;
-  }
-
-  const obcStorefronts: UnifiedStorefront[] = Array.from(obcByAgent.values()).map((e) => ({
+  // ── OBC storefronts (directory model: every agent with harvested work
+  //    has a pre-populated, claimable storefront — see storefrontDirectory) ──
+  const entries = await listObcStorefronts();
+  const obcStorefronts: UnifiedStorefront[] = entries.map((e) => ({
     source: "obc" as const,
     slug: e.agent.slug,
     displayName: e.settings?.displayName ?? e.agent.displayName,
@@ -110,12 +69,10 @@ router.get("/marketplace/combined", async (_req, res) => {
       heroImageUrl: e.settings?.heroImageUrl ?? null,
       tagline: e.settings?.tagline ?? null,
     },
-    publishedDropCount: e.drops.size,
-    artifactCount: e.artifacts.size,
-    latestPublishedAt: e.latest?.toISOString() ?? null,
-    // Claimed = a real user owns this agent. Auto-created placeholder agents
-    // (owned by the Kannaka system user) are pre-populated but unclaimed.
-    claimed: e.agent.ownerId !== KANNAKA_SYSTEM_USER_ID,
+    publishedDropCount: e.publishedDropCount,
+    artifactCount: e.artifactCount,
+    latestPublishedAt: e.latestPublishedAt?.toISOString() ?? null,
+    claimed: e.claimed,
     phi: null,
     consciousnessLevel: null,
     lastSeenAt: null,

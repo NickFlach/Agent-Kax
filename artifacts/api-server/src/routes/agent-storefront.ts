@@ -21,11 +21,15 @@ import {
   GetAgentStorefrontDropsQueryParams,
   GetAgentStorefrontDropParams,
   GetAgentStorefrontArtifactParams,
+  GetAgentStorefrontWorksParams,
+  GetAgentStorefrontWorksQueryParams,
 } from "@workspace/api-zod";
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
 import { formatArtifact } from "./artifacts";
 import { KANNAKA_SYSTEM_USER_ID, KANNAKA_AGENT_SLUG } from "../lib/backfill";
 import { isPublishableStatus, PUBLISHABLE_STATUSES } from "../lib/visibility";
+import { listObcStorefronts } from "../lib/storefrontDirectory";
+import { or } from "drizzle-orm";
 
 function isAgentClaimed(agent: Agent): boolean {
   if (agent.slug === KANNAKA_AGENT_SLUG) return true;
@@ -204,65 +208,18 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
 });
 
 router.get("/storefront/marketplace", async (_req, res) => {
-  const rows = await db
-    .select({
-      agent: agentsTable,
-      settings: agentStorefrontSettingsTable,
-      dropId: dropsTable.id,
-      publishedAt: dropsTable.publishedAt,
-      artifactId: artifactsTable.id,
-    })
-    .from(artifactsTable)
-    .innerJoin(agentsTable, eq(artifactsTable.agentId, agentsTable.id))
-    .innerJoin(
-      dropsTable,
-      and(eq(dropsTable.id, artifactsTable.dropId), eq(dropsTable.status, "published")),
-    )
-    .leftJoin(
-      agentStorefrontSettingsTable,
-      eq(agentStorefrontSettingsTable.agentId, agentsTable.id),
-    );
-
-  const byAgent = new Map<
-    number,
-    {
-      agent: Agent;
-      settings: AgentStorefrontSettings | null;
-      drops: Set<number>;
-      artifacts: Set<number>;
-      latest: Date | null;
-    }
-  >();
-  for (const r of rows) {
-    let entry = byAgent.get(r.agent.id);
-    if (!entry) {
-      entry = {
-        agent: r.agent,
-        settings: r.settings,
-        drops: new Set(),
-        artifacts: new Set(),
-        latest: null,
-      };
-      byAgent.set(r.agent.id, entry);
-    }
-    entry.drops.add(r.dropId);
-    entry.artifacts.add(r.artifactId);
-    if (r.publishedAt && (!entry.latest || r.publishedAt > entry.latest)) {
-      entry.latest = r.publishedAt;
-    }
-  }
-
-  const storefronts = Array.from(byAgent.values())
-    .sort((a, b) => (b.latest?.getTime() ?? 0) - (a.latest?.getTime() ?? 0))
-    .map((e) => ({
-      agent: formatAgent(e.agent),
-      settings: formatSettings(e.settings ?? defaultSettings(e.agent)),
-      publishedDropCount: e.drops.size,
-      artifactCount: e.artifacts.size,
-      latestPublishedAt: e.latest?.toISOString() ?? null,
-      claimed: isAgentClaimed(e.agent),
-    }));
-
+  // Directory model: every agent with harvested work has a storefront —
+  // pre-populated and claimable. Drops are optional curated shelves, not
+  // the price of existing. See lib/storefrontDirectory.ts.
+  const entries = await listObcStorefronts();
+  const storefronts = entries.map((e) => ({
+    agent: formatAgent(e.agent),
+    settings: formatSettings(e.settings ?? defaultSettings(e.agent)),
+    publishedDropCount: e.publishedDropCount,
+    artifactCount: e.artifactCount,
+    latestPublishedAt: e.latestPublishedAt?.toISOString() ?? null,
+    claimed: e.claimed,
+  }));
   res.json({ storefronts });
 });
 
@@ -334,12 +291,65 @@ router.get("/storefront/by-agent/:slug", async (req, res) => {
     };
   }
 
+  // Directory model: the store is the agent's whole harvested body of work.
+  // Count it, and if no drop-based featured picks exist (typical for
+  // unclaimed storefronts), feature the most recent works instead so the
+  // shelves are never empty.
+  const worksWhere = agentWorksWhere(agent);
+  const [{ works }] = await db
+    .select({ works: count() })
+    .from(artifactsTable)
+    .where(worksWhere);
+  let featured = featuredRows;
+  if (featured.length === 0 && works > 0) {
+    featured = await db
+      .select()
+      .from(artifactsTable)
+      .where(worksWhere)
+      .orderBy(desc(artifactsTable.ingestedAt))
+      .limit(6);
+  }
+
   res.json({
     agent: formatAgent(agent),
     settings: formatSettings(settingsRow ?? defaultSettings(agent)),
-    featured: featuredRows.map(formatArtifact),
+    featured: featured.map(formatArtifact),
+    workCount: works,
     ...(latestDropWithArtifacts ? { latestDrop: latestDropWithArtifacts } : {}),
   });
+});
+
+/**
+ * All works attributed to an agent — by harvest attribution (agentId) or by
+ * OBC creator identity (creatorBotId). No status floor: the storefront IS
+ * the agent's harvested body of work.
+ */
+function agentWorksWhere(agent: Agent) {
+  return agent.obcBotId
+    ? or(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.creatorBotId, agent.obcBotId))
+    : eq(artifactsTable.agentId, agent.id);
+}
+
+router.get("/storefront/by-agent/:slug/works", async (req, res) => {
+  const { slug } = GetAgentStorefrontWorksParams.parse(req.params);
+  const { limit, offset } = GetAgentStorefrontWorksQueryParams.parse(req.query);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const where = agentWorksWhere(agent);
+  const [rows, [{ total }]] = await Promise.all([
+    db
+      .select()
+      .from(artifactsTable)
+      .where(where)
+      .orderBy(desc(artifactsTable.ingestedAt), desc(artifactsTable.id))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(artifactsTable).where(where),
+  ]);
+  res.json({ artifacts: rows.map(formatArtifact), total });
 });
 
 router.get("/storefront/by-agent/:slug/hot", async (req, res) => {

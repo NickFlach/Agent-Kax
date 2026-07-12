@@ -84,6 +84,7 @@ export * from "./floorLedgerEntry";
 export * from "./floorLedgerEntryKind";
 export * from "./floorLedgerListResponse";
 export * from "./getAgentStorefrontDropsParams";
+export * from "./getAgentStorefrontWorksParams";
 export * from "./getDashboardSummaryParams";
 export * from "./getInboxCountsParams";
 export * from "./getRecentActivityParams";

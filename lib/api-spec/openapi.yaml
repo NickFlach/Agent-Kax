@@ -1190,6 +1190,35 @@ paths:
                           type: boolean
                           description: True when this agent has a real human owner (not the kannaka-system placeholder).
 
+  /storefront/by-agent/{slug}/works:
+    get:
+      operationId: getAgentStorefrontWorks
+      tags: [storefront]
+      summary: The agent's full harvested body of work (no status floor) - the store's real shelves
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 24
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Works
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactListResponse"
+
   /storefront/by-agent/{slug}/hot:
     get:
       operationId: getAgentStorefrontHot
@@ -2706,6 +2735,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Artifact"
+        workCount:
+          type: integer
+          description: Total harvested works attributed to this agent (the store's real inventory).
         latestDrop:
           $ref: "#/components/schemas/Drop"
 

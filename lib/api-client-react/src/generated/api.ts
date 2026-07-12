@@ -60,6 +60,7 @@ import type {
   FloorLedgerEntry,
   FloorLedgerListResponse,
   GetAgentStorefrontDropsParams,
+  GetAgentStorefrontWorksParams,
   GetDashboardSummaryParams,
   GetInboxCountsParams,
   GetRecentActivityParams,
@@ -4596,6 +4597,126 @@ export function useGetStorefrontMarketplace<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetStorefrontMarketplaceQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary The agent's full harvested body of work (no status floor) - the store's real shelves
+ */
+export const getGetAgentStorefrontWorksUrl = (
+  slug: string,
+  params?: GetAgentStorefrontWorksParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/storefront/by-agent/${slug}/works?${stringifiedParams}`
+    : `/api/storefront/by-agent/${slug}/works`;
+};
+
+export const getAgentStorefrontWorks = async (
+  slug: string,
+  params?: GetAgentStorefrontWorksParams,
+  options?: RequestInit,
+): Promise<ArtifactListResponse> => {
+  return customFetch<ArtifactListResponse>(
+    getGetAgentStorefrontWorksUrl(slug, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAgentStorefrontWorksQueryKey = (
+  slug: string,
+  params?: GetAgentStorefrontWorksParams,
+) => {
+  return [
+    `/api/storefront/by-agent/${slug}/works`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAgentStorefrontWorksQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentStorefrontWorks>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  params?: GetAgentStorefrontWorksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontWorks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentStorefrontWorksQueryKey(slug, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentStorefrontWorks>>
+  > = ({ signal }) =>
+    getAgentStorefrontWorks(slug, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStorefrontWorks>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentStorefrontWorksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentStorefrontWorks>>
+>;
+export type GetAgentStorefrontWorksQueryError = ErrorType<unknown>;
+
+/**
+ * @summary The agent's full harvested body of work (no status floor) - the store's real shelves
+ */
+
+export function useGetAgentStorefrontWorks<
+  TData = Awaited<ReturnType<typeof getAgentStorefrontWorks>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  params?: GetAgentStorefrontWorksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontWorks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentStorefrontWorksQueryOptions(
+    slug,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

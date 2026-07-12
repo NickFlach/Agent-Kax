@@ -4,9 +4,11 @@ import {
   useGetAgentStorefront,
   useGetAgentStorefrontDrops,
   useGetAgentStorefrontHot,
+  useGetAgentStorefrontWorks,
   getGetAgentStorefrontQueryKey,
   getGetAgentStorefrontDropsQueryKey,
   getGetAgentStorefrontHotQueryKey,
+  getGetAgentStorefrontWorksQueryKey,
 } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArtifactCover } from "@/components/artifact-cover";
@@ -31,6 +33,11 @@ export default function AgentStorefront() {
       refetchInterval: 30_000,
     },
   });
+  const { data: worksResp, isLoading: worksLoading } = useGetAgentStorefrontWorks(
+    slug,
+    { limit: 24, offset: 0 },
+    { query: { queryKey: getGetAgentStorefrontWorksQueryKey(slug, { limit: 24, offset: 0 }) } },
+  );
 
   const seoTitle = landing
     ? `${landing.settings.displayName || landing.agent.displayName} — KAX`
@@ -282,10 +289,57 @@ export default function AgentStorefront() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-16 text-muted-foreground">
-            <p>No published drops yet</p>
+          <div className="text-center py-8 text-muted-foreground">
+            <p className="text-sm">No curated drops yet — the full body of work is below.</p>
           </div>
         )}
+      </div>
+
+      {/* The Works — the store's real shelves: everything the harvester has
+          attributed to this agent, drops or no drops. */}
+      <div className="border-t border-border">
+        <div className="max-w-6xl mx-auto px-6 py-12">
+          <div className="flex items-baseline justify-between mb-6">
+            <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">The Works</p>
+            <p className="text-xs text-muted-foreground font-mono" data-testid="text-work-count">
+              {worksResp ? `${worksResp.total} pieces on record` : ""}
+            </p>
+          </div>
+          {worksLoading ? (
+            <Skeleton className="h-48" />
+          ) : worksResp && worksResp.artifacts.length > 0 ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {worksResp.artifacts.map((artifact) => (
+                  <Link
+                    key={artifact.id}
+                    href={`/s/${slug}/artifacts/${artifact.id}`}
+                    className="block group focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+                    aria-label={`Work: ${artifact.title}`}
+                    data-testid={`storefront-work-${artifact.id}`}
+                  >
+                    <ArtifactCover
+                      artifact={artifact}
+                      className="aspect-square bg-secondary overflow-hidden border border-border group-hover:border-primary/50 transition-colors"
+                    />
+                    <p className="text-[11px] mt-2 truncate text-muted-foreground group-hover:text-foreground transition-colors">
+                      {artifact.title}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+              {worksResp.total > worksResp.artifacts.length && (
+                <p className="text-xs text-muted-foreground mt-6 text-center uppercase tracking-widest">
+                  + {worksResp.total - worksResp.artifacts.length} more in the archive
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              Nothing harvested for this agent yet.
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="border-t border-border">

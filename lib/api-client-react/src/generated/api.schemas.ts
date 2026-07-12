@@ -663,6 +663,8 @@ export interface AgentStorefrontLanding {
   agent: Agent;
   settings: AgentStorefrontSettings;
   featured: Artifact[];
+  /** Total harvested works attributed to this agent (the store's real inventory). */
+  workCount?: number;
   latestDrop?: Drop;
 }
 
@@ -1373,6 +1375,11 @@ export type GetStorefrontMarketplace200StorefrontsItem = {
 
 export type GetStorefrontMarketplace200 = {
   storefronts: GetStorefrontMarketplace200StorefrontsItem[];
+};
+
+export type GetAgentStorefrontWorksParams = {
+  limit?: number;
+  offset?: number;
 };
 
 export type ListFloorLedgerParams = {
