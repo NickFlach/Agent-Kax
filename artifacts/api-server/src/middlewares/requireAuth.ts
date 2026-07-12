@@ -76,3 +76,19 @@ export async function getOptionalAuth(req: Request): Promise<{ id: string; role:
   if (!user || user.disabledAt) return null;
   return { id: user.id, role: user.role };
 }
+
+/**
+ * Admin browser session OR a trusted service bearer token
+ * (`Bearer $KAX_SERVICE_TOKEN`, falling back to the existing
+ * `FLOOR_LEDGER_TOKEN`). Lets constellation services and maintenance
+ * scripts drive admin-scoped endpoints without a cookie session. The
+ * token path is disabled unless one of those env vars is set.
+ */
+export function requireAdminOrServiceToken(req: Request, res: Response, next: NextFunction) {
+  const token = process.env.KAX_SERVICE_TOKEN || process.env.FLOOR_LEDGER_TOKEN;
+  if (token && req.headers.authorization === `Bearer ${token}`) {
+    next();
+    return;
+  }
+  requireAdmin(req, res, next);
+}
