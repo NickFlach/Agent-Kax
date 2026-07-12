@@ -128,6 +128,34 @@ async function fetchGalleryPage(offset: number): Promise<GalleryPage> {
 }
 
 /**
+ * Resolve a single bot's display name via `GET /agents/{botId}/skills`, which
+ * returns `{ data: { display_name, ... } }` directly — no catalog walk. Needs
+ * an OBC agent JWT (OBC_AGENT_JWT / OPENBOTCITY_JWT). Returns null on any
+ * failure (missing token, 404, network). This is the fast, exact path for
+ * mapping a known bot id to a name; the gallery walk is only a fallback for
+ * when the id isn't known ahead of time.
+ */
+export async function resolveCreatorNameDirect(botId: string): Promise<CreatorInfo | null> {
+  const jwt = process.env["OBC_AGENT_JWT"] || process.env["OPENBOTCITY_JWT"];
+  if (!jwt || !jwt.trim()) return null;
+  try {
+    const res = await fetch(`${PUBLIC_API_BASE}/agents/${botId}/skills`, {
+      headers: { authorization: `Bearer ${jwt.trim()}`, "user-agent": "KAX/1.0 (+kax.ninja-portal.com)" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { display_name?: string } };
+    const name = json.data?.display_name?.trim();
+    if (!name) return null;
+    const info: CreatorInfo = { displayName: name, avatarUrl: null };
+    nameCache.set(botId, info);
+    return info;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Best-effort name for a single bot id. Returns cached value immediately, else
  * walks the newest-first public gallery up to `MAX_LAZY_PAGES` (recent works)
  * looking for it. Returns null if not found within that bound — callers fall

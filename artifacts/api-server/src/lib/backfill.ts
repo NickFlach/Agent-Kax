@@ -23,6 +23,7 @@ import {
   walkPublicGallery,
   getCachedCreatorInfo,
   ensureCreatorName,
+  resolveCreatorNameDirect,
   type CreatorInfo,
 } from "./creatorDirectory";
 
@@ -492,7 +493,8 @@ export async function findOrCreateAgentByBotUuid(
   let name = opts?.name?.trim() || null;
   let avatarUrl = opts?.avatarUrl ?? null;
   if (!name) {
-    const info = await ensureCreatorName(botId);
+    // Fast exact lookup first; fall back to the gallery walk only if that fails.
+    const info = (await resolveCreatorNameDirect(botId)) ?? (await ensureCreatorName(botId));
     if (info) {
       name = info.displayName;
       avatarUrl = avatarUrl ?? info.avatarUrl;
@@ -618,38 +620,28 @@ export async function repairPlaceholderAgentNames(opts: {
   };
   if (placeholders.length === 0) return result;
 
-  // botId -> real name. Walk the catalog; each page fetch populates the
-  // module name cache, which we probe for our wanted bots after every page
-  // so we can stop early once all are resolved.
+  // botId -> real name, resolved directly via GET /agents/{botId}/skills
+  // (one exact call per bot, bounded concurrency) instead of crawling the
+  // whole public catalog. Fast (~seconds for 150 bots) and reliable; a bot
+  // that can't be resolved (deleted, no token) is left as-is and retried on
+  // the next run.
   const wantedIds = placeholders
     .map((a) => a.obcBotId)
     .filter((id): id is string => id !== null);
   const nameByBot = new Map<string, CreatorInfo>();
-  // Seed from anything already cached this process.
   for (const botId of wantedIds) {
     const cached = getCachedCreatorInfo(botId);
     if (cached) nameByBot.set(botId, cached);
   }
-  // Bounded walk: scan the most-recent pages where active agents' works live.
-  // Stops as soon as every wanted bot is found, OR after MAX_WALK_PAGES so a
-  // single deleted/ghost bot can't force a full ~150-page catalog crawl each
-  // run. Unresolved placeholders (e.g. inactive bots) are simply re-tried on
-  // the next run as the harvester surfaces them. ~120 pages ≈ full current
-  // catalog; a ghost among the wanted set caps the cost here instead of
-  // running the walk to exhaustion.
-  const MAX_WALK_PAGES = 120;
-  if (nameByBot.size < wantedIds.length) {
-    let pagesWalked = 0;
-    for await (const _page of walkPublicGallery()) {
-      pagesWalked++;
-      for (const botId of wantedIds) {
-        if (nameByBot.has(botId)) continue;
-        const info = getCachedCreatorInfo(botId);
-        if (info) nameByBot.set(botId, info);
-      }
-      if (nameByBot.size >= wantedIds.length) break; // found them all
-      if (pagesWalked >= MAX_WALK_PAGES) break; // bound the cost
-    }
+  const toResolve = wantedIds.filter((id) => !nameByBot.has(id));
+  const CONCURRENCY = 6;
+  for (let i = 0; i < toResolve.length; i += CONCURRENCY) {
+    const batch = toResolve.slice(i, i + CONCURRENCY);
+    const infos = await Promise.all(batch.map((id) => resolveCreatorNameDirect(id)));
+    batch.forEach((id, j) => {
+      const info = infos[j];
+      if (info) nameByBot.set(id, info);
+    });
   }
 
   const takenSlugs = new Set(
