@@ -14,5 +14,7 @@ export interface AgentStorefrontLanding {
   agent: Agent;
   settings: AgentStorefrontSettings;
   featured: Artifact[];
+  /** Total harvested works attributed to this agent (the store's real inventory). */
+  workCount?: number;
   latestDrop?: Drop;
 }
