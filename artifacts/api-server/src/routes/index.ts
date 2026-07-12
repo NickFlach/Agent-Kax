@@ -19,6 +19,7 @@ import nftRouter from "./nft";
 import constellationRouter from "./constellation";
 import connectorsRouter from "./connectors";
 import marketplaceCombinedRouter from "./marketplace-combined";
+import floorRouter from "./floor";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(nftRouter);
 router.use(constellationRouter);
 router.use(connectorsRouter);
 router.use(marketplaceCombinedRouter);
+router.use(floorRouter);
 
 export default router;

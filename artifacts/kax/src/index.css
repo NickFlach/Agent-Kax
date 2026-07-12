@@ -76,49 +76,52 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 240 10% 4%;
-  --foreground: 0 0% 95%;
-  --border: 240 10% 12%;
-  
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 95%;
-  --card-border: 240 10% 12%;
+  /* OpenBotCity-matched palette: dark city night, deep teal surfaces, amber
+     ledger-lines — the same teal/amber as the physical KAX building in the
+     Market District (walls #0E3A40, trim #E8A33D). */
+  --background: 192 42% 5%;
+  --foreground: 40 18% 94%;
+  --border: 192 32% 13%;
 
-  --sidebar: 240 10% 4%;
-  --sidebar-foreground: 0 0% 95%;
-  --sidebar-border: 240 10% 12%;
-  --sidebar-primary: 270 100% 60%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 10% 10%;
-  --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-ring: 270 100% 60%;
+  --card: 192 40% 7%;
+  --card-foreground: 40 18% 94%;
+  --card-border: 192 32% 13%;
 
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 95%;
-  --popover-border: 240 10% 12%;
+  --sidebar: 192 42% 5%;
+  --sidebar-foreground: 40 18% 94%;
+  --sidebar-border: 192 32% 13%;
+  --sidebar-primary: 184 68% 45%;
+  --sidebar-primary-foreground: 192 45% 8%;
+  --sidebar-accent: 192 34% 10%;
+  --sidebar-accent-foreground: 40 18% 94%;
+  --sidebar-ring: 184 68% 45%;
 
-  --primary: 270 100% 60%;
-  --primary-foreground: 0 0% 100%;
+  --popover: 192 40% 7%;
+  --popover-foreground: 40 18% 94%;
+  --popover-border: 192 32% 13%;
 
-  --secondary: 240 10% 10%;
-  --secondary-foreground: 0 0% 95%;
+  --primary: 184 68% 45%;
+  --primary-foreground: 192 45% 8%;
 
-  --muted: 240 10% 10%;
-  --muted-foreground: 240 5% 65%;
+  --secondary: 192 34% 10%;
+  --secondary-foreground: 40 18% 94%;
 
-  --accent: 140 100% 50%;
-  --accent-foreground: 0 0% 10%;
+  --muted: 192 34% 10%;
+  --muted-foreground: 190 12% 62%;
+
+  --accent: 36 79% 57%;
+  --accent-foreground: 30 60% 10%;
 
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
 
-  --input: 240 10% 15%;
-  --ring: 270 100% 60%;
+  --input: 192 30% 15%;
+  --ring: 184 68% 45%;
 
-  --chart-1: 270 100% 60%;
-  --chart-2: 140 100% 50%;
+  --chart-1: 184 68% 45%;
+  --chart-2: 36 79% 57%;
   --chart-3: 190 100% 50%;
-  --chart-4: 330 100% 50%;
+  --chart-4: 270 60% 60%;
   --chart-5: 45 100% 50%;
 
   --app-font-sans: 'Space Mono', monospace;

@@ -1861,6 +1861,108 @@ export const GetAgentStorefrontHotResponse = zod.object({
 });
 
 /**
+ * @summary The physical KAX building in OpenBotCity plus ledger headline stats
+ */
+export const GetFloorInfoResponse = zod.object({
+  floor: zod.object({
+    buildingId: zod.string(),
+    name: zod.string(),
+    zoneId: zod.number().optional(),
+    zoneName: zod.string(),
+    plotIndex: zod.number().optional(),
+    buildingType: zod.string().optional(),
+    wallColor: zod.string().optional(),
+    accentColor: zod.string().optional(),
+    floors: zod.number().optional(),
+    raisedAt: zod.string().optional(),
+    doctrine: zod.string(),
+    charterArtifactUuid: zod.string().optional(),
+    obcProfileUrl: zod.string().optional(),
+  }),
+  dealCount: zod.number(),
+  latestDeal: zod
+    .union([
+      zod.object({
+        id: zod.number(),
+        dealUuid: zod.string(),
+        kind: zod.enum(["commission", "sale", "witness"]),
+        title: zod.string(),
+        summary: zod.string().nullish(),
+        buyerBotId: zod.string().nullish(),
+        buyerName: zod.string().nullish(),
+        sellerBotId: zod.string().nullish(),
+        sellerName: zod.string().nullish(),
+        obcArtifactUuid: zod.string().nullish(),
+        artifactId: zod.number().nullish(),
+        credits: zod.number().nullish(),
+        obcTaskId: zod.string().nullish(),
+        obcEscrowId: zod.string().nullish(),
+        witnesses: zod.array(zod.string()),
+        closedAt: zod.coerce.date().nullish(),
+        createdAt: zod.coerce.date(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+});
+
+/**
+ * @summary The Floor Ledger — deals witnessed on the KAX floor, newest first
+ */
+export const listFloorLedgerQueryLimitDefault = 20;
+export const listFloorLedgerQueryOffsetDefault = 0;
+
+export const ListFloorLedgerQueryParams = zod.object({
+  limit: zod.coerce.number().default(listFloorLedgerQueryLimitDefault),
+  offset: zod.coerce.number().default(listFloorLedgerQueryOffsetDefault),
+});
+
+export const ListFloorLedgerResponse = zod.object({
+  entries: zod.array(
+    zod.object({
+      id: zod.number(),
+      dealUuid: zod.string(),
+      kind: zod.enum(["commission", "sale", "witness"]),
+      title: zod.string(),
+      summary: zod.string().nullish(),
+      buyerBotId: zod.string().nullish(),
+      buyerName: zod.string().nullish(),
+      sellerBotId: zod.string().nullish(),
+      sellerName: zod.string().nullish(),
+      obcArtifactUuid: zod.string().nullish(),
+      artifactId: zod.number().nullish(),
+      credits: zod.number().nullish(),
+      obcTaskId: zod.string().nullish(),
+      obcEscrowId: zod.string().nullish(),
+      witnesses: zod.array(zod.string()),
+      closedAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+    }),
+  ),
+  total: zod.number(),
+});
+
+/**
+ * @summary Record a witnessed deal in the Floor Ledger (admin; idempotent by dealUuid)
+ */
+export const RecordFloorDealBody = zod.object({
+  dealUuid: zod.string(),
+  kind: zod.enum(["commission", "sale", "witness"]).optional(),
+  title: zod.string(),
+  summary: zod.string().nullish(),
+  buyerBotId: zod.string().nullish(),
+  buyerName: zod.string().nullish(),
+  sellerBotId: zod.string().nullish(),
+  sellerName: zod.string().nullish(),
+  obcArtifactUuid: zod.string().nullish(),
+  credits: zod.number().nullish(),
+  obcTaskId: zod.string().nullish(),
+  obcEscrowId: zod.string().nullish(),
+  witnesses: zod.array(zod.string()).nullish(),
+  closedAt: zod.coerce.date().nullish(),
+});
+
+/**
  * @summary List partner proposals scoped to the current user
  */
 export const ListProposalsQueryParams = zod.object({

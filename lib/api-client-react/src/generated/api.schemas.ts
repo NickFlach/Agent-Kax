@@ -582,6 +582,110 @@ export interface AgentStorefrontLanding {
   latestDrop?: Drop;
 }
 
+export type FloorInfoFloor = {
+  buildingId: string;
+  name: string;
+  zoneId?: number;
+  zoneName: string;
+  plotIndex?: number;
+  buildingType?: string;
+  wallColor?: string;
+  accentColor?: string;
+  floors?: number;
+  raisedAt?: string;
+  doctrine: string;
+  charterArtifactUuid?: string;
+  obcProfileUrl?: string;
+};
+
+export type FloorLedgerEntryKind =
+  (typeof FloorLedgerEntryKind)[keyof typeof FloorLedgerEntryKind];
+
+export const FloorLedgerEntryKind = {
+  commission: "commission",
+  sale: "sale",
+  witness: "witness",
+} as const;
+
+export interface FloorLedgerEntry {
+  id: number;
+  dealUuid: string;
+  kind: FloorLedgerEntryKind;
+  title: string;
+  /** @nullable */
+  summary?: string | null;
+  /** @nullable */
+  buyerBotId?: string | null;
+  /** @nullable */
+  buyerName?: string | null;
+  /** @nullable */
+  sellerBotId?: string | null;
+  /** @nullable */
+  sellerName?: string | null;
+  /** @nullable */
+  obcArtifactUuid?: string | null;
+  /** @nullable */
+  artifactId?: number | null;
+  /** @nullable */
+  credits?: number | null;
+  /** @nullable */
+  obcTaskId?: string | null;
+  /** @nullable */
+  obcEscrowId?: string | null;
+  witnesses: string[];
+  /** @nullable */
+  closedAt?: string | null;
+  createdAt: string;
+}
+
+export interface FloorInfo {
+  floor: FloorInfoFloor;
+  dealCount: number;
+  latestDeal?: FloorLedgerEntry | null;
+}
+
+export interface FloorLedgerListResponse {
+  entries: FloorLedgerEntry[];
+  total: number;
+}
+
+export type RecordFloorDealBodyKind =
+  (typeof RecordFloorDealBodyKind)[keyof typeof RecordFloorDealBodyKind];
+
+export const RecordFloorDealBodyKind = {
+  commission: "commission",
+  sale: "sale",
+  witness: "witness",
+} as const;
+
+export interface RecordFloorDealBody {
+  dealUuid: string;
+  kind?: RecordFloorDealBodyKind;
+  title: string;
+  /** @nullable */
+  summary?: string | null;
+  /** @nullable */
+  buyerBotId?: string | null;
+  /** @nullable */
+  buyerName?: string | null;
+  /** @nullable */
+  sellerBotId?: string | null;
+  /** @nullable */
+  sellerName?: string | null;
+  /** @nullable */
+  obcArtifactUuid?: string | null;
+  /** @nullable */
+  credits?: number | null;
+  /** @nullable */
+  obcTaskId?: string | null;
+  /** @nullable */
+  obcEscrowId?: string | null;
+  /** @nullable */
+  witnesses?: string[] | null;
+  /** @nullable */
+  closedAt?: string | null;
+}
+
 export type HarvestAgentBodyType =
   (typeof HarvestAgentBodyType)[keyof typeof HarvestAgentBodyType];
 
@@ -1179,6 +1283,11 @@ export type GetStorefrontMarketplace200StorefrontsItem = {
 
 export type GetStorefrontMarketplace200 = {
   storefronts: GetStorefrontMarketplace200StorefrontsItem[];
+};
+
+export type ListFloorLedgerParams = {
+  limit?: number;
+  offset?: number;
 };
 
 export type ListProposalsParams = {
