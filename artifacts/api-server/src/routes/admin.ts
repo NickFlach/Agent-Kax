@@ -4,7 +4,7 @@ import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { ListAdminUsersResponse, UpdateAdminUserBody, UpdateAdminUserParams } from "@workspace/api-zod";
-import { reattributeArtifactsByCreator } from "../lib/backfill";
+import { reattributeArtifactsByCreator, repairPlaceholderAgentNames } from "../lib/backfill";
 import {
   partnerApiAvailable,
   partnerApiKey,
@@ -91,6 +91,15 @@ router.patch("/admin/users/:id", requireAdmin, async (req, res) => {
 router.post("/admin/reattribute-artifacts", requireAdmin, async (req, res) => {
   const result = await reattributeArtifactsByCreator({
     ownerId: req.user!.id,
+    dryRun: req.query["dryRun"] === "true",
+  });
+  res.json(result);
+});
+
+// Rename unclaimed agents stuck on a "Agent <hex>" placeholder by resolving
+// their real display name from the public catalog. dryRun=true to preview.
+router.post("/admin/repair-agent-names", requireAdmin, async (req, res) => {
+  const result = await repairPlaceholderAgentNames({
     dryRun: req.query["dryRun"] === "true",
   });
   res.json(result);

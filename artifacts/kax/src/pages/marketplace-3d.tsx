@@ -245,7 +245,7 @@ export default function Marketplace3D() {
   }
 
   return (
-    <div className="relative min-h-screen w-full bg-[#020506] overflow-hidden kax3d-font">
+    <div className="relative h-screen w-full bg-[#020506] overflow-hidden kax3d-font">
       {/* Skip link + screen-reader-only directory of storefronts so keyboard
           and assistive-tech users can reach every storefront without going
           through the WebGL scene (which is unreachable by keyboard). */}
@@ -407,8 +407,12 @@ export default function Marketplace3D() {
         )}
       </div>
 
-      {/* 3D Scene */}
+      {/* 3D Scene — pinned to fill the viewport. Without an explicit absolute
+          fill, the Canvas's default height:100% resolves against the parent's
+          height and can collapse to a sliver at the top. */}
       <Canvas
+        className="!absolute inset-0"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         camera={{ position: [0, 6, 18], fov: 45 }}
         onPointerMissed={() => setSelected(null)}
         dpr={[1, 1.5]}
