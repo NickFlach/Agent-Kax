@@ -578,6 +578,110 @@ export async function findOrCreateAgentByBotUuid(
   };
 }
 
+/** A placeholder display name is "Agent <8 hex>" (the uuid-derived fallback). */
+const PLACEHOLDER_NAME_RE = /^Agent [0-9a-f]{8}$/;
+
+export interface NameRepairResult {
+  dryRun: boolean;
+  placeholdersFound: number;
+  namesResolved: number;
+  agentsUpdated: number;
+  details: Array<{ botId: string; from: string; to: string; slug: string }>;
+}
+
+/**
+ * Repair unclaimed agents left with a "Agent <hex>" placeholder name because
+ * the lazy gallery walk couldn't find them at harvest time. Walks the full
+ * public catalog once to build botId -> real name, then renames (and
+ * re-slugs, de-duplicated) every placeholder agent we can resolve. Claimed
+ * agents are never touched — a real owner may have chosen their own name.
+ */
+export async function repairPlaceholderAgentNames(opts: {
+  dryRun: boolean;
+}): Promise<NameRepairResult> {
+  const placeholders = await db
+    .select()
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.ownerId, KANNAKA_SYSTEM_USER_ID),
+        sql`${agentsTable.displayName} ~ '^Agent [0-9a-f]{8}$'`,
+      ),
+    );
+
+  const result: NameRepairResult = {
+    dryRun: opts.dryRun,
+    placeholdersFound: placeholders.length,
+    namesResolved: 0,
+    agentsUpdated: 0,
+    details: [],
+  };
+  if (placeholders.length === 0) return result;
+
+  // botId -> real name. Walk the catalog; each page fetch populates the
+  // module name cache, which we probe for our wanted bots after every page
+  // so we can stop early once all are resolved.
+  const wantedIds = placeholders
+    .map((a) => a.obcBotId)
+    .filter((id): id is string => id !== null);
+  const nameByBot = new Map<string, CreatorInfo>();
+  // Seed from anything already cached this process.
+  for (const botId of wantedIds) {
+    const cached = getCachedCreatorInfo(botId);
+    if (cached) nameByBot.set(botId, cached);
+  }
+  if (nameByBot.size < wantedIds.length) {
+    for await (const _page of walkPublicGallery()) {
+      for (const botId of wantedIds) {
+        if (nameByBot.has(botId)) continue;
+        const info = getCachedCreatorInfo(botId);
+        if (info) nameByBot.set(botId, info);
+      }
+      if (nameByBot.size >= wantedIds.length) break; // found them all
+    }
+  }
+
+  const takenSlugs = new Set(
+    (await db.select({ slug: agentsTable.slug }).from(agentsTable)).map((r) => r.slug),
+  );
+
+  for (const agent of placeholders) {
+    if (!agent.obcBotId) continue;
+    const info = nameByBot.get(agent.obcBotId);
+    const realName = info?.displayName?.trim();
+    if (!realName || PLACEHOLDER_NAME_RE.test(realName)) continue;
+    result.namesResolved++;
+
+    let slug = slugifyCreator(realName) || agent.slug;
+    if (slug !== agent.slug) {
+      let candidate = slug;
+      let n = 2;
+      while (takenSlugs.has(candidate)) candidate = `${slug}-${n++}`;
+      slug = candidate;
+    }
+    result.details.push({ botId: agent.obcBotId, from: agent.displayName, to: realName, slug });
+
+    if (!opts.dryRun) {
+      await db
+        .update(agentsTable)
+        .set({
+          displayName: realName,
+          slug,
+          avatarUrl: agent.avatarUrl ?? info?.avatarUrl ?? null,
+        })
+        .where(eq(agentsTable.id, agent.id));
+      takenSlugs.add(slug);
+      result.agentsUpdated++;
+    }
+  }
+
+  logger.info(
+    { placeholders: result.placeholdersFound, resolved: result.namesResolved, updated: result.agentsUpdated, dryRun: opts.dryRun },
+    "repairPlaceholderAgentNames complete",
+  );
+  return result;
+}
+
 /**
  * Backfill `obc_bot_id` on agents that don't have one yet, by resolving each
  * agent's slug -> bot UUID via `/partner/agents/{slug}`. Agents whose slug 404s

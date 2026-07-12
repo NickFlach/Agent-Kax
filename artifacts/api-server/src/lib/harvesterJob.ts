@@ -209,7 +209,14 @@ async function doRunPartnerHarvest(opts: {
       if (botId) {
         agent = agentCache.get(botId) ?? null;
         if (!agent) {
-          agent = await findOrCreateAgentByBotUuid(botId);
+          // Pass the creator name straight from the partner artifact — it's
+          // right here, so the agent is named correctly on creation instead
+          // of falling back to a uuid-derived "Agent <hex>" placeholder when
+          // the lazy gallery walk can't find the bot in recent works.
+          agent = await findOrCreateAgentByBotUuid(botId, {
+            name: pa.creator?.display_name ?? null,
+            avatarUrl: pa.creator?.avatar_url ?? null,
+          });
           agentCache.set(botId, agent);
         }
       }
