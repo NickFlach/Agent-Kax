@@ -630,14 +630,25 @@ export async function repairPlaceholderAgentNames(opts: {
     const cached = getCachedCreatorInfo(botId);
     if (cached) nameByBot.set(botId, cached);
   }
+  // Bounded walk: scan the most-recent pages where active agents' works live.
+  // Stops as soon as every wanted bot is found, OR after MAX_WALK_PAGES so a
+  // single deleted/ghost bot can't force a full ~150-page catalog crawl each
+  // run. Unresolved placeholders (e.g. inactive bots) are simply re-tried on
+  // the next run as the harvester surfaces them. ~120 pages ≈ full current
+  // catalog; a ghost among the wanted set caps the cost here instead of
+  // running the walk to exhaustion.
+  const MAX_WALK_PAGES = 120;
   if (nameByBot.size < wantedIds.length) {
+    let pagesWalked = 0;
     for await (const _page of walkPublicGallery()) {
+      pagesWalked++;
       for (const botId of wantedIds) {
         if (nameByBot.has(botId)) continue;
         const info = getCachedCreatorInfo(botId);
         if (info) nameByBot.set(botId, info);
       }
       if (nameByBot.size >= wantedIds.length) break; // found them all
+      if (pagesWalked >= MAX_WALK_PAGES) break; // bound the cost
     }
   }
 
