@@ -2760,7 +2760,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [commission, sale, witness]
+          enum: [commission, sale, witness, prediction]
         title:
           type: string
         summary:
@@ -2813,7 +2813,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [commission, sale, witness]
+          enum: [commission, sale, witness, prediction]
         title:
           type: string
         summary:

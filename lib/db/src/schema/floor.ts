@@ -1,7 +1,7 @@
 import { pgTable, serial, integer, text, real, jsonb, timestamp, pgEnum } from "drizzle-orm/pg-core";
 import { artifactsTable } from "./artifacts";
 
-export const floorDealKindEnum = pgEnum("floor_deal_kind", ["commission", "sale", "witness"]);
+export const floorDealKindEnum = pgEnum("floor_deal_kind", ["commission", "sale", "witness", "prediction"]);
 
 /**
  * The Floor Ledger — permanent record of deals witnessed on the physical

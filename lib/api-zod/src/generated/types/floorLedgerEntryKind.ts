@@ -13,4 +13,5 @@ export const FloorLedgerEntryKind = {
   commission: "commission",
   sale: "sale",
   witness: "witness",
+  prediction: "prediction",
 } as const;
