@@ -54,13 +54,18 @@ function Storefront({
 }) {
   const isClaimed = agent.claimed;
   const isConstellation = agent.source === "constellation";
-  
-  // Update colors to match KAX theme: teal/amber
-  // Constellation: muted amber
-  // Unclaimed: teal
-  // Claimed: bright teal
-  const mainColor = isConstellation ? "#E8A33D" : isClaimed ? "#0E3A40" : "#145963";
-  const glowColor = isConstellation ? "#E8A33D" : isClaimed ? "#00ffff" : "#145963";
+
+  // Neon-market colour language, readable across the whole district:
+  //   claimed/secured  → cyan   (alive, owned)
+  //   available        → amber  (come claim it)
+  //   constellation    → violet (a network signal, not a shop)
+  const glowColor = isConstellation ? "#a98bff" : isClaimed ? "#00e5ff" : "#E8A33D";
+  const mainColor = isConstellation ? "#2a2140" : isClaimed ? "#0E3A40" : "#123642";
+  // Lit facade tones (lighter than the old near-black boxes)
+  const bodyColor = isConstellation ? "#2c2748" : isClaimed ? "#173f49" : "#1a3b45";
+  const bodyColor2 = isConstellation ? "#332c55" : isClaimed ? "#1d4a55" : "#204651";
+  const windowColor = isConstellation ? "#c9b6ff" : isClaimed ? "#8ff0ea" : "#f3c983";
+  const doorColor = isConstellation ? "#a98bff" : isClaimed ? "#E8A33D" : "#ffd9a0";
   
   const glyphRef = useRef<THREE.Group>(null);
   const haloRef = useRef<THREE.Mesh>(null);
@@ -102,51 +107,85 @@ function Storefront({
         <meshBasicMaterial />
       </mesh>
 
+      {/* Stoop / base platform with a neon edge strip */}
+      <mesh position={[0, 0.15, 0.4]}>
+        <boxGeometry args={[3.6, 0.3, 3.8]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.6} metalness={0.3} />
+      </mesh>
+      <mesh position={[0, 0.32, 1.85]}>
+        <boxGeometry args={[3.6, 0.06, 0.08]} />
+        <meshStandardMaterial color={glowColor} emissive={glowColor} emissiveIntensity={2} toneMapped={false} />
+      </mesh>
+
+      {/* Main body — lighter, lit facade */}
       <mesh position={[0, 2, 0]}>
-        <boxGeometry args={[3, 4, 3]} />
-        <meshStandardMaterial color="#0B1E23" roughness={0.7} metalness={0.2} />
+        <boxGeometry args={[3, 3.6, 3]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.55} metalness={0.35} />
       </mesh>
-      <mesh position={[0, 4.5, 0.2]}>
-        <boxGeometry args={[2.8, 1, 2.8]} />
-        <meshStandardMaterial color="#0A181C" roughness={0.8} />
+      {/* Setback upper storey + roof cap for silhouette detail */}
+      <mesh position={[0, 4.2, 0.25]}>
+        <boxGeometry args={[2.6, 1.1, 2.5]} />
+        <meshStandardMaterial color={bodyColor2} roughness={0.6} metalness={0.3} />
       </mesh>
-      <mesh position={[0, 5.5, 0.4]}>
-        <boxGeometry args={[2.2, 1, 2.2]} />
-        <meshStandardMaterial color="#081215" roughness={0.9} />
+      <mesh position={[0, 5.0, 0.4]}>
+        <boxGeometry args={[1.8, 0.5, 1.8]} />
+        <meshStandardMaterial color={bodyColor2} roughness={0.7} metalness={0.25} />
+      </mesh>
+      {/* Neon roofline strip */}
+      <mesh position={[0, 3.85, 1.5]}>
+        <boxGeometry args={[3, 0.08, 0.08]} />
+        <meshStandardMaterial color={glowColor} emissive={glowColor} emissiveIntensity={2.2} toneMapped={false} />
       </mesh>
 
+      {/* Two lit shop windows flanking the door (interior glow) */}
+      <mesh position={[-0.9, 1.5, 1.51]}>
+        <planeGeometry args={[0.9, 1.6]} />
+        <meshStandardMaterial color={windowColor} emissive={windowColor} emissiveIntensity={1.1} toneMapped={false} />
+      </mesh>
+      <mesh position={[0.9, 1.5, 1.51]}>
+        <planeGeometry args={[0.9, 1.6]} />
+        <meshStandardMaterial color={windowColor} emissive={windowColor} emissiveIntensity={1.1} toneMapped={false} />
+      </mesh>
+      {/* Doorway with warm interior light */}
       <mesh position={[0, 1, 1.51]}>
-        <planeGeometry args={[1, 2]} />
-        <meshStandardMaterial color={isClaimed ? "#071D20" : "#0A1618"} emissive={mainColor} emissiveIntensity={0.2} />
+        <planeGeometry args={[0.9, 2]} />
+        <meshStandardMaterial color={doorColor} emissive={doorColor} emissiveIntensity={0.9} toneMapped={false} />
       </mesh>
 
-      <mesh ref={haloRef} position={[0, 3, 1.55]}>
+      {/* Angled awning over the storefront in the accent color */}
+      <mesh position={[0, 2.55, 1.75]} rotation={[Math.PI / 5, 0, 0]}>
+        <boxGeometry args={[3.1, 0.7, 0.08]} />
+        <meshStandardMaterial color={glowColor} emissive={glowColor} emissiveIntensity={0.9} toneMapped={false} />
+      </mesh>
+
+      <mesh ref={haloRef} position={[0, 3.2, 1.55]}>
         <planeGeometry args={[3.4, 1.6]} />
         <meshBasicMaterial color={glowColor} transparent opacity={0} />
       </mesh>
 
-      <mesh position={[0, 3, 1.6]}>
-        <boxGeometry args={[2.8, 1, 0.1]} />
-        <meshStandardMaterial color={mainColor} emissive={glowColor} emissiveIntensity={1.4} transparent opacity={0.9} />
+      {/* Sign board */}
+      <mesh position={[0, 3.25, 1.6]}>
+        <boxGeometry args={[2.8, 0.9, 0.1]} />
+        <meshStandardMaterial color={mainColor} emissive={glowColor} emissiveIntensity={1.4} transparent opacity={0.92} />
       </mesh>
 
       {/* Labels suspend on the remote font fetch — isolate them so a slow
           or blocked font can never blank the buildings themselves. */}
       <Suspense fallback={null}>
-        <Text position={[0, 3.1, 1.66]} fontSize={0.3} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.6}>
+        <Text position={[0, 3.4, 1.66]} fontSize={0.28} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.6}>
           {agent.name}
         </Text>
-        <Text position={[0, 2.7, 1.66]} fontSize={0.15} color="#e0e0e0" font={SPACE_MONO_WOFF}>
+        <Text position={[0, 3.05, 1.66]} fontSize={0.15} color="#e8e8e8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
           {isConstellation
             ? `Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
             : `${agent.artifacts} WORK${agent.artifacts === 1 ? "" : "S"}`}
         </Text>
         {isConstellation ? (
-          <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
-            [ CONSTELLATION ]
+          <Text position={[0, 4.35, 1.66]} fontSize={0.16} color={glowColor} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+            [ SIGNAL ]
           </Text>
         ) : !isClaimed ? (
-          <Text position={[0, 3.8, 1.66]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF}>
+          <Text position={[0, 4.35, 1.66]} fontSize={0.16} color={glowColor} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
             [ AVAILABLE ]
           </Text>
         ) : null}
@@ -245,7 +284,7 @@ export default function Marketplace3D() {
   }
 
   return (
-    <div className="relative h-screen w-full bg-[#020506] overflow-hidden kax3d-font">
+    <div className="relative h-screen w-full bg-[#0a1a24] overflow-hidden kax3d-font">
       {/* Skip link + screen-reader-only directory of storefronts so keyboard
           and assistive-tech users can reach every storefront without going
           through the WebGL scene (which is unreachable by keyboard). */}
@@ -289,7 +328,7 @@ export default function Marketplace3D() {
         </ul>
       </nav>
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none bg-gradient-to-b from-[#020506] to-transparent">
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none bg-gradient-to-b from-[#0a1a24] to-transparent">
         <Link href="/" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80 transition-colors" data-testid="link-home">
           KAX
         </Link>
@@ -424,12 +463,15 @@ export default function Marketplace3D() {
           });
         }}
       >
-        <color attach="background" args={["#020506"]} />
-        <fog attach="fog" args={["#020506", 10, 60]} />
+        {/* Lit deep-teal night — a market after dark, not a black void */}
+        <color attach="background" args={["#0a1a24"]} />
+        <fog attach="fog" args={["#0d2230", 22, 85]} />
 
-        <ambientLight intensity={0.5} color="#2A4A50" />
-        <directionalLight position={[0, 10, 5]} intensity={0.9} color="#5E9AA6" />
-        <pointLight position={[10, 10, -10]} intensity={1.2} color="#E8A33D" />
+        <hemisphereLight args={["#3d6b78", "#0a1620", 0.9]} />
+        <ambientLight intensity={0.35} color="#2A4A50" />
+        <directionalLight position={[6, 14, 8]} intensity={1.1} color="#9fd0d8" />
+        <pointLight position={[-14, 8, -6]} intensity={1.4} distance={70} color="#00e5ff" />
+        <pointLight position={[14, 8, -18]} intensity={1.4} distance={70} color="#E8A33D" />
 
         <OrbitControls target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
 
@@ -439,22 +481,33 @@ export default function Marketplace3D() {
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
           <planeGeometry args={[100, 200]} />
           <MeshReflectorMaterial
-            blur={[200, 50]}
+            blur={[300, 80]}
             resolution={512}
             mixBlur={1}
-            mixStrength={60}
-            roughness={1}
+            mixStrength={45}
+            roughness={0.9}
             depthScale={1}
             minDepthThreshold={0.4}
             maxDepthThreshold={1.4}
-            color="#010304"
-            metalness={0.8}
-            mirror={0.5}
+            color="#0a1c24"
+            metalness={0.7}
+            mirror={0.55}
           />
         </mesh>
 
-        <Sparkles count={200} scale={[20, 10, 40]} size={1.5} speed={0.4} opacity={0.2} color="#00ffff" position={[0, 5, -10]} />
-        <Sparkles count={120} scale={[20, 10, 40]} size={2} speed={0.6} opacity={0.3} color="#E8A33D" position={[0, 5, -10]} />
+        {/* Neon plaza grid — the market street, tron-lit */}
+        <gridHelper
+          args={[120, 60, "#1f6b74", "#123640"]}
+          position={[0, 0.02, -10]}
+        />
+        {/* Central boulevard runway between the two storefront rows */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, -18]}>
+          <planeGeometry args={[3.2, 90]} />
+          <meshStandardMaterial color="#0E3A40" emissive="#00e5ff" emissiveIntensity={0.35} transparent opacity={0.55} toneMapped={false} />
+        </mesh>
+
+        <Sparkles count={140} scale={[26, 12, 60]} size={1.4} speed={0.3} opacity={0.35} color="#00e5ff" position={[0, 6, -12]} />
+        <Sparkles count={90} scale={[26, 12, 60]} size={2} speed={0.5} opacity={0.4} color="#E8A33D" position={[0, 6, -12]} />
 
         {layout.map((item) => (
           <Storefront
