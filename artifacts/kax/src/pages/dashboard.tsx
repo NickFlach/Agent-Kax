@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useGetDashboardSummary, useGetRecentActivity, useGetScoreDistribution, useGetHotArtifacts, useGetInboxCounts, getGetDashboardSummaryQueryKey, getGetRecentActivityQueryKey, getGetScoreDistributionQueryKey, getGetHotArtifactsQueryKey, getGetInboxCountsQueryKey } from "@workspace/api-client-react";
-import { Link as WLink } from "wouter";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from "recharts";
-import { Link } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
@@ -84,7 +83,7 @@ export default function Dashboard() {
 
       {inboxCounts && (inboxCounts.proposalsPending > 0 || inboxCounts.dmsUnread > 0 || inboxCounts.matchesTotal > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="inbox-counts">
-          <WLink href="/proposals">
+          <Link href="/proposals">
             <Card className="cursor-pointer hover-elevate">
               <CardContent className="p-4 flex items-center justify-between">
                 <div>
@@ -94,8 +93,8 @@ export default function Dashboard() {
                 <span className="text-xs text-muted-foreground">review →</span>
               </CardContent>
             </Card>
-          </WLink>
-          <WLink href="/inbox">
+          </Link>
+          <Link href="/inbox">
             <Card className="cursor-pointer hover-elevate">
               <CardContent className="p-4 flex items-center justify-between">
                 <div>
@@ -105,8 +104,8 @@ export default function Dashboard() {
                 <span className="text-xs text-muted-foreground">open inbox →</span>
               </CardContent>
             </Card>
-          </WLink>
-          <WLink href="/proposals">
+          </Link>
+          <Link href="/proposals">
             <Card className="cursor-pointer hover-elevate">
               <CardContent className="p-4 flex items-center justify-between">
                 <div>
@@ -116,7 +115,7 @@ export default function Dashboard() {
                 <span className="text-xs text-muted-foreground">view →</span>
               </CardContent>
             </Card>
-          </WLink>
+          </Link>
         </div>
       )}
 
