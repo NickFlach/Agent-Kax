@@ -320,11 +320,22 @@ export default function LoginPage() {
                 </p>
               )}
 
-              <p className="mt-5 text-[10px] uppercase tracking-widest text-muted-foreground">
-                {mode === "register"
-                  ? "Already have an account? Use Sign in."
-                  : "New here? Create an account in seconds."}
-              </p>
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                  {mode === "register"
+                    ? "Already have an account? Use Sign in."
+                    : "New here? Create an account in seconds."}
+                </p>
+                {mode === "signin" && (
+                  <Link
+                    href="/reset-password"
+                    className="shrink-0 text-[10px] uppercase tracking-widest text-primary underline underline-offset-2"
+                    data-testid="link-forgot-password"
+                  >
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
         </div>

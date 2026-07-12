@@ -1,6 +1,8 @@
+import crypto from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
+import { authChallengesTable } from "@workspace/db/schema";
 import {
   RegisterWithEmailBody,
   RegisterWithEmailResponse,
@@ -9,12 +11,18 @@ import {
   LinkEmailBody,
   LinkEmailResponse,
   LinkWalletResponse,
+  RequestPasswordResetBody,
+  RequestPasswordResetResponse,
+  ConfirmPasswordResetBody,
+  ConfirmPasswordResetResponse,
 } from "@workspace/api-zod";
 import { createSession, SESSION_COOKIE, SESSION_TTL } from "../lib/auth";
 import { requireAuth } from "../middlewares/requireAuth";
 import { hashPassword, verifyPassword, dummyVerify } from "../lib/password";
 import { createRateLimiter } from "../lib/rateLimit";
 import { consumeWalletProof } from "../lib/walletProof";
+import { sendNotificationEmail } from "../lib/notify";
+import { logger } from "../lib/logger";
 
 /**
  * Email + password door (task #52) and account linking. Wallet stays
@@ -171,6 +179,178 @@ router.post("/auth/email/login", async (req, res) => {
   loginLimiter.clear(emailKey);
   await openSession(res, user);
   res.json(LoginWithEmailResponse.parse({ user: authUserPayload(user) }));
+});
+
+// ---------------------------------------------------------------------------
+// Forgot-password reset (task #53). Tokens reuse the auth_challenges
+// table: `challenge` stores the sha256 hex of the emailed token (a DB
+// leak never exposes usable tokens), claimSubject is the user id,
+// single-use via `consumed`, 30 min TTL.
+// ---------------------------------------------------------------------------
+
+const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+// Exported so tests can reset the windows between cases.
+export const resetRequestLimiter = createRateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
+export const resetConfirmLimiter = createRateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
+
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+/**
+ * Canonical public origin for links placed in emails. Same posture as
+ * share.ts getBaseUrl: never trust request headers (Host is
+ * attacker-controllable), only explicit env.
+ */
+function resetLinkBase(): string {
+  const override = (process.env["KAX_PUBLIC_URL"] || "").trim();
+  if (override) return override.replace(/\/+$/, "");
+  const replitDomain =
+    process.env["REPLIT_DEV_DOMAIN"] || (process.env["REPLIT_DOMAINS"] || "").split(",")[0];
+  if (replitDomain) return `https://${replitDomain.trim()}`;
+  return "https://kax.replit.app";
+}
+
+/**
+ * Issue a reset token for `email` and send the email, if (and only if)
+ * the address belongs to an account with a password set. Runs detached
+ * from the request/response cycle so the endpoint's response timing is
+ * identical whether or not the account exists.
+ */
+async function issueResetToken(email: string): Promise<void> {
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, email))
+    .limit(1);
+  // No account, wallet-only account (no password to reset), or a
+  // disabled account: silently do nothing. The caller already
+  // responded with the generic 200.
+  if (!user || !user.passwordHash || user.disabledAt) return;
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  await db.insert(authChallengesTable).values({
+    kind: "password_reset",
+    challenge: sha256Hex(token),
+    claimSubject: user.id,
+    expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+  });
+
+  const link = `${resetLinkBase()}/reset-password?token=${token}`;
+  const sent = await sendNotificationEmail({
+    to: email,
+    subject: "Reset your KAX password",
+    text: [
+      "Someone (hopefully you) asked to reset the password for this KAX account.",
+      "",
+      `Reset it here (link valid for 30 minutes, single use):`,
+      link,
+      "",
+      "If you didn't request this, you can safely ignore this email —",
+      "your password stays unchanged.",
+    ].join("\n"),
+  });
+  if (!sent) {
+    logger.warn({ userId: user.id }, "password reset: email not sent (see notify logs)");
+  }
+}
+
+/**
+ * POST /auth/email/reset-request — ask for a reset link by email.
+ * ALWAYS answers the same generic 200 whether or not the email exists
+ * (anti-enumeration, same posture as login). The actual lookup + email
+ * send happens after the response so timing doesn't leak either.
+ */
+router.post("/auth/email/reset-request", (req, res) => {
+  const parsed = RequestPasswordResetBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "enter a valid email address" });
+    return;
+  }
+  const email = parsed.data.email.trim().toLowerCase();
+  const ipAllowed = resetRequestLimiter.hit(`ip:${clientIp(req)}`);
+  const emailAllowed = resetRequestLimiter.hit(`email:${email}`);
+  if (!ipAllowed || !emailAllowed) {
+    res.status(429).json({ error: "too many reset requests — try again later" });
+    return;
+  }
+  res.json(RequestPasswordResetResponse.parse({ ok: true }));
+  // Detached on purpose — see issueResetToken docs.
+  void issueResetToken(email).catch((err) => {
+    logger.error({ err }, "password reset: issue failed");
+  });
+});
+
+/**
+ * POST /auth/email/reset-confirm — redeem a token, set a new password.
+ * The token row is consumed atomically (UPDATE … WHERE consumed=false
+ * RETURNING) so a replayed or raced request collapses to the same
+ * generic 400. On success every other outstanding reset token for the
+ * account is voided too.
+ */
+router.post("/auth/email/reset-confirm", async (req, res) => {
+  if (!resetConfirmLimiter.hit(`ip:${clientIp(req)}`)) {
+    res.status(429).json({ error: "too many attempts — try again in a few minutes" });
+    return;
+  }
+  const parsed = ConfirmPasswordResetBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "a reset token and a new password of at least 8 characters are required" });
+    return;
+  }
+  const invalid = () =>
+    res.status(400).json({ error: "that reset link is invalid or has expired — request a new one" });
+
+  const tokenHash = sha256Hex(parsed.data.token);
+  const [challenge] = await db
+    .update(authChallengesTable)
+    .set({ consumed: true })
+    .where(
+      and(
+        eq(authChallengesTable.kind, "password_reset"),
+        eq(authChallengesTable.challenge, tokenHash),
+        eq(authChallengesTable.consumed, false),
+        gt(authChallengesTable.expiresAt, sql`now()`),
+      ),
+    )
+    .returning();
+  if (!challenge) {
+    invalid();
+    return;
+  }
+
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, challenge.claimSubject))
+    .limit(1);
+  if (!user || user.disabledAt) {
+    // Same generic 400 — never confirm anything about the account.
+    invalid();
+    return;
+  }
+
+  const passwordHash = await hashPassword(parsed.data.newPassword);
+  await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, user.id));
+
+  // Void any other outstanding reset tokens for this account.
+  await db
+    .update(authChallengesTable)
+    .set({ consumed: true })
+    .where(
+      and(
+        eq(authChallengesTable.kind, "password_reset"),
+        eq(authChallengesTable.claimSubject, user.id),
+        eq(authChallengesTable.consumed, false),
+      ),
+    );
+
+  // Forgive the login limiter for this email so the user can sign in
+  // immediately with the new password.
+  if (user.email) loginLimiter.clear(`email:${user.email}`);
+
+  res.json(ConfirmPasswordResetResponse.parse({ ok: true }));
 });
 
 /**

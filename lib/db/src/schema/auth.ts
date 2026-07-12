@@ -62,7 +62,14 @@ export type User = typeof usersTable.$inferSelect;
 //     creates an OBC artifact whose description includes the phrase,
 //     server fetches the artifact via the partner API and confirms
 //     the creator_bot_id matches claimSubject + the phrase appears.
-export const authChallengeKindEnum = pgEnum("auth_challenge_kind", ["wallet_nonce", "agent_challenge"]);
+//   - password_reset: single-use email password-reset token (task #53).
+//     `challenge` stores the sha256 hex of the token (never the raw
+//     token), claimSubject is the user id. 30 min TTL.
+export const authChallengeKindEnum = pgEnum("auth_challenge_kind", [
+  "wallet_nonce",
+  "agent_challenge",
+  "password_reset",
+]);
 
 export const authChallengesTable = pgTable(
   "auth_challenges",

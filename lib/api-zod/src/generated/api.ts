@@ -240,6 +240,55 @@ export const LoginWithEmailResponse = zod.object({
 });
 
 /**
+ * Always answers 200 with the same body whether or not the email
+exists — the response never reveals account existence (same
+anti-enumeration posture as login). If the email belongs to an
+account with a password set, a single-use reset link (30 min
+TTL) is emailed.
+
+ * @summary Request a password-reset email
+ */
+export const requestPasswordResetBodyEmailMax = 254;
+
+export const RequestPasswordResetBody = zod.object({
+  email: zod.string().email().max(requestPasswordResetBodyEmailMax),
+});
+
+export const RequestPasswordResetResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * Consumes the single-use token from the reset email and updates
+the account's password hash. The token is invalidated whether
+the attempt succeeds or fails downstream, and all other
+outstanding reset tokens for the account are voided on success.
+
+ * @summary Set a new password using a reset token
+ */
+export const confirmPasswordResetBodyTokenMax = 256;
+
+export const confirmPasswordResetBodyNewPasswordMin = 8;
+export const confirmPasswordResetBodyNewPasswordMax = 128;
+
+export const ConfirmPasswordResetBody = zod.object({
+  token: zod
+    .string()
+    .min(1)
+    .max(confirmPasswordResetBodyTokenMax)
+    .describe("Single-use token from the reset email"),
+  newPassword: zod
+    .string()
+    .min(confirmPasswordResetBodyNewPasswordMin)
+    .max(confirmPasswordResetBodyNewPasswordMax)
+    .describe("8-128 characters. Capped to bound scrypt CPU cost."),
+});
+
+export const ConfirmPasswordResetResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * The client first mints a nonce at /auth/wallet/nonce and signs the
 returned message. This endpoint verifies the proof exactly like
 /auth/wallet/verify but attaches the address to the CURRENT

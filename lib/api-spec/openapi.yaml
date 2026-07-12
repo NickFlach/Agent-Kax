@@ -154,6 +154,61 @@ paths:
           description: Account disabled
         '429':
           description: Too many attempts — try again later
+  /auth/email/reset-request:
+    post:
+      tags: [Auth]
+      operationId: requestPasswordReset
+      summary: Request a password-reset email
+      description: |
+        Always answers 200 with the same body whether or not the email
+        exists — the response never reveals account existence (same
+        anti-enumeration posture as login). If the email belongs to an
+        account with a password set, a single-use reset link (30 min
+        TTL) is emailed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequestBody'
+      responses:
+        '200':
+          description: Accepted (whether or not the account exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetAcceptedResponse'
+        '400':
+          description: Invalid email
+        '429':
+          description: Too many reset requests — try again later
+  /auth/email/reset-confirm:
+    post:
+      tags: [Auth]
+      operationId: confirmPasswordReset
+      summary: Set a new password using a reset token
+      description: |
+        Consumes the single-use token from the reset email and updates
+        the account's password hash. The token is invalidated whether
+        the attempt succeeds or fails downstream, and all other
+        outstanding reset tokens for the account are voided on success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmBody'
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetAcceptedResponse'
+        '400':
+          description: Invalid, expired, or already-used token, or bad password
+        '429':
+          description: Too many attempts — try again later
   /auth/link/wallet:
     post:
       tags: [Auth]
@@ -1827,6 +1882,34 @@ components:
           type: string
           minLength: 8
           maxLength: 128
+    PasswordResetRequestBody:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    PasswordResetConfirmBody:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Single-use token from the reset email
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 8-128 characters. Capped to bound scrypt CPU cost.
+    PasswordResetAcceptedResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
     AuthMethodsResponse:
       type: object
       required: [email, walletAddress, hasPassword]

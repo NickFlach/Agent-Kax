@@ -33,6 +33,7 @@ import ConstellationAgentPage from "@/pages/constellation-agent";
 import Inbox from "@/pages/inbox";
 import Proposals from "@/pages/proposals";
 import LoginPage from "@/pages/login";
+import ResetPasswordPage from "@/pages/reset-password";
 import BotsPage from "@/pages/bots";
 import FloorPage from "@/pages/floor";
 import LandingPage from "@/pages/landing";
@@ -347,6 +348,9 @@ function Router() {
       </Route>
       <Route path="/login">
         <LoginPage />
+      </Route>
+      <Route path="/reset-password">
+        <ResetPasswordPage />
       </Route>
       <Route path="/s">
         <Marketplace />

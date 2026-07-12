@@ -85,6 +85,30 @@ export interface LinkEmailRequest {
   password: string;
 }
 
+export interface PasswordResetRequestBody {
+  /** @maxLength 254 */
+  email: string;
+}
+
+export interface PasswordResetConfirmBody {
+  /**
+   * Single-use token from the reset email
+   * @minLength 1
+   * @maxLength 256
+   */
+  token: string;
+  /**
+   * 8-128 characters. Capped to bound scrypt CPU cost.
+   * @minLength 8
+   * @maxLength 128
+   */
+  newPassword: string;
+}
+
+export interface PasswordResetAcceptedResponse {
+  ok: boolean;
+}
+
 export interface AuthMethodsResponse {
   /** @nullable */
   email: string | null;
