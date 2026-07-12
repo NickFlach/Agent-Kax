@@ -8,6 +8,7 @@ import {
   authChallengesTable,
 } from "@workspace/db";
 import { createSession, SESSION_COOKIE, SESSION_TTL } from "../lib/auth";
+import { consumeWalletProof } from "../lib/walletProof";
 
 const router: Router = Router();
 
@@ -95,67 +96,21 @@ router.post("/auth/wallet/nonce", async (req, res) => {
  */
 router.post("/auth/wallet/verify", async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const addressRaw = typeof body.address === "string" ? body.address : "";
-  const signature = typeof body.signature === "string" ? body.signature : "";
-  const nonce = typeof body.nonce === "string" ? body.nonce.toLowerCase() : "";
-  if (!ADDRESS_RE.test(addressRaw) || !SIGNATURE_RE.test(signature) || !/^[0-9a-f]+$/.test(nonce)) {
-    res.status(400).json({ error: "address, signature, and nonce are required" });
+  // Verification (input shape → nonce lookup → canonical-payload
+  // signature check → atomic consume) is shared with /auth/link/wallet.
+  // The canonical payload stored at /nonce time is used and any
+  // client-supplied `message` ignored — the SIWE phishing fix, see
+  // migration 0004 and lib/walletProof.ts.
+  const proof = await consumeWalletProof({
+    address: body.address,
+    signature: body.signature,
+    nonce: body.nonce,
+  });
+  if (!proof.ok) {
+    res.status(proof.status).json({ error: proof.error });
     return;
   }
-  const address = addressRaw.toLowerCase();
-  // Look up the nonce — must exist, match address, be unconsumed + unexpired.
-  // We ignore any client-supplied `message` field and use the canonical
-  // payload stored at /nonce time. Without this, an attacker who got
-  // a victim to sign ANY message containing a valid nonce (via phishing
-  // wallet popups) could replay that signature here to mint a session
-  // in the victim's name. See migration 0004.
-  const [challenge] = await db
-    .select()
-    .from(authChallengesTable)
-    .where(and(
-      eq(authChallengesTable.kind, "wallet_nonce"),
-      eq(authChallengesTable.challenge, nonce),
-    ))
-    .limit(1);
-  if (!challenge || challenge.consumed || challenge.claimSubject !== address || challenge.expiresAt < new Date()) {
-    res.status(401).json({ error: "nonce invalid, expired, or already used" });
-    return;
-  }
-  const canonicalMessage = challenge.payload;
-  if (!canonicalMessage || canonicalMessage.length < 50) {
-    // Pre-0004 row without stored payload — refuse rather than fall
-    // through to the unsafe path. Client must request a fresh nonce.
-    res.status(409).json({ error: "stale nonce — please request a new one" });
-    return;
-  }
-  // Recover the signer from the canonical SIWE message. ethers handles
-  // the "personal_sign" \x19Ethereum Signed Message:\n<len> prefix
-  // when given the raw message + signature.
-  let recovered: string;
-  try {
-    recovered = ethers.verifyMessage(canonicalMessage, signature).toLowerCase();
-  } catch (err) {
-    res.status(401).json({ error: "signature verification failed" });
-    return;
-  }
-  if (recovered !== address) {
-    res.status(401).json({ error: "signature does not match address" });
-    return;
-  }
-  // Atomically consume the nonce. If another concurrent request beats
-  // us to it, the update will affect 0 rows — bail.
-  const consumed = await db
-    .update(authChallengesTable)
-    .set({ consumed: true })
-    .where(and(
-      eq(authChallengesTable.id, challenge.id),
-      eq(authChallengesTable.consumed, false),
-    ))
-    .returning();
-  if (consumed.length === 0) {
-    res.status(409).json({ error: "nonce raced — please try again" });
-    return;
-  }
+  const address = proof.address;
   // Upsert the user keyed by wallet address. New rows default to a
   // displayName of the truncated 0x…XXXX so something readable shows
   // in the UI before the user sets their own.

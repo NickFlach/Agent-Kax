@@ -142,10 +142,20 @@ export async function cleanupAuthTestData(opts: {
   addresses?: string[];
   userIds?: string[];
   sids?: string[];
+  /**
+   * Emails of users created through POST /auth/email/register (their
+   * ids are gen_random_uuid, not test-prefixed, so cleanupTestData()
+   * can't catch them — pass the registered emails here instead).
+   */
+  emails?: string[];
 } = {}): Promise<void> {
   const addrs = (opts.addresses ?? []).map((a) => a.toLowerCase());
   const userIds = opts.userIds ?? [];
   const sids = opts.sids ?? [];
+  const emails = (opts.emails ?? []).map((e) => e.toLowerCase());
+  if (emails.length > 0) {
+    await db.delete(usersTable).where(inArray(usersTable.email, emails));
+  }
   if (sids.length > 0) {
     await db.delete(sessionsTable).where(inArray(sessionsTable.sid, sids));
   }

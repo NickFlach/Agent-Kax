@@ -14,6 +14,12 @@ import { authMiddleware } from "./middlewares/authMiddleware";
 
 const app: Express = express();
 
+// Behind the Replit shared proxy: trust the first X-Forwarded-For hop
+// so req.ip reflects the real client. Without this every visitor
+// shares the proxy's address and per-IP rate limiting (auth-email.ts)
+// would throttle everyone together.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,

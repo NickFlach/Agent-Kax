@@ -18,6 +18,13 @@ declare global {
       isAuthenticated(): this is AuthedRequest;
 
       user?: User | undefined;
+
+      /**
+       * Which door opened the active session — derived from the
+       * synthetic access_token prefix (`wallet:` / `email:` /
+       * `obc_agent:`). Undefined when anonymous.
+       */
+      authProvider?: string | undefined;
     }
 
     export interface AuthedRequest {
@@ -88,5 +95,9 @@ export async function authMiddleware(
   }
 
   req.user = session.user;
+  const providerPrefix = tokStr.split(":")[0];
+  if (providerPrefix === "wallet" || providerPrefix === "email" || providerPrefix === "obc_agent") {
+    req.authProvider = providerPrefix;
+  }
   next();
 }

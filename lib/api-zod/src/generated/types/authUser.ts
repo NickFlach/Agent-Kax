@@ -28,8 +28,10 @@ export interface AuthUser {
    */
   walletAddress?: string | null;
   /**
-   * Auth provider for the active session (wallet, obc_agent)
+   * Auth provider for the active session (wallet, obc_agent, email)
    * @nullable
    */
   provider?: string | null;
+  /** True if the account has an email password set (email door usable) */
+  hasPassword?: boolean;
 }

@@ -39,6 +39,12 @@ const getCurrentUser = async (req: Request, res: Response) => {
           emailOnProposal: dbUser.emailOnProposal,
           emailOnDm: dbUser.emailOnDm,
         },
+        // Task #52: these were always in the OpenAPI schema but never
+        // returned — zod silently stripped them, so the client's
+        // `user.walletAddress` was permanently undefined.
+        walletAddress: dbUser.walletAddress,
+        provider: req.authProvider ?? null,
+        hasPassword: Boolean(dbUser.passwordHash),
       },
     }),
   );

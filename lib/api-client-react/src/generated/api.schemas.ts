@@ -41,10 +41,56 @@ export interface AuthUser {
    */
   walletAddress?: string | null;
   /**
-   * Auth provider for the active session (wallet, obc_agent)
+   * Auth provider for the active session (wallet, obc_agent, email)
    * @nullable
    */
   provider?: string | null;
+  /** True if the account has an email password set (email door usable) */
+  hasPassword?: boolean;
+}
+
+export interface EmailRegisterRequest {
+  /** @maxLength 254 */
+  email: string;
+  /**
+   * 8-128 characters. Capped to bound scrypt CPU cost.
+   * @minLength 8
+   * @maxLength 128
+   */
+  password: string;
+  /**
+   * @maxLength 80
+   * @nullable
+   */
+  displayName?: string | null;
+}
+
+export interface EmailLoginRequest {
+  /** @maxLength 254 */
+  email: string;
+  /**
+   * @minLength 1
+   * @maxLength 128
+   */
+  password: string;
+}
+
+export interface LinkEmailRequest {
+  /** @maxLength 254 */
+  email: string;
+  /**
+   * @minLength 8
+   * @maxLength 128
+   */
+  password: string;
+}
+
+export interface AuthMethodsResponse {
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  walletAddress: string | null;
+  hasPassword: boolean;
 }
 
 export interface WalletNonceRequest {

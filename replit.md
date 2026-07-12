@@ -123,7 +123,19 @@ All routes under `/api`:
 
 ## Authentication
 
-Wallet is the canonical (and only) login path as of task #24. OIDC (Replit Auth + Space Child Auth) was removed entirely — `/api/login`, `/api/callback`, and `/api/mobile-auth/*` are gone, the `openid-client` dependency is dropped, and the `replit` variant of `auth_provider` is dropped from the enum (migration 0003). Logout is now a one-shot `POST /api/logout` that deletes the session row and clears the cookie. Legacy `obc_agent:<userId>` sessions issued before the wallet-primary refactor (task #21) are grandfathered until they expire on their own; their bot is lazily backfilled into `user_bots` on first authenticated request.
+Two equal sign-in doors as of task #52: **wallet (SIWE)** and **email + password**. Both open a session against the SAME `users` row; a signed-in user can link the missing method from the "Sign-in methods" card on `/bots` (`POST /api/auth/link/wallet`, `POST /api/auth/link/email`). The login page (`/login`) is a two-door OBC-styled layout. Sessions carry a synthetic `access_token` prefix recording which door opened them (`wallet:` / `email:` / legacy `obc_agent:`); authMiddleware surfaces it as `req.authProvider` and `GET /api/auth/user` returns `walletAddress`, `provider`, and `hasPassword`.
+
+OIDC (Replit Auth + Space Child Auth) was removed entirely in task #24 — `/api/login`, `/api/callback`, and `/api/mobile-auth/*` are gone, the `openid-client` dependency is dropped, and the `replit` variant of `auth_provider` is dropped from the enum (migration 0003; migration 0009 adds the `email` variant + `users.password_hash`). Logout is a one-shot `POST /api/logout` that deletes the session row and clears the cookie. Legacy `obc_agent:<userId>` sessions issued before the wallet-primary refactor (task #21) are grandfathered until they expire on their own; their bot is lazily backfilled into `user_bots` on first authenticated request.
+
+### Email + password (second door, task #52)
+
+- `POST /api/auth/email/register { email, password, displayName? }` — creates the account and signs in. Password ≥ 8 chars; email lowercased; duplicate email → 409 (DB unique constraint, never check-then-insert). Rate-limited 5/h per IP.
+- `POST /api/auth/email/login { email, password }` — generic 401 for unknown email / wrong password / passwordless (wallet-only) account, with a dummy scrypt compare so the unknown-email path isn't detectably faster. Rate-limited 10 per 15 min per email AND per IP; the email window is forgiven on successful login. Disabled accounts → 403.
+- `POST /api/auth/link/email { email, password }` (auth) — sets email+password on a wallet-first account. 409 if a password is already set, if the account has a different email, or if the email belongs to another account.
+- `POST /api/auth/link/wallet { address, signature, nonce }` (auth) — attaches a wallet to an email-first account via the exact same SIWE proof pipeline as `/auth/wallet/verify` (shared `consumeWalletProof` in `lib/walletProof.ts`); does NOT touch the session. 409 if the account already has a wallet or the wallet is linked elsewhere.
+- Passwords: async scrypt (N=16384, r=8, p=1), per-hash salt+params encoded in the stored string, `timingSafeEqual`, 128-char input cap. Hashing lives in `artifacts/api-server/src/lib/password.ts`; the in-memory fixed-window rate limiter in `lib/rateLimit.ts` (single-instance server, by design).
+- `app.set("trust proxy", 1)` is on so `req.ip` is the real client behind the Replit proxy. Caveat: if the server were ever exposed directly, X-Forwarded-For becomes client-controlled and per-IP limits are bypassable.
+- Tests: `artifacts/api-server/src/routes/auth-email.test.ts` (18 cases, real dev DB, real ethers signatures for link-wallet).
 
 ### Wallet (primary, EIP-191 SIWE-style)
 

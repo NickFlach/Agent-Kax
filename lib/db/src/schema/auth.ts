@@ -18,8 +18,9 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
 // `wallet` = SIWE EIP-4361 (canonical, post task #24). `obc_agent` =
 // OBC artifact-as-proof flow, retained for grandfathered rows whose
 // session was minted before the wallet-primary refactor (task #21).
+// `email` = email + password registration (task #52, migration 0009).
 // The legacy `replit` OIDC variant was dropped in migration 0003.
-export const authProviderEnum = pgEnum("auth_provider", ["wallet", "obc_agent"]);
+export const authProviderEnum = pgEnum("auth_provider", ["wallet", "obc_agent", "email"]);
 
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 // Extended 2026-05-11 with walletAddress + obcBotId for the new auth
@@ -42,6 +43,9 @@ export const usersTable = pgTable("users", {
   // obcBotId.
   walletAddress: varchar("wallet_address").unique(),
   obcBotId: varchar("obc_bot_id").unique(),
+  // Email + password door (task #52). scrypt-formatted string
+  // (`scrypt$N$r$p$saltB64$hashB64`). Null for wallet-only accounts.
+  passwordHash: varchar("password_hash"),
   authProvider: authProviderEnum("auth_provider").notNull().default("wallet"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

@@ -32,6 +32,7 @@ import type {
   Artifact,
   ArtifactListResponse,
   ArtifactMintState,
+  AuthMethodsResponse,
   AuthUserEnvelope,
   ConnectorAgentLookupResponse,
   ConnectorArtifactPageResponse,
@@ -50,6 +51,8 @@ import type {
   Drop,
   DropListResponse,
   DropSuggestionsResponse,
+  EmailLoginRequest,
+  EmailRegisterRequest,
   ErrorEnvelope,
   FeaturedResponse,
   FloorInfo,
@@ -68,6 +71,7 @@ import type {
   HealthStatus,
   HotArtifactsResponse,
   InboxCounts,
+  LinkEmailRequest,
   ListAdminUsersResponse,
   ListArtifactsParams,
   ListConnectorArtifactsParams,
@@ -438,6 +442,359 @@ export const useVerifyWalletSignature = <
   TContext
 > => {
   return useMutation(getVerifyWalletSignatureMutationOptions(options));
+};
+
+/**
+ * @summary Create an account with email + password and open a session
+ */
+export const getRegisterWithEmailUrl = () => {
+  return `/api/auth/email/register`;
+};
+
+export const registerWithEmail = async (
+  emailRegisterRequest: EmailRegisterRequest,
+  options?: RequestInit,
+): Promise<AuthUserEnvelope> => {
+  return customFetch<AuthUserEnvelope>(getRegisterWithEmailUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailRegisterRequest),
+  });
+};
+
+export const getRegisterWithEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerWithEmail>>,
+    TError,
+    { data: BodyType<EmailRegisterRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof registerWithEmail>>,
+  TError,
+  { data: BodyType<EmailRegisterRequest> },
+  TContext
+> => {
+  const mutationKey = ["registerWithEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof registerWithEmail>>,
+    { data: BodyType<EmailRegisterRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return registerWithEmail(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegisterWithEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof registerWithEmail>>
+>;
+export type RegisterWithEmailMutationBody = BodyType<EmailRegisterRequest>;
+export type RegisterWithEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Create an account with email + password and open a session
+ */
+export const useRegisterWithEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerWithEmail>>,
+    TError,
+    { data: BodyType<EmailRegisterRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof registerWithEmail>>,
+  TError,
+  { data: BodyType<EmailRegisterRequest> },
+  TContext
+> => {
+  return useMutation(getRegisterWithEmailMutationOptions(options));
+};
+
+/**
+ * @summary Sign in with email + password
+ */
+export const getLoginWithEmailUrl = () => {
+  return `/api/auth/email/login`;
+};
+
+export const loginWithEmail = async (
+  emailLoginRequest: EmailLoginRequest,
+  options?: RequestInit,
+): Promise<AuthUserEnvelope> => {
+  return customFetch<AuthUserEnvelope>(getLoginWithEmailUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailLoginRequest),
+  });
+};
+
+export const getLoginWithEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof loginWithEmail>>,
+    TError,
+    { data: BodyType<EmailLoginRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof loginWithEmail>>,
+  TError,
+  { data: BodyType<EmailLoginRequest> },
+  TContext
+> => {
+  const mutationKey = ["loginWithEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof loginWithEmail>>,
+    { data: BodyType<EmailLoginRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return loginWithEmail(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LoginWithEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof loginWithEmail>>
+>;
+export type LoginWithEmailMutationBody = BodyType<EmailLoginRequest>;
+export type LoginWithEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Sign in with email + password
+ */
+export const useLoginWithEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof loginWithEmail>>,
+    TError,
+    { data: BodyType<EmailLoginRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof loginWithEmail>>,
+  TError,
+  { data: BodyType<EmailLoginRequest> },
+  TContext
+> => {
+  return useMutation(getLoginWithEmailMutationOptions(options));
+};
+
+/**
+ * The client first mints a nonce at /auth/wallet/nonce and signs the
+returned message. This endpoint verifies the proof exactly like
+/auth/wallet/verify but attaches the address to the CURRENT
+signed-in account instead of opening a new session.
+
+ * @summary Link a wallet to the signed-in account
+ */
+export const getLinkWalletUrl = () => {
+  return `/api/auth/link/wallet`;
+};
+
+export const linkWallet = async (
+  walletVerifyRequest: WalletVerifyRequest,
+  options?: RequestInit,
+): Promise<AuthMethodsResponse> => {
+  return customFetch<AuthMethodsResponse>(getLinkWalletUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(walletVerifyRequest),
+  });
+};
+
+export const getLinkWalletMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkWallet>>,
+    TError,
+    { data: BodyType<WalletVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkWallet>>,
+  TError,
+  { data: BodyType<WalletVerifyRequest> },
+  TContext
+> => {
+  const mutationKey = ["linkWallet"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkWallet>>,
+    { data: BodyType<WalletVerifyRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return linkWallet(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkWalletMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkWallet>>
+>;
+export type LinkWalletMutationBody = BodyType<WalletVerifyRequest>;
+export type LinkWalletMutationError = ErrorType<void>;
+
+/**
+ * @summary Link a wallet to the signed-in account
+ */
+export const useLinkWallet = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkWallet>>,
+    TError,
+    { data: BodyType<WalletVerifyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkWallet>>,
+  TError,
+  { data: BodyType<WalletVerifyRequest> },
+  TContext
+> => {
+  return useMutation(getLinkWalletMutationOptions(options));
+};
+
+/**
+ * Lets a wallet-first user add the email door to their existing
+account. Fails 409 if the email belongs to another account or a
+password is already set (password change is out of scope).
+
+ * @summary Set an email + password on the signed-in account
+ */
+export const getLinkEmailUrl = () => {
+  return `/api/auth/link/email`;
+};
+
+export const linkEmail = async (
+  linkEmailRequest: LinkEmailRequest,
+  options?: RequestInit,
+): Promise<AuthMethodsResponse> => {
+  return customFetch<AuthMethodsResponse>(getLinkEmailUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(linkEmailRequest),
+  });
+};
+
+export const getLinkEmailMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkEmail>>,
+    TError,
+    { data: BodyType<LinkEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof linkEmail>>,
+  TError,
+  { data: BodyType<LinkEmailRequest> },
+  TContext
+> => {
+  const mutationKey = ["linkEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof linkEmail>>,
+    { data: BodyType<LinkEmailRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return linkEmail(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LinkEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof linkEmail>>
+>;
+export type LinkEmailMutationBody = BodyType<LinkEmailRequest>;
+export type LinkEmailMutationError = ErrorType<void>;
+
+/**
+ * @summary Set an email + password on the signed-in account
+ */
+export const useLinkEmail = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof linkEmail>>,
+    TError,
+    { data: BodyType<LinkEmailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof linkEmail>>,
+  TError,
+  { data: BodyType<LinkEmailRequest> },
+  TContext
+> => {
+  return useMutation(getLinkEmailMutationOptions(options));
 };
 
 /**

@@ -48,7 +48,15 @@ export const GetCurrentAuthUserResponse = zod.object({
       provider: zod
         .string()
         .nullish()
-        .describe("Auth provider for the active session (wallet, obc_agent)"),
+        .describe(
+          "Auth provider for the active session (wallet, obc_agent, email)",
+        ),
+      hasPassword: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True if the account has an email password set (email door usable)",
+        ),
     }),
     zod.null(),
   ]),
@@ -111,10 +119,178 @@ export const VerifyWalletSignatureResponse = zod.object({
       provider: zod
         .string()
         .nullish()
-        .describe("Auth provider for the active session (wallet, obc_agent)"),
+        .describe(
+          "Auth provider for the active session (wallet, obc_agent, email)",
+        ),
+      hasPassword: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True if the account has an email password set (email door usable)",
+        ),
     }),
     zod.null(),
   ]),
+});
+
+/**
+ * @summary Create an account with email + password and open a session
+ */
+export const registerWithEmailBodyEmailMax = 254;
+
+export const registerWithEmailBodyPasswordMin = 8;
+export const registerWithEmailBodyPasswordMax = 128;
+
+export const registerWithEmailBodyDisplayNameMax = 80;
+
+export const RegisterWithEmailBody = zod.object({
+  email: zod.string().email().max(registerWithEmailBodyEmailMax),
+  password: zod
+    .string()
+    .min(registerWithEmailBodyPasswordMin)
+    .max(registerWithEmailBodyPasswordMax)
+    .describe("8-128 characters. Capped to bound scrypt CPU cost."),
+  displayName: zod.string().max(registerWithEmailBodyDisplayNameMax).nullish(),
+});
+
+export const RegisterWithEmailResponse = zod.object({
+  user: zod.union([
+    zod.object({
+      id: zod.string(),
+      email: zod.string().email().nullable(),
+      firstName: zod.string().nullable(),
+      lastName: zod.string().nullable(),
+      profileImageUrl: zod.string().nullable(),
+      displayName: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]).optional(),
+      notificationPrefs: zod
+        .object({
+          emailOnProposal: zod.boolean(),
+          emailOnDm: zod.boolean(),
+        })
+        .optional(),
+      walletAddress: zod
+        .string()
+        .nullish()
+        .describe("Lowercased EVM address if user signed in via wallet"),
+      provider: zod
+        .string()
+        .nullish()
+        .describe(
+          "Auth provider for the active session (wallet, obc_agent, email)",
+        ),
+      hasPassword: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True if the account has an email password set (email door usable)",
+        ),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
+ * @summary Sign in with email + password
+ */
+export const loginWithEmailBodyEmailMax = 254;
+
+export const loginWithEmailBodyPasswordMax = 128;
+
+export const LoginWithEmailBody = zod.object({
+  email: zod.string().email().max(loginWithEmailBodyEmailMax),
+  password: zod.string().min(1).max(loginWithEmailBodyPasswordMax),
+});
+
+export const LoginWithEmailResponse = zod.object({
+  user: zod.union([
+    zod.object({
+      id: zod.string(),
+      email: zod.string().email().nullable(),
+      firstName: zod.string().nullable(),
+      lastName: zod.string().nullable(),
+      profileImageUrl: zod.string().nullable(),
+      displayName: zod.string().nullish(),
+      role: zod.enum(["user", "admin"]).optional(),
+      notificationPrefs: zod
+        .object({
+          emailOnProposal: zod.boolean(),
+          emailOnDm: zod.boolean(),
+        })
+        .optional(),
+      walletAddress: zod
+        .string()
+        .nullish()
+        .describe("Lowercased EVM address if user signed in via wallet"),
+      provider: zod
+        .string()
+        .nullish()
+        .describe(
+          "Auth provider for the active session (wallet, obc_agent, email)",
+        ),
+      hasPassword: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True if the account has an email password set (email door usable)",
+        ),
+    }),
+    zod.null(),
+  ]),
+});
+
+/**
+ * The client first mints a nonce at /auth/wallet/nonce and signs the
+returned message. This endpoint verifies the proof exactly like
+/auth/wallet/verify but attaches the address to the CURRENT
+signed-in account instead of opening a new session.
+
+ * @summary Link a wallet to the signed-in account
+ */
+export const LinkWalletBody = zod.object({
+  address: zod.string(),
+  signature: zod
+    .string()
+    .describe(
+      "65-byte hex signature (0x + 130 chars) over the canonical SIWE message the server issued at \/auth\/wallet\/nonce",
+    ),
+  nonce: zod
+    .string()
+    .describe(
+      "The nonce returned by \/auth\/wallet\/nonce. The server rebuilds the canonical message from this and ignores any client-supplied message text.",
+    ),
+});
+
+export const LinkWalletResponse = zod.object({
+  email: zod.string().nullable(),
+  walletAddress: zod.string().nullable(),
+  hasPassword: zod.boolean(),
+});
+
+/**
+ * Lets a wallet-first user add the email door to their existing
+account. Fails 409 if the email belongs to another account or a
+password is already set (password change is out of scope).
+
+ * @summary Set an email + password on the signed-in account
+ */
+export const linkEmailBodyEmailMax = 254;
+
+export const linkEmailBodyPasswordMin = 8;
+export const linkEmailBodyPasswordMax = 128;
+
+export const LinkEmailBody = zod.object({
+  email: zod.string().email().max(linkEmailBodyEmailMax),
+  password: zod
+    .string()
+    .min(linkEmailBodyPasswordMin)
+    .max(linkEmailBodyPasswordMax),
+});
+
+export const LinkEmailResponse = zod.object({
+  email: zod.string().nullable(),
+  walletAddress: zod.string().nullable(),
+  hasPassword: zod.boolean(),
 });
 
 /**
@@ -216,7 +392,15 @@ export const GetMeResponse = zod.object({
       provider: zod
         .string()
         .nullish()
-        .describe("Auth provider for the active session (wallet, obc_agent)"),
+        .describe(
+          "Auth provider for the active session (wallet, obc_agent, email)",
+        ),
+      hasPassword: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True if the account has an email password set (email door usable)",
+        ),
     }),
     zod.null(),
   ]),

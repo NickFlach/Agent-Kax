@@ -106,6 +106,109 @@ paths:
                 $ref: '#/components/schemas/AuthUserEnvelope'
         '401':
           description: Bad signature, expired nonce, or address mismatch
+  /auth/email/register:
+    post:
+      tags: [Auth]
+      operationId: registerWithEmail
+      summary: Create an account with email + password and open a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailRegisterRequest'
+      responses:
+        '200':
+          description: Registered and signed in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+        '400':
+          description: Invalid email or password (min 8 characters)
+        '409':
+          description: Email already registered
+        '429':
+          description: Too many registration attempts — try again later
+  /auth/email/login:
+    post:
+      tags: [Auth]
+      operationId: loginWithEmail
+      summary: Sign in with email + password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailLoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+        '401':
+          description: Invalid email or password (deliberately generic)
+        '403':
+          description: Account disabled
+        '429':
+          description: Too many attempts — try again later
+  /auth/link/wallet:
+    post:
+      tags: [Auth]
+      operationId: linkWallet
+      summary: Link a wallet to the signed-in account
+      description: |
+        The client first mints a nonce at /auth/wallet/nonce and signs the
+        returned message. This endpoint verifies the proof exactly like
+        /auth/wallet/verify but attaches the address to the CURRENT
+        signed-in account instead of opening a new session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WalletVerifyRequest'
+      responses:
+        '200':
+          description: Wallet linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMethodsResponse'
+        '401':
+          description: Auth required, or bad signature / expired nonce
+        '409':
+          description: Address already linked to another account, or this account already has a wallet
+  /auth/link/email:
+    post:
+      tags: [Auth]
+      operationId: linkEmail
+      summary: Set an email + password on the signed-in account
+      description: |
+        Lets a wallet-first user add the email door to their existing
+        account. Fails 409 if the email belongs to another account or a
+        password is already set (password change is out of scope).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkEmailRequest'
+      responses:
+        '200':
+          description: Email + password set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMethodsResponse'
+        '400':
+          description: Invalid email or password (min 8 characters)
+        '401':
+          description: Auth required
+        '409':
+          description: Email already in use, password already set, or account has a different email
   /auth/agent/challenge:
     post:
       tags: [Auth]
@@ -1680,7 +1783,60 @@ components:
           description: Lowercased EVM address if user signed in via wallet
         provider:
           type: [string, 'null']
-          description: Auth provider for the active session (wallet, obc_agent)
+          description: Auth provider for the active session (wallet, obc_agent, email)
+        hasPassword:
+          type: boolean
+          description: True if the account has an email password set (email door usable)
+    EmailRegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 8-128 characters. Capped to bound scrypt CPU cost.
+        displayName:
+          type: [string, 'null']
+          maxLength: 80
+    EmailLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    LinkEmailRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    AuthMethodsResponse:
+      type: object
+      required: [email, walletAddress, hasPassword]
+      properties:
+        email:
+          type: [string, 'null']
+        walletAddress:
+          type: [string, 'null']
+        hasPassword:
+          type: boolean
     WalletNonceRequest:
       type: object
       required: [address]
