@@ -2173,7 +2173,7 @@ export const GetFloorInfoResponse = zod.object({
       zod.object({
         id: zod.number(),
         dealUuid: zod.string(),
-        kind: zod.enum(["commission", "sale", "witness"]),
+        kind: zod.enum(["commission", "sale", "witness", "prediction"]),
         title: zod.string(),
         summary: zod.string().nullish(),
         buyerBotId: zod.string().nullish(),
@@ -2210,7 +2210,7 @@ export const ListFloorLedgerResponse = zod.object({
     zod.object({
       id: zod.number(),
       dealUuid: zod.string(),
-      kind: zod.enum(["commission", "sale", "witness"]),
+      kind: zod.enum(["commission", "sale", "witness", "prediction"]),
       title: zod.string(),
       summary: zod.string().nullish(),
       buyerBotId: zod.string().nullish(),
@@ -2235,7 +2235,7 @@ export const ListFloorLedgerResponse = zod.object({
  */
 export const RecordFloorDealBody = zod.object({
   dealUuid: zod.string(),
-  kind: zod.enum(["commission", "sale", "witness"]).optional(),
+  kind: zod.enum(["commission", "sale", "witness", "prediction"]).optional(),
   title: zod.string(),
   summary: zod.string().nullish(),
   buyerBotId: zod.string().nullish(),

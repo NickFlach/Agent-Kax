@@ -689,6 +689,7 @@ export const FloorLedgerEntryKind = {
   commission: "commission",
   sale: "sale",
   witness: "witness",
+  prediction: "prediction",
 } as const;
 
 export interface FloorLedgerEntry {
@@ -740,6 +741,7 @@ export const RecordFloorDealBodyKind = {
   commission: "commission",
   sale: "sale",
   witness: "witness",
+  prediction: "prediction",
 } as const;
 
 export interface RecordFloorDealBody {

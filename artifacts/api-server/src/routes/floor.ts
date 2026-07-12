@@ -8,8 +8,25 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { KAX_FLOOR } from "../lib/floor";
+import type { Request, Response, NextFunction } from "express";
 
 const router: IRouter = Router();
+
+/**
+ * Allow trusted constellation services (e.g. the observatory's prediction
+ * registry) to write ledger entries server-to-server with a bearer token,
+ * as an alternative to an admin browser session. Disabled unless
+ * FLOOR_LEDGER_TOKEN is set.
+ */
+function requireAdminOrFloorToken(req: Request, res: Response, next: NextFunction) {
+  const token = process.env.FLOOR_LEDGER_TOKEN;
+  const header = req.headers.authorization;
+  if (token && header === `Bearer ${token}`) {
+    next();
+    return;
+  }
+  requireAdmin(req, res, next);
+}
 
 function formatEntry(e: FloorLedgerEntry) {
   return {
@@ -63,7 +80,7 @@ router.get("/floor/ledger", async (req, res) => {
   res.json({ entries: entries.map(formatEntry), total });
 });
 
-router.post("/floor/ledger", requireAdmin, async (req, res) => {
+router.post("/floor/ledger", requireAdminOrFloorToken, async (req, res) => {
   const body = RecordFloorDealBody.parse(req.body);
   const values = {
     dealUuid: body.dealUuid,

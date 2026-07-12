@@ -13,4 +13,5 @@ export const RecordFloorDealBodyKind = {
   commission: "commission",
   sale: "sale",
   witness: "witness",
+  prediction: "prediction",
 } as const;
