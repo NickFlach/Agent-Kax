@@ -13,21 +13,32 @@ export interface WasdBounds {
   maxY?: number;
 }
 
+/** Axis-aligned box footprint on the ground plane (for collision). */
+export interface Obstacle {
+  cx: number;
+  cz: number;
+  hx: number;
+  hz: number;
+}
+
 /**
  * First-person-ish WASD movement layered on top of OrbitControls: W/S glide
- * along the look direction, A/D strafe, R/F rise/fall — all on the horizontal
- * plane at the current height. Both the camera and the orbit target move
- * together, so drag-to-look and scroll-zoom keep working and clicking a store
- * still selects it (no pointer lock stealing the cursor).
+ * along the look direction, A/D strafe, R/F (or Space/Shift) rise/fall. The
+ * camera and the orbit target move by the SAME resolved delta, so drag-look,
+ * scroll-zoom and click-select all keep working (no pointer lock). Optional
+ * `obstacles` block you from walking through buildings; `bounds` keep you in
+ * the scene.
  */
 export function WasdMove({
   controls,
   speed = 14,
   bounds,
+  obstacles,
 }: {
   controls: React.RefObject<MinimalControls>;
   speed?: number;
   bounds?: WasdBounds;
+  obstacles?: Obstacle[];
 }) {
   const keys = useRef<Record<string, boolean>>({});
   const { camera } = useThree();
@@ -76,20 +87,45 @@ export function WasdMove({
     move.current.addScaledVector(forward.current, fwd);
     move.current.addScaledVector(right.current, strafe);
     if (move.current.lengthSq() > 0) move.current.normalize();
-    move.current.y += vert; // rise/fall independent of look
+    move.current.y += vert;
     move.current.multiplyScalar(speed * Math.min(dt, 0.05));
 
-    camera.position.add(move.current);
+    // Candidate position, then resolve bounds + collision.
+    let nx = camera.position.x + move.current.x;
+    let ny = camera.position.y + move.current.y;
+    let nz = camera.position.z + move.current.z;
+
     if (bounds) {
-      camera.position.x = THREE.MathUtils.clamp(camera.position.x, bounds.minX, bounds.maxX);
-      camera.position.z = THREE.MathUtils.clamp(camera.position.z, bounds.minZ, bounds.maxZ);
-      if (bounds.minY != null || bounds.maxY != null) {
-        camera.position.y = THREE.MathUtils.clamp(camera.position.y, bounds.minY ?? -Infinity, bounds.maxY ?? Infinity);
+      nx = THREE.MathUtils.clamp(nx, bounds.minX, bounds.maxX);
+      nz = THREE.MathUtils.clamp(nz, bounds.minZ, bounds.maxZ);
+      ny = THREE.MathUtils.clamp(ny, bounds.minY ?? -Infinity, bounds.maxY ?? Infinity);
+    }
+
+    // Building collision (only while at street level — you can fly over tops).
+    if (obstacles && ny < 7) {
+      const pad = 0.5;
+      for (const o of obstacles) {
+        const dx = nx - o.cx;
+        const dz = nz - o.cz;
+        const px = o.hx + pad - Math.abs(dx);
+        const pz = o.hz + pad - Math.abs(dz);
+        if (px > 0 && pz > 0) {
+          if (px < pz) nx = o.cx + Math.sign(dx || 1) * (o.hx + pad);
+          else nz = o.cz + Math.sign(dz || 1) * (o.hz + pad);
+        }
       }
     }
+
+    // Apply the SAME resolved delta to camera and look target so orbit stays sane.
+    const rdx = nx - camera.position.x;
+    const rdy = ny - camera.position.y;
+    const rdz = nz - camera.position.z;
+    camera.position.set(nx, ny, nz);
     const c = controls.current;
     if (c) {
-      c.target.add(move.current);
+      c.target.x += rdx;
+      c.target.y += rdy;
+      c.target.z += rdz;
       c.update();
     }
   });

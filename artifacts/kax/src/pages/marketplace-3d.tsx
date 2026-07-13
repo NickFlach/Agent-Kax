@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import { WasdMove } from "@/components/wasd-move";
+import { NpcFigure, WandererNpc, PlayerAvatar, PlayerTracker } from "@/components/npc";
 import "./marketplace-3d.css";
 
 const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
@@ -247,6 +248,11 @@ function Storefront({
           </Text>
         </group>
       </Suspense>
+
+      {/* The store's worker — an NPC standing out front on the boulevard side */}
+      <group position={[0.9, 0, 2.5]}>
+        <NpcFigure color={glowColor} />
+      </group>
     </group>
   );
 }
@@ -413,7 +419,12 @@ export default function Marketplace3D() {
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
   const orbitRef = useRef<any>(null);
   const [nearby, setNearby] = useState<SceneAgent | null>(null);
+  const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
   const streetDepth = -2 - Math.max(1, Math.ceil(sceneAgents.length / 2)) * 4.5;
+  const obstacles = useMemo(
+    () => layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
+    [layout],
+  );
 
   const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`);
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
@@ -603,6 +614,38 @@ export default function Marketplace3D() {
         </div>
       </div>
 
+      {/* Minimap — overhead view of the street + your position */}
+      <div className="absolute top-16 right-4 z-20 kax3d-hud p-1.5 pointer-events-none">
+        <svg width={104} height={150} viewBox="0 0 104 150" aria-hidden>
+          <rect x={0} y={0} width={104} height={150} fill="#08131a" />
+          <rect x={45} y={3} width={14} height={144} fill="#0e2a30" />
+          {(() => {
+            const zRange = Math.max(1, 8 - streetDepth);
+            const mapXZ = (x: number, z: number): [number, number] => [
+              52 + (Math.max(-8, Math.min(8, x)) / 8) * 46,
+              5 + ((8 - z) / zRange) * 140,
+            ];
+            return (
+              <>
+                {layout.map((l, i) => {
+                  const [px, py] = mapXZ(l.position[0], l.position[2]);
+                  return <circle key={i} cx={px} cy={py} r={2.2} fill={l.agent.claimed ? "#00e5ff" : "#E8A33D"} />;
+                })}
+                {(() => {
+                  const [px, py] = mapXZ(player.x, player.z);
+                  return (
+                    <g transform={`translate(${px},${py}) rotate(${(player.h * 180) / Math.PI})`}>
+                      <polygon points="0,-5 3.4,4 -3.4,4" fill="#ffffff" />
+                    </g>
+                  );
+                })()}
+              </>
+            );
+          })()}
+        </svg>
+        <p className="text-[8px] text-center uppercase tracking-widest text-muted-foreground mt-0.5">You are here</p>
+      </div>
+
       {/* Proximity "press E to enter" prompt */}
       {nearby && (
         <div
@@ -663,7 +706,21 @@ export default function Marketplace3D() {
           controls={orbitRef}
           speed={18}
           bounds={{ minX: -13, maxX: 13, minZ: streetDepth - 6, maxZ: 15, minY: 1.4, maxY: 28 }}
+          obstacles={obstacles}
         />
+        <PlayerAvatar />
+        <PlayerTracker onUpdate={setPlayer} />
+        {Array.from({ length: 6 }).map((_, i) => (
+          <WandererNpc
+            key={i}
+            x={i % 2 === 0 ? -1.4 : 1.4}
+            zNear={4}
+            zFar={streetDepth + 4}
+            speed={0.05 + (i % 3) * 0.015}
+            offset={i * 0.37}
+            color={SIGN_PALETTE[i % SIGN_PALETTE.length]}
+          />
+        ))}
 
         {/* Ground, atmosphere and buildings render unconditionally — the only
             suspending resources (label fonts) are isolated inside each

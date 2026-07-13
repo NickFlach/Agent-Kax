@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -16,6 +16,7 @@ import type { Artifact } from "@workspace/api-client-react";
 type WallItem = { work: Artifact; curatedBy: string | null };
 import { Button } from "@/components/ui/button";
 import { WasdMove } from "@/components/wasd-move";
+import { NpcFigure } from "@/components/npc";
 import "./marketplace-3d.css";
 
 const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
@@ -108,21 +109,22 @@ function ArtworkFrame({
           <meshStandardMaterial color={failed ? "#0d242a" : "#123642"} emissive={accent} emissiveIntensity={0.18} />
         )}
       </mesh>
-      {/* Placeholder label for non-image works */}
-      {!tex && (
-        <Text position={[0, 0, 0.05]} fontSize={0.22} color={accent} font={SPACE_MONO_WOFF} maxWidth={w - 0.3} anchorX="center" anchorY="middle" textAlign="center">
-          {work.artifactType.toUpperCase()}
+      {/* Text suspends on the remote font — isolate so it can never blank the room */}
+      <Suspense fallback={null}>
+        {!tex && (
+          <Text position={[0, 0, 0.05]} fontSize={0.22} color={accent} font={SPACE_MONO_WOFF} maxWidth={w - 0.3} anchorX="center" anchorY="middle" textAlign="center">
+            {work.artifactType.toUpperCase()}
+          </Text>
+        )}
+        <Text position={[0, -(h / 2) - 0.26, 0.05]} fontSize={0.16} color="#cfefe9" font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
+          {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
         </Text>
-      )}
-      {/* Little title placard under the frame */}
-      <Text position={[0, -(h / 2) - 0.26, 0.05]} fontSize={0.16} color="#cfefe9" font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
-        {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
-      </Text>
-      {item.curatedBy && (
-        <Text position={[0, -(h / 2) - 0.48, 0.05]} fontSize={0.12} color={accent} font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
-          ◆ curated · by {item.curatedBy}
-        </Text>
-      )}
+        {item.curatedBy && (
+          <Text position={[0, -(h / 2) - 0.48, 0.05]} fontSize={0.12} color={accent} font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
+            ◆ curated · by {item.curatedBy}
+          </Text>
+        )}
+      </Suspense>
     </group>
   );
 }
@@ -276,9 +278,16 @@ export default function StoreInterior() {
         </mesh>
 
         {/* Store name across the back wall */}
-        <Text position={[0, 6.6, -14.8]} fontSize={0.9} color={accent} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={18}>
-          {name.toUpperCase()}
-        </Text>
+        <Suspense fallback={null}>
+          <Text position={[0, 6.6, -14.8]} fontSize={0.9} color={accent} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={18}>
+            {name.toUpperCase()}
+          </Text>
+        </Suspense>
+
+        {/* The store's worker NPC, standing near the entrance */}
+        <group position={[3, 0, 5]}>
+          <NpcFigure color={accent} />
+        </group>
 
         {/* The works, hung on the walls (own works + curated pieces) */}
         {wallItems.map((it, i) =>
@@ -296,9 +305,11 @@ export default function StoreInterior() {
         )}
 
         {isLoading || wallItems.length > 0 ? null : (
-          <Text position={[0, 3.3, -13]} fontSize={0.4} color="#8aa" font={SPACE_MONO_WOFF} anchorX="center" maxWidth={14} textAlign="center">
-            This store has no works on the walls yet.
-          </Text>
+          <Suspense fallback={null}>
+            <Text position={[0, 3.3, -13]} fontSize={0.4} color="#8aa" font={SPACE_MONO_WOFF} anchorX="center" maxWidth={14} textAlign="center">
+              This store has no works on the walls yet.
+            </Text>
+          </Suspense>
         )}
       </Canvas>
     </div>
