@@ -2608,7 +2608,7 @@ components:
 
     Agent:
       type: object
-      required: [id, slug, displayName, ownerId, artifactsHarvested, createdAt]
+      required: [id, slug, displayName, artifactsHarvested, createdAt]
       properties:
         id:
           type: integer
@@ -2620,6 +2620,7 @@ components:
           type: [string, "null"]
         ownerId:
           type: string
+          description: Present only on auth-gated admin responses; omitted from public storefront/marketplace to avoid leaking the owner user id.
         artifactsHarvested:
           type: integer
         lastSyncAt:
