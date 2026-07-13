@@ -1,15 +1,20 @@
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   useGetAgent,
   useHarvestAgent,
   useGetAgentConversations,
+  useGetAgentStorefrontListings,
+  useAddStoreListing,
+  useRemoveStoreListing,
   getGetAgentQueryKey,
   getGetAgentConversationsQueryKey,
+  getGetAgentStorefrontListingsQueryKey,
   getListArtifactsQueryKey,
   getListAgentsQueryKey,
 } from "@workspace/api-client-react";
-import type { ConversationItem } from "@workspace/api-client-react";
+import type { ConversationItem, StoreListing } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -153,6 +158,8 @@ export default function AgentDetail() {
         </Card>
       </div>
 
+      <CurateCard slug={slug} />
+
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
@@ -219,6 +226,106 @@ export default function AgentDetail() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function CurateCard({ slug }: { slug: string }) {
+  const queryClient = useQueryClient();
+  const listKey = getGetAgentStorefrontListingsQueryKey(slug);
+  const { data } = useGetAgentStorefrontListings(slug, { query: { queryKey: listKey, retry: false } });
+  const [artifactId, setArtifactId] = useState("");
+  const [price, setPrice] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: listKey });
+  const add = useAddStoreListing({ mutation: { onSuccess: invalidate } });
+  const remove = useRemoveStoreListing({ mutation: { onSuccess: invalidate } });
+
+  const listings = data?.listings ?? [];
+
+  const submit = () => {
+    setError(null);
+    const id = parseInt(artifactId, 10);
+    if (!Number.isFinite(id)) {
+      setError("Enter a numeric artifact id");
+      return;
+    }
+    const p = price.trim() ? Number(price) : null;
+    add.mutate(
+      { slug, data: { artifactId: id, price: Number.isFinite(p as number) ? p : null } },
+      {
+        onSuccess: () => {
+          setArtifactId("");
+          setPrice("");
+        },
+        onError: (e) => setError((e as { message?: string })?.message ?? "Could not add (already listed?)"),
+      },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+          Curate Into Store
+        </CardTitle>
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+          {listings.length} curated
+        </span>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">
+          Stock any work — including other agents' — in this store. Provenance stays intact; the
+          piece keeps its true creator.
+        </p>
+        <div className="flex flex-wrap gap-2 items-center mb-2">
+          <input
+            value={artifactId}
+            onChange={(e) => setArtifactId(e.target.value)}
+            placeholder="artifact id"
+            className="bg-secondary border border-border px-2 py-1 text-sm font-mono w-32"
+            data-testid="input-curate-artifact-id"
+          />
+          <input
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="price (optional)"
+            className="bg-secondary border border-border px-2 py-1 text-sm font-mono w-32"
+            data-testid="input-curate-price"
+          />
+          <Button size="sm" onClick={submit} disabled={add.isPending} data-testid="button-curate-add">
+            {add.isPending ? "Adding…" : "Add"}
+          </Button>
+        </div>
+        {error && <p className="text-xs text-destructive mb-2">{error}</p>}
+        {listings.length > 0 && (
+          <div className="space-y-1 mt-3">
+            {listings.map((l: StoreListing) => (
+              <div
+                key={l.id}
+                className="flex items-center justify-between border border-border px-3 py-2 text-sm"
+                data-testid={`curated-listing-${l.id}`}
+              >
+                <span className="truncate">
+                  {l.artifact.title}{" "}
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    by {l.artifact.creatorName}
+                    {l.price != null ? ` · ${l.price} cr` : ""}
+                  </span>
+                </span>
+                <button
+                  onClick={() => remove.mutate({ slug, id: l.id })}
+                  className="text-[10px] uppercase tracking-widest text-destructive hover:underline ml-2 shrink-0"
+                  data-testid={`button-remove-listing-${l.id}`}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

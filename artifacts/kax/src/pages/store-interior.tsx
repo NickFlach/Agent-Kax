@@ -6,10 +6,14 @@ import { useParams, useLocation, Link } from "wouter";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontWorks,
+  useGetAgentStorefrontListings,
   getGetAgentStorefrontQueryKey,
   getGetAgentStorefrontWorksQueryKey,
+  getGetAgentStorefrontListingsQueryKey,
 } from "@workspace/api-client-react";
 import type { Artifact } from "@workspace/api-client-react";
+
+type WallItem = { work: Artifact; curatedBy: string | null };
 import { Button } from "@/components/ui/button";
 import "./marketplace-3d.css";
 
@@ -28,20 +32,21 @@ function pickImageUrl(a: Artifact): string | null {
 /** A framed artwork on the wall. Loads its texture imperatively with a
  *  fallback panel so a CORS/404 failure can never suspend-crash the room. */
 function ArtworkFrame({
-  work,
+  item,
   position,
   rotation,
   accent,
   onOpen,
   onHover,
 }: {
-  work: Artifact;
+  item: WallItem;
   position: [number, number, number];
   rotation: [number, number, number];
   accent: string;
   onOpen: (w: Artifact) => void;
   onHover: (w: Artifact | null) => void;
 }) {
+  const work = item.work;
   const [tex, setTex] = useState<THREE.Texture | null>(null);
   const [failed, setFailed] = useState(false);
   const url = useMemo(() => pickImageUrl(work), [work]);
@@ -109,9 +114,14 @@ function ArtworkFrame({
         </Text>
       )}
       {/* Little title placard under the frame */}
-      <Text position={[0, -(h / 2) - 0.28, 0.05]} fontSize={0.16} color="#cfefe9" font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
+      <Text position={[0, -(h / 2) - 0.26, 0.05]} fontSize={0.16} color="#cfefe9" font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
         {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
       </Text>
+      {item.curatedBy && (
+        <Text position={[0, -(h / 2) - 0.48, 0.05]} fontSize={0.12} color={accent} font={SPACE_MONO_WOFF} maxWidth={w} anchorX="center" anchorY="middle">
+          ◆ curated · by {item.curatedBy}
+        </Text>
+      )}
     </group>
   );
 }
@@ -146,12 +156,28 @@ export default function StoreInterior() {
     { limit: MAX_WALL_WORKS, offset: 0 },
     { query: { queryKey: getGetAgentStorefrontWorksQueryKey(slug, { limit: MAX_WALL_WORKS, offset: 0 }) } },
   );
+  const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
+    query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug), retry: false },
+  });
 
-  const works = worksResp?.artifacts ?? [];
   const total = worksResp?.total ?? 0;
   const name = landing?.settings.displayName || landing?.agent.displayName || slug;
   const accent = landing?.settings.accentColor || "#00e5ff";
-  const slots = useMemo(() => wallSlots(works.length), [works.length]);
+
+  // The store's walls: the owner's own works first, then curated pieces
+  // (including other agents' works), each tagged with its true creator.
+  const wallItems: WallItem[] = useMemo(() => {
+    const own: WallItem[] = (worksResp?.artifacts ?? []).map((w) => ({ work: w, curatedBy: null }));
+    const curated: WallItem[] = (listingsResp?.listings ?? []).map((l) => ({
+      work: l.artifact,
+      curatedBy: l.artifact.creatorName ?? "another agent",
+    }));
+    const seen = new Set(own.map((i) => i.work.id));
+    return [...own, ...curated.filter((i) => !seen.has(i.work.id))].slice(0, MAX_WALL_WORKS);
+  }, [worksResp, listingsResp]);
+
+  const curatedCount = listingsResp?.listings?.length ?? 0;
+  const slots = useMemo(() => wallSlots(wallItems.length), [wallItems.length]);
 
   const openWork = (w: Artifact) => navigate(`/s/${slug}/artifacts/${w.id}`);
 
@@ -173,7 +199,9 @@ export default function StoreInterior() {
           <p className="text-[10px] text-accent font-bold uppercase tracking-[0.3em] mb-1">Store Interior</p>
           <h1 className="text-xl font-bold text-foreground tracking-widest uppercase" data-testid="text-store-name">{name}</h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
-            {isLoading ? "hanging the walls…" : `${total} work${total === 1 ? "" : "s"} · showing ${works.length}`}
+            {isLoading
+              ? "hanging the walls…"
+              : `${total} work${total === 1 ? "" : "s"}${curatedCount ? ` · ${curatedCount} curated` : ""} · showing ${wallItems.length}`}
           </p>
           <div className="mt-4 border-t border-border pt-3 min-h-[2.5rem]">
             {hovered ? (
@@ -185,9 +213,9 @@ export default function StoreInterior() {
               <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Look around · click a piece to open it</p>
             )}
           </div>
-          {total > works.length && (
+          {total > wallItems.length && (
             <Link href={`/s/${slug}`} className="pointer-events-auto text-[10px] uppercase tracking-widest text-accent hover:text-foreground mt-3 inline-block">
-              + {total - works.length} more in the list →
+              + more in the list →
             </Link>
           )}
         </div>
@@ -245,12 +273,12 @@ export default function StoreInterior() {
           {name.toUpperCase()}
         </Text>
 
-        {/* The works, hung on the walls */}
-        {works.map((w, i) =>
+        {/* The works, hung on the walls (own works + curated pieces) */}
+        {wallItems.map((it, i) =>
           slots[i] ? (
             <ArtworkFrame
-              key={w.id}
-              work={w}
+              key={`${it.work.id}-${it.curatedBy ? "c" : "o"}`}
+              item={it}
               position={slots[i].pos}
               rotation={slots[i].rot}
               accent={accent}
@@ -260,7 +288,7 @@ export default function StoreInterior() {
           ) : null,
         )}
 
-        {isLoading || works.length > 0 ? null : (
+        {isLoading || wallItems.length > 0 ? null : (
           <Text position={[0, 3.3, -13]} fontSize={0.4} color="#8aa" font={SPACE_MONO_WOFF} anchorX="center" maxWidth={14} textAlign="center">
             This store has no works on the walls yet.
           </Text>

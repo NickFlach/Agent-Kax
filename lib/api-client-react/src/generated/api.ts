@@ -19,6 +19,7 @@ import type {
 import type {
   ActivityFeed,
   AddArtifactToDropBody,
+  AddStoreListingBody,
   AdminUser,
   Agent,
   AgentChallengeRequest,
@@ -106,8 +107,11 @@ import type {
   ReattributeArtifactsResponse,
   RecordFloorDealBody,
   RecordMintBody,
+  RemoveStoreListing200,
   ReplyMessageBody,
   ScoreDistribution,
+  StoreListing,
+  StoreListingsResponse,
   UpdateAdminUserBody,
   UpdateAgentStorefrontSettingsBody,
   UpdateDropBody,
@@ -5161,6 +5165,273 @@ export function useGetAgentConversations<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Works this store has curated — including pieces by other agents
+ */
+export const getGetAgentStorefrontListingsUrl = (slug: string) => {
+  return `/api/storefront/by-agent/${slug}/listings`;
+};
+
+export const getAgentStorefrontListings = async (
+  slug: string,
+  options?: RequestInit,
+): Promise<StoreListingsResponse> => {
+  return customFetch<StoreListingsResponse>(
+    getGetAgentStorefrontListingsUrl(slug),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAgentStorefrontListingsQueryKey = (slug: string) => {
+  return [`/api/storefront/by-agent/${slug}/listings`] as const;
+};
+
+export const getGetAgentStorefrontListingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentStorefrontListings>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontListings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentStorefrontListingsQueryKey(slug);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentStorefrontListings>>
+  > = ({ signal }) =>
+    getAgentStorefrontListings(slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentStorefrontListings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentStorefrontListingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentStorefrontListings>>
+>;
+export type GetAgentStorefrontListingsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Works this store has curated — including pieces by other agents
+ */
+
+export function useGetAgentStorefrontListings<
+  TData = Awaited<ReturnType<typeof getAgentStorefrontListings>>,
+  TError = ErrorType<unknown>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentStorefrontListings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentStorefrontListingsQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Curate a work into this store (owner/admin); any artifact, incl. other agents'
+ */
+export const getAddStoreListingUrl = (slug: string) => {
+  return `/api/agents/${slug}/listings`;
+};
+
+export const addStoreListing = async (
+  slug: string,
+  addStoreListingBody: AddStoreListingBody,
+  options?: RequestInit,
+): Promise<StoreListing> => {
+  return customFetch<StoreListing>(getAddStoreListingUrl(slug), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(addStoreListingBody),
+  });
+};
+
+export const getAddStoreListingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addStoreListing>>,
+    TError,
+    { slug: string; data: BodyType<AddStoreListingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addStoreListing>>,
+  TError,
+  { slug: string; data: BodyType<AddStoreListingBody> },
+  TContext
+> => {
+  const mutationKey = ["addStoreListing"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addStoreListing>>,
+    { slug: string; data: BodyType<AddStoreListingBody> }
+  > = (props) => {
+    const { slug, data } = props ?? {};
+
+    return addStoreListing(slug, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddStoreListingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addStoreListing>>
+>;
+export type AddStoreListingMutationBody = BodyType<AddStoreListingBody>;
+export type AddStoreListingMutationError = ErrorType<void>;
+
+/**
+ * @summary Curate a work into this store (owner/admin); any artifact, incl. other agents'
+ */
+export const useAddStoreListing = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addStoreListing>>,
+    TError,
+    { slug: string; data: BodyType<AddStoreListingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof addStoreListing>>,
+  TError,
+  { slug: string; data: BodyType<AddStoreListingBody> },
+  TContext
+> => {
+  return useMutation(getAddStoreListingMutationOptions(options));
+};
+
+/**
+ * @summary Remove a curated listing from this store (owner/admin)
+ */
+export const getRemoveStoreListingUrl = (slug: string, id: number) => {
+  return `/api/agents/${slug}/listings/${id}`;
+};
+
+export const removeStoreListing = async (
+  slug: string,
+  id: number,
+  options?: RequestInit,
+): Promise<RemoveStoreListing200> => {
+  return customFetch<RemoveStoreListing200>(
+    getRemoveStoreListingUrl(slug, id),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getRemoveStoreListingMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeStoreListing>>,
+    TError,
+    { slug: string; id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof removeStoreListing>>,
+  TError,
+  { slug: string; id: number },
+  TContext
+> => {
+  const mutationKey = ["removeStoreListing"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof removeStoreListing>>,
+    { slug: string; id: number }
+  > = (props) => {
+    const { slug, id } = props ?? {};
+
+    return removeStoreListing(slug, id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RemoveStoreListingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof removeStoreListing>>
+>;
+
+export type RemoveStoreListingMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Remove a curated listing from this store (owner/admin)
+ */
+export const useRemoveStoreListing = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof removeStoreListing>>,
+    TError,
+    { slug: string; id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof removeStoreListing>>,
+  TError,
+  { slug: string; id: number },
+  TContext
+> => {
+  return useMutation(getRemoveStoreListingMutationOptions(options));
+};
 
 /**
  * @summary List partner proposals scoped to the current user

@@ -710,6 +710,28 @@ export interface AgentConversationsResponse {
   items: ConversationItem[];
 }
 
+export interface StoreListing {
+  id: number;
+  /** @nullable */
+  price?: number | null;
+  /** @nullable */
+  note?: string | null;
+  createdAt: string;
+  artifact: Artifact;
+}
+
+export interface StoreListingsResponse {
+  listings: StoreListing[];
+}
+
+export interface AddStoreListingBody {
+  artifactId: number;
+  /** @nullable */
+  price?: number | null;
+  /** @nullable */
+  note?: string | null;
+}
+
 export type FloorInfoFloor = {
   buildingId: string;
   name: string;
@@ -1427,6 +1449,10 @@ export type GetAgentStorefrontWorksParams = {
 export type ListFloorLedgerParams = {
   limit?: number;
   offset?: number;
+};
+
+export type RemoveStoreListing200 = {
+  ok: boolean;
 };
 
 export type ListProposalsParams = {
