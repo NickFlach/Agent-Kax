@@ -526,7 +526,8 @@ export interface Agent {
   displayName: string;
   /** @nullable */
   avatarUrl?: string | null;
-  ownerId: string;
+  /** Present only on auth-gated admin responses; omitted from public storefront/marketplace to avoid leaking the owner user id. */
+  ownerId?: string;
   artifactsHarvested: number;
   /** @nullable */
   lastSyncAt?: string | null;

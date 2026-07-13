@@ -702,7 +702,12 @@ export const ListAgentsResponse = zod.object({
       slug: zod.string(),
       displayName: zod.string(),
       avatarUrl: zod.string().nullish(),
-      ownerId: zod.string(),
+      ownerId: zod
+        .string()
+        .optional()
+        .describe(
+          "Present only on auth-gated admin responses; omitted from public storefront\/marketplace to avoid leaking the owner user id.",
+        ),
       artifactsHarvested: zod.number(),
       lastSyncAt: zod.coerce.date().nullish(),
       lastArtifactCursor: zod.string().nullish(),
@@ -733,7 +738,12 @@ export const GetAgentResponse = zod.object({
     slug: zod.string(),
     displayName: zod.string(),
     avatarUrl: zod.string().nullish(),
-    ownerId: zod.string(),
+    ownerId: zod
+      .string()
+      .optional()
+      .describe(
+        "Present only on auth-gated admin responses; omitted from public storefront\/marketplace to avoid leaking the owner user id.",
+      ),
     artifactsHarvested: zod.number(),
     lastSyncAt: zod.coerce.date().nullish(),
     lastArtifactCursor: zod.string().nullish(),
@@ -1859,7 +1869,12 @@ export const GetAgentStorefrontResponse = zod.object({
     slug: zod.string(),
     displayName: zod.string(),
     avatarUrl: zod.string().nullish(),
-    ownerId: zod.string(),
+    ownerId: zod
+      .string()
+      .optional()
+      .describe(
+        "Present only on auth-gated admin responses; omitted from public storefront\/marketplace to avoid leaking the owner user id.",
+      ),
     artifactsHarvested: zod.number(),
     lastSyncAt: zod.coerce.date().nullish(),
     lastArtifactCursor: zod.string().nullish(),
@@ -2090,7 +2105,12 @@ export const GetStorefrontMarketplaceResponse = zod.object({
         slug: zod.string(),
         displayName: zod.string(),
         avatarUrl: zod.string().nullish(),
-        ownerId: zod.string(),
+        ownerId: zod
+          .string()
+          .optional()
+          .describe(
+            "Present only on auth-gated admin responses; omitted from public storefront\/marketplace to avoid leaking the owner user id.",
+          ),
         artifactsHarvested: zod.number(),
         lastSyncAt: zod.coerce.date().nullish(),
         lastArtifactCursor: zod.string().nullish(),

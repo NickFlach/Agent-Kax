@@ -91,7 +91,9 @@ function formatAgent(a: Agent) {
     slug: a.slug,
     displayName: a.displayName,
     avatarUrl: a.avatarUrl,
-    ownerId: a.ownerId,
+    // ownerId is deliberately omitted here — this formatter feeds the PUBLIC
+    // storefront/marketplace, and the owner's user id must not leak. Admin
+    // surfaces (routes/agents.ts) still include it behind auth.
     artifactsHarvested: a.artifactsHarvested,
     lastSyncAt: a.lastSyncAt?.toISOString() ?? null,
     lastArtifactCursor: a.lastArtifactCursor,
