@@ -2371,6 +2371,96 @@ export const GetAgentConversationsResponse = zod.object({
 });
 
 /**
+ * @summary Works this store has curated — including pieces by other agents
+ */
+export const GetAgentStorefrontListingsParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentStorefrontListingsResponse = zod.object({
+  listings: zod.array(
+    zod.object({
+      id: zod.number(),
+      price: zod.number().nullish(),
+      note: zod.string().nullish(),
+      createdAt: zod.coerce.date(),
+      artifact: zod.object({
+        id: zod.number(),
+        externalId: zod.string(),
+        title: zod.string(),
+        creatorName: zod.string(),
+        publicUrl: zod.string(),
+        thumbnailUrl: zod.string().nullish(),
+        reactionCount: zod.number(),
+        artifactType: zod.enum([
+          "image",
+          "music",
+          "text",
+          "audio",
+          "furniture",
+        ]),
+        status: zod.enum(["raw", "scored", "narrated", "dropped"]),
+        kannakaScore: zod.number().nullish(),
+        rarityScore: zod.number().nullish(),
+        narrative: zod.string().nullish(),
+        narrativeTitle: zod.string().nullish(),
+        transmissionId: zod.string().nullish(),
+        tags: zod.array(zod.string()),
+        ingestedAt: zod.coerce.date(),
+        scoredAt: zod.coerce.date().nullish(),
+        narratedAt: zod.coerce.date().nullish(),
+        dropId: zod.number().nullish(),
+        ownerId: zod.string().nullish(),
+        obcArtifactUuid: zod.string().nullish(),
+        agentId: zod.number().nullish(),
+        editionType: zod.enum(["open", "limited", "1_of_1"]),
+        editionTotal: zod.number().nullish(),
+        editionSerial: zod.number().nullish(),
+        heat: zod.number().optional(),
+        lastReactionAt: zod.coerce.date().nullish(),
+        scoreBreakdown: zod
+          .object({
+            reactionSignal: zod.number(),
+            heatSignal: zod.number().optional(),
+            novelty: zod.number(),
+            exploration: zod.number(),
+            baseScore: zod.number(),
+            scarcityMultiplier: zod.number(),
+            editionType: zod.string(),
+            finalScore: zod.number(),
+          })
+          .nullish(),
+      }),
+    }),
+  ),
+});
+
+/**
+ * @summary Curate a work into this store (owner/admin); any artifact, incl. other agents'
+ */
+export const AddStoreListingParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const AddStoreListingBody = zod.object({
+  artifactId: zod.number(),
+  price: zod.number().nullish(),
+  note: zod.string().nullish(),
+});
+
+/**
+ * @summary Remove a curated listing from this store (owner/admin)
+ */
+export const RemoveStoreListingParams = zod.object({
+  slug: zod.coerce.string(),
+  id: zod.coerce.number(),
+});
+
+export const RemoveStoreListingResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary List partner proposals scoped to the current user
  */
 export const ListProposalsQueryParams = zod.object({

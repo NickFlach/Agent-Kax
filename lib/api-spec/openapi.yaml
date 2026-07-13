@@ -1313,6 +1313,80 @@ paths:
         "404":
           description: Agent not found
 
+  /storefront/by-agent/{slug}/listings:
+    get:
+      operationId: getAgentStorefrontListings
+      tags: [storefront]
+      summary: Works this store has curated — including pieces by other agents
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Listings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreListingsResponse"
+
+  /agents/{slug}/listings:
+    post:
+      operationId: addStoreListing
+      tags: [storefront]
+      summary: Curate a work into this store (owner/admin); any artifact, incl. other agents'
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddStoreListingBody"
+      responses:
+        "201":
+          description: Created listing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreListing"
+        "409":
+          description: Already listed
+
+  /agents/{slug}/listings/{id}:
+    delete:
+      operationId: removeStoreListing
+      tags: [storefront]
+      summary: Remove a curated listing from this store (owner/admin)
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+
   /proposals:
     get:
       operationId: listProposals
@@ -2810,6 +2884,42 @@ components:
         occurredAt:
           type: string
           format: date-time
+
+    StoreListing:
+      type: object
+      required: [id, artifact, createdAt]
+      properties:
+        id:
+          type: integer
+        price:
+          type: [number, "null"]
+        note:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        artifact:
+          $ref: "#/components/schemas/Artifact"
+
+    StoreListingsResponse:
+      type: object
+      required: [listings]
+      properties:
+        listings:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoreListing"
+
+    AddStoreListingBody:
+      type: object
+      required: [artifactId]
+      properties:
+        artifactId:
+          type: integer
+        price:
+          type: [number, "null"]
+        note:
+          type: [string, "null"]
 
     FloorInfo:
       type: object

@@ -6,6 +6,7 @@ import {
   artifactsTable,
   dropsTable,
   reactionsTable,
+  storeListingsTable,
   type AgentStorefrontSettings,
   type Agent,
 } from "@workspace/db/schema";
@@ -23,6 +24,10 @@ import {
   GetAgentStorefrontArtifactParams,
   GetAgentStorefrontWorksParams,
   GetAgentStorefrontWorksQueryParams,
+  GetAgentStorefrontListingsParams,
+  AddStoreListingParams,
+  AddStoreListingBody,
+  RemoveStoreListingParams,
 } from "@workspace/api-zod";
 import { requireAuth, canMutate } from "../middlewares/requireAuth";
 import { formatArtifact } from "./artifacts";
@@ -352,6 +357,94 @@ router.get("/storefront/by-agent/:slug/works", async (req, res) => {
     db.select({ total: count() }).from(artifactsTable).where(where),
   ]);
   res.json({ artifacts: rows.map(formatArtifact), total });
+});
+
+// ── Cross-agent store listings ───────────────────────────────────────────
+// A store can stock works by OTHER agents. The listing never rewrites
+// provenance — the artifact keeps its true creator — it just says "this
+// store offers this piece", optionally at a price.
+
+function formatListing(l: typeof storeListingsTable.$inferSelect, artifact: typeof artifactsTable.$inferSelect) {
+  return {
+    id: l.id,
+    price: l.price,
+    note: l.note,
+    createdAt: l.createdAt.toISOString(),
+    artifact: formatArtifact(artifact),
+  };
+}
+
+router.get("/storefront/by-agent/:slug/listings", async (req, res) => {
+  const { slug } = GetAgentStorefrontListingsParams.parse(req.params);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  const rows = await db
+    .select({ listing: storeListingsTable, artifact: artifactsTable })
+    .from(storeListingsTable)
+    .innerJoin(artifactsTable, eq(artifactsTable.id, storeListingsTable.artifactId))
+    .where(eq(storeListingsTable.storeAgentId, agent.id))
+    .orderBy(desc(storeListingsTable.createdAt))
+    .limit(100);
+  res.json({ listings: rows.map((r) => formatListing(r.listing, r.artifact)) });
+});
+
+router.post("/agents/:slug/listings", requireAuth, async (req, res) => {
+  const { slug } = AddStoreListingParams.parse(req.params);
+  const body = AddStoreListingBody.parse(req.body);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (!(await canMutate(req, agent.ownerId))) {
+    res.status(403).json({ error: "Not your store" });
+    return;
+  }
+  const [artifact] = await db
+    .select()
+    .from(artifactsTable)
+    .where(eq(artifactsTable.id, body.artifactId))
+    .limit(1);
+  if (!artifact) {
+    res.status(404).json({ error: "Artifact not found" });
+    return;
+  }
+  const [listing] = await db
+    .insert(storeListingsTable)
+    .values({
+      storeAgentId: agent.id,
+      artifactId: body.artifactId,
+      addedByUserId: req.user!.id,
+      price: body.price ?? null,
+      note: body.note ?? null,
+    })
+    .onConflictDoNothing({ target: [storeListingsTable.storeAgentId, storeListingsTable.artifactId] })
+    .returning();
+  if (!listing) {
+    res.status(409).json({ error: "Already listed in this store" });
+    return;
+  }
+  res.status(201).json(formatListing(listing, artifact));
+});
+
+router.delete("/agents/:slug/listings/:id", requireAuth, async (req, res) => {
+  const { slug, id } = RemoveStoreListingParams.parse(req.params);
+  const agent = await loadAgentBySlug(slug);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+  if (!(await canMutate(req, agent.ownerId))) {
+    res.status(403).json({ error: "Not your store" });
+    return;
+  }
+  await db
+    .delete(storeListingsTable)
+    .where(and(eq(storeListingsTable.id, id), eq(storeListingsTable.storeAgentId, agent.id)));
+  res.json({ ok: true });
 });
 
 router.get("/storefront/by-agent/:slug/hot", async (req, res) => {

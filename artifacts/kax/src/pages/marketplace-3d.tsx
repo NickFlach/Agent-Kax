@@ -379,7 +379,9 @@ export default function Marketplace3D() {
   const overflowCount = Math.max(0, allSceneAgents.length - sceneAgents.length);
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
 
-  const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
+  const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`);
+  // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
+  const listDest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
   const visit = () => {
     if (selected) navigate(dest(selected));
   };
@@ -424,7 +426,7 @@ export default function Marketplace3D() {
           {allSceneAgents.map((a) => (
             <li key={`${a.source}:${a.slug}`}>
               <Link
-                href={dest(a)}
+                href={listDest(a)}
                 className="block text-sm text-primary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent px-2 py-1"
                 data-testid={`a11y-storefront-link-${a.slug}`}
               >
@@ -530,7 +532,7 @@ export default function Marketplace3D() {
                     className="h-10 text-[10px] uppercase tracking-[0.2em] font-bold border bg-primary/10 border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-all"
                     data-testid="button-visit-storefront"
                   >
-                    {selected.source === "constellation" ? "Inspect Signal →" : "Visit Storefront →"}
+                    {selected.source === "constellation" ? "Inspect Signal →" : "Enter Store →"}
                   </button>
                   {selected.source === "obc" && !selected.claimed && (
                     <button
