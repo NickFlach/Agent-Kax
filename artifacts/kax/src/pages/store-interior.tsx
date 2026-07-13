@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -15,6 +15,7 @@ import type { Artifact } from "@workspace/api-client-react";
 
 type WallItem = { work: Artifact; curatedBy: string | null };
 import { Button } from "@/components/ui/button";
+import { WasdMove } from "@/components/wasd-move";
 import "./marketplace-3d.css";
 
 const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
@@ -147,6 +148,7 @@ export default function StoreInterior() {
   const { slug } = useParams<{ slug: string }>();
   const [, navigate] = useLocation();
   const [hovered, setHovered] = useState<Artifact | null>(null);
+  const orbitRef = useRef<any>(null);
 
   const { data: landing } = useGetAgentStorefront(slug, {
     query: { queryKey: getGetAgentStorefrontQueryKey(slug), retry: false },
@@ -222,7 +224,7 @@ export default function StoreInterior() {
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        Drag to look · Scroll to move · Click a piece
+        WASD to walk · Drag to look · Click a piece · R/F up-down
       </div>
 
       <Canvas
@@ -241,7 +243,12 @@ export default function StoreInterior() {
         <pointLight position={[-7, 6, -8]} intensity={0.7} distance={40} color={accent} />
         <pointLight position={[7, 6, -8]} intensity={0.7} distance={40} color="#E8A33D" />
 
-        <OrbitControls target={[0, 3, -6]} minDistance={3} maxDistance={16} maxPolarAngle={Math.PI / 2 - 0.02} />
+        <OrbitControls ref={orbitRef} target={[0, 3, -6]} minDistance={3} maxDistance={16} maxPolarAngle={Math.PI / 2 - 0.02} />
+        <WasdMove
+          controls={orbitRef}
+          speed={9}
+          bounds={{ minX: -9, maxX: 9, minZ: -14, maxZ: 9, minY: 1.4, maxY: 6.5 }}
+        />
 
         {/* Room shell */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -5]}>

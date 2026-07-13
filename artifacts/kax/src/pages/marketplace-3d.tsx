@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, Suspense, useEffect } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
@@ -7,6 +7,7 @@ import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
+import { WasdMove } from "@/components/wasd-move";
 import "./marketplace-3d.css";
 
 const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
@@ -262,6 +263,38 @@ function hash01(s: string, salt = 0): number {
   return ((h >>> 0) % 100000) / 100000;
 }
 
+/** Reports the nearest store as you walk past it, so the HUD can offer
+ *  "press E to enter". Only fires onNearest when the nearest store changes. */
+function ProximityDetector({
+  points,
+  onNearest,
+}: {
+  points: Array<{ agent: SceneAgent; pos: [number, number, number] }>;
+  onNearest: (a: SceneAgent | null) => void;
+}) {
+  const { camera } = useThree();
+  const last = useRef<string | null>(null);
+  useFrame(() => {
+    let best: SceneAgent | null = null;
+    let bestD = 8 * 8; // enter-radius²
+    for (const p of points) {
+      const dx = camera.position.x - p.pos[0];
+      const dz = camera.position.z - p.pos[2];
+      const d = dx * dx + dz * dz;
+      if (d < bestD) {
+        bestD = d;
+        best = p.agent;
+      }
+    }
+    const key = best?.slug ?? null;
+    if (key !== last.current) {
+      last.current = key;
+      onNearest(best);
+    }
+  });
+  return null;
+}
+
 function StreetLamp({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
@@ -378,6 +411,9 @@ export default function Marketplace3D() {
   const sceneAgents = useMemo(() => allSceneAgents.slice(0, MAX_3D_STOREFRONTS), [allSceneAgents]);
   const overflowCount = Math.max(0, allSceneAgents.length - sceneAgents.length);
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
+  const orbitRef = useRef<any>(null);
+  const [nearby, setNearby] = useState<SceneAgent | null>(null);
+  const streetDepth = -2 - Math.max(1, Math.ceil(sceneAgents.length / 2)) * 4.5;
 
   const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`);
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
@@ -386,6 +422,19 @@ export default function Marketplace3D() {
     if (selected) navigate(dest(selected));
   };
   const enterStorefront = (a: SceneAgent) => navigate(dest(a));
+
+  // Walk up to a store and press E to enter it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyE" && nearby) {
+        e.preventDefault();
+        navigate(dest(nearby));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearby]);
 
   if (webglSupported === false) {
     return (
@@ -554,9 +603,25 @@ export default function Marketplace3D() {
         </div>
       </div>
 
+      {/* Proximity "press E to enter" prompt */}
+      {nearby && (
+        <div
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 px-4 py-2 kax3d-hud pointer-events-auto"
+          data-testid="prompt-enter-nearby"
+        >
+          <button
+            onClick={() => navigate(dest(nearby))}
+            className="text-[11px] uppercase tracking-[0.2em] font-bold text-primary"
+          >
+            <span className="text-accent">[ E ]</span> Enter {nearby.name}
+            {nearby.source === "obc" ? "'s store" : ""}
+          </button>
+        </div>
+      )}
+
       {/* Footer hint */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 text-center font-bold">
-        Drag to orbit · Scroll to zoom · Click to inspect
+        WASD to walk · Drag to look · E to enter · Scroll to zoom
         {overflowCount > 0 && (
           <div className="mt-3 pointer-events-auto">
             <Link href="/marketplace" className="border-b border-muted-foreground hover:text-foreground hover:border-foreground transition-colors pb-1" data-testid="link-overflow-list">
@@ -593,7 +658,12 @@ export default function Marketplace3D() {
         <pointLight position={[-14, 8, -6]} intensity={1.4} distance={70} color="#00e5ff" />
         <pointLight position={[14, 8, -18]} intensity={1.4} distance={70} color="#E8A33D" />
 
-        <OrbitControls target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
+        <OrbitControls ref={orbitRef} target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
+        <WasdMove
+          controls={orbitRef}
+          speed={18}
+          bounds={{ minX: -13, maxX: 13, minZ: streetDepth - 6, maxZ: 15, minY: 1.4, maxY: 28 }}
+        />
 
         {/* Ground, atmosphere and buildings render unconditionally — the only
             suspending resources (label fonts) are isolated inside each
@@ -630,6 +700,7 @@ export default function Marketplace3D() {
         <Sparkles count={90} scale={[26, 12, 60]} size={2} speed={0.5} opacity={0.4} color="#E8A33D" position={[0, 6, -12]} />
 
         <StreetProps storeCount={sceneAgents.length} />
+        <ProximityDetector points={layout.map((l) => ({ agent: l.agent, pos: l.position }))} onNearest={setNearby} />
 
         {layout.map((item) => (
           <Storefront
