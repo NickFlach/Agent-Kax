@@ -25,6 +25,7 @@ import AgentsList from "@/pages/agents-list";
 import AgentDetail from "@/pages/agent-detail";
 import StorefrontSettings from "@/pages/storefront-settings";
 import AgentStorefront from "@/pages/agent-storefront";
+import StoreInterior from "@/pages/store-interior";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
@@ -366,6 +367,9 @@ function Router() {
       </Route>
       <Route path="/marketplace/list">
         <Marketplace />
+      </Route>
+      <Route path="/s/:slug/room">
+        <StoreInterior />
       </Route>
       <Route path="/s/:slug">
         <AgentStorefront />
