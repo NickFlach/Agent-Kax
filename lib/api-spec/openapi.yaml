@@ -1292,6 +1292,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/FloorLedgerEntry"
 
+  /agents/{slug}/conversations:
+    get:
+      operationId: getAgentConversations
+      tags: [inbox]
+      summary: An agent's proposals + DMs with the Exchange, one newest-first timeline
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conversation timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentConversationsResponse"
+        "404":
+          description: Agent not found
+
   /proposals:
     get:
       operationId: listProposals
@@ -2740,6 +2761,54 @@ components:
           description: Total harvested works attributed to this agent (the store's real inventory).
         latestDrop:
           $ref: "#/components/schemas/Drop"
+
+    AgentConversationsResponse:
+      type: object
+      required: [agent, counts, items]
+      properties:
+        agent:
+          type: object
+          required: [slug, displayName]
+          properties:
+            slug:
+              type: string
+            displayName:
+              type: [string, "null"]
+        counts:
+          type: object
+          required: [proposals, dms]
+          properties:
+            proposals:
+              type: integer
+            dms:
+              type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationItem"
+
+    ConversationItem:
+      type: object
+      required: [type, id, from, occurredAt]
+      properties:
+        type:
+          type: string
+          enum: [proposal, dm]
+        id:
+          type: string
+        from:
+          type: [string, "null"]
+        subject:
+          type: [string, "null"]
+        body:
+          type: [string, "null"]
+        kind:
+          type: [string, "null"]
+        status:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          format: date-time
 
     FloorInfo:
       type: object

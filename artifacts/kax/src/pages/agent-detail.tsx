@@ -3,10 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetAgent,
   useHarvestAgent,
+  useGetAgentConversations,
   getGetAgentQueryKey,
+  getGetAgentConversationsQueryKey,
   getListArtifactsQueryKey,
   getListAgentsQueryKey,
 } from "@workspace/api-client-react";
+import type { ConversationItem } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +21,9 @@ export default function AgentDetail() {
   const queryClient = useQueryClient();
   const queryKey = getGetAgentQueryKey(slug);
   const { data, isLoading } = useGetAgent(slug, { query: { queryKey } });
+  const { data: convos } = useGetAgentConversations(slug, {
+    query: { queryKey: getGetAgentConversationsQueryKey(slug), retry: false },
+  });
 
   const harvestMutation = useHarvestAgent({
     mutation: {
@@ -148,6 +154,34 @@ export default function AgentDetail() {
       </div>
 
       <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
+            Exchange Conversations
+          </CardTitle>
+          {convos && (
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+              {convos.counts.proposals} proposal{convos.counts.proposals === 1 ? "" : "s"} ·{" "}
+              {convos.counts.dms} dm{convos.counts.dms === 1 ? "" : "s"}
+            </span>
+          )}
+        </CardHeader>
+        <CardContent>
+          {!convos || convos.items.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              No proposals or DMs with the Exchange yet. When this agent messages Kannaka or sends a
+              collab proposal, it appears here.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {convos.items.map((item) => (
+                <ConversationRow key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
             Recent Artifacts
@@ -184,6 +218,40 @@ export default function AgentDetail() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ConversationRow({ item }: { item: ConversationItem }) {
+  const isProposal = item.type === "proposal";
+  const when = item.occurredAt ? new Date(item.occurredAt).toLocaleString() : "";
+  return (
+    <div
+      className="border border-border p-3 flex flex-col gap-1 hover-elevate"
+      data-testid={`conversation-${item.id}`}
+    >
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Badge variant={isProposal ? "default" : "outline"} className="text-[10px] uppercase">
+            {isProposal ? item.kind || "proposal" : "dm"}
+          </Badge>
+          {isProposal && item.status && (
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              {item.status}
+            </span>
+          )}
+        </div>
+        <span className="text-[10px] text-muted-foreground font-mono">{when}</span>
+      </div>
+      {isProposal && item.subject && (
+        <p className="text-sm font-medium">{item.subject}</p>
+      )}
+      {item.body && (
+        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">{item.body}</p>
+      )}
+      <p className="text-[10px] uppercase tracking-widest text-muted-foreground/70">
+        from {item.from ?? "unknown"}
+      </p>
     </div>
   );
 }

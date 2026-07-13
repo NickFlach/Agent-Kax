@@ -5,6 +5,7 @@ import {
   dmsTable,
   matchesTable,
   outboundMessagesTable,
+  agentsTable,
   type Proposal,
   type Dm,
   type Match,
@@ -21,6 +22,7 @@ import {
   ReplyDmParams,
   ReplyDmBody,
   GetDmThreadParams,
+  GetAgentConversationsParams,
 } from "@workspace/api-zod";
 import { requireAuth, getOwnerScope, canMutate } from "../middlewares/requireAuth";
 import {
@@ -106,6 +108,71 @@ function fmtMatch(m: Match) {
     createdAt: m.createdAt.toISOString(),
   };
 }
+
+/**
+ * Exchange Conversations — every proposal and DM a given agent has exchanged
+ * with Kannaka/the Exchange, merged into one newest-first timeline. This is
+ * what KAX can actually see: the partner key is Kannaka's identity, so these
+ * are the counterparty's interactions with the Exchange (not their private
+ * inbox, which OBC never exposes to a partner). Auth-gated — operator view on
+ * the agent detail page.
+ */
+router.get("/agents/:slug/conversations", requireAuth, async (req, res) => {
+  const { slug } = GetAgentConversationsParams.parse(req.params);
+  const [agent] = await db
+    .select({ id: agentsTable.id, slug: agentsTable.slug, displayName: agentsTable.displayName })
+    .from(agentsTable)
+    .where(eq(agentsTable.slug, slug))
+    .limit(1);
+  if (!agent) {
+    res.status(404).json({ error: "Agent not found" });
+    return;
+  }
+
+  const [proposals, dms] = await Promise.all([
+    db
+      .select()
+      .from(proposalsTable)
+      .where(eq(proposalsTable.agentId, agent.id))
+      .orderBy(desc(proposalsTable.occurredAt))
+      .limit(100),
+    db
+      .select()
+      .from(dmsTable)
+      .where(eq(dmsTable.agentId, agent.id))
+      .orderBy(desc(dmsTable.occurredAt))
+      .limit(100),
+  ]);
+
+  const items = [
+    ...proposals.map((p) => ({
+      type: "proposal" as const,
+      id: `proposal-${p.id}`,
+      from: p.fromDisplayName ?? p.fromAgentSlug ?? agent.displayName,
+      subject: p.subject,
+      body: p.body,
+      kind: p.kind,
+      status: p.status,
+      occurredAt: p.occurredAt.toISOString(),
+    })),
+    ...dms.map((d) => ({
+      type: "dm" as const,
+      id: `dm-${d.id}`,
+      from: d.fromDisplayName ?? d.fromAgentSlug ?? agent.displayName,
+      subject: null,
+      body: d.body,
+      kind: null,
+      status: null,
+      occurredAt: d.occurredAt.toISOString(),
+    })),
+  ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+
+  res.json({
+    agent: { slug: agent.slug, displayName: agent.displayName },
+    counts: { proposals: proposals.length, dms: dms.length },
+    items,
+  });
+});
 
 router.get("/proposals", requireAuth, async (req, res) => {
   const ownerScope = await getOwnerScope(req);
