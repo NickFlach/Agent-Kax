@@ -11,7 +11,7 @@ import {
   outboundMessagesTable,
   userBotsTable,
 } from "@workspace/db/schema";
-import { isNull, eq, and, or, sql } from "drizzle-orm";
+import { isNull, eq, and, or, sql, count } from "drizzle-orm";
 import { logger } from "./logger";
 import {
   getPartnerAgent,
@@ -588,6 +588,8 @@ export interface NameRepairResult {
   placeholdersFound: number;
   namesResolved: number;
   agentsUpdated: number;
+  /** Artifacts whose denormalized creator_name was (re)synced to the agent's name. */
+  artifactsSynced: number;
   details: Array<{ botId: string; from: string; to: string; slug: string }>;
 }
 
@@ -616,9 +618,9 @@ export async function repairPlaceholderAgentNames(opts: {
     placeholdersFound: placeholders.length,
     namesResolved: 0,
     agentsUpdated: 0,
+    artifactsSynced: 0,
     details: [],
   };
-  if (placeholders.length === 0) return result;
 
   // botId -> real name, resolved directly via GET /agents/{botId}/skills
   // (one exact call per bot, bounded concurrency) instead of crawling the
@@ -678,8 +680,37 @@ export async function repairPlaceholderAgentNames(opts: {
     }
   }
 
+  // Sync the denormalized artifacts.creator_name to each agent's current
+  // display name. This is the field the dashboard leaderboard, artifact
+  // lists, search and the audio player actually read — repairing only the
+  // agents table leaves those surfaces showing the old "Agent <hex>"
+  // placeholder (e.g. an agent renamed to "Ren_Final" whose tracks still
+  // read "Agent 7b1dcca5"). Runs every time, so it also heals drift after
+  // the placeholder agents have already been renamed.
+  const [mismatch] = await db
+    .select({ n: count() })
+    .from(artifactsTable)
+    .innerJoin(agentsTable, eq(artifactsTable.creatorBotId, agentsTable.obcBotId))
+    .where(sql`${artifactsTable.creatorName} IS DISTINCT FROM ${agentsTable.displayName}`);
+  result.artifactsSynced = Number(mismatch?.n ?? 0);
+  if (!opts.dryRun && result.artifactsSynced > 0) {
+    await db.execute(sql`
+      UPDATE artifacts AS a
+      SET creator_name = ag.display_name
+      FROM agents AS ag
+      WHERE a.creator_bot_id = ag.obc_bot_id
+        AND a.creator_name IS DISTINCT FROM ag.display_name
+    `);
+  }
+
   logger.info(
-    { placeholders: result.placeholdersFound, resolved: result.namesResolved, updated: result.agentsUpdated, dryRun: opts.dryRun },
+    {
+      placeholders: result.placeholdersFound,
+      resolved: result.namesResolved,
+      updated: result.agentsUpdated,
+      artifactsSynced: result.artifactsSynced,
+      dryRun: opts.dryRun,
+    },
     "repairPlaceholderAgentNames complete",
   );
   return result;
