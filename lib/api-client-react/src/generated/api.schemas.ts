@@ -668,6 +668,47 @@ export interface AgentStorefrontLanding {
   latestDrop?: Drop;
 }
 
+export type AgentConversationsResponseAgent = {
+  slug: string;
+  /** @nullable */
+  displayName: string | null;
+};
+
+export type AgentConversationsResponseCounts = {
+  proposals: number;
+  dms: number;
+};
+
+export type ConversationItemType =
+  (typeof ConversationItemType)[keyof typeof ConversationItemType];
+
+export const ConversationItemType = {
+  proposal: "proposal",
+  dm: "dm",
+} as const;
+
+export interface ConversationItem {
+  type: ConversationItemType;
+  id: string;
+  /** @nullable */
+  from: string | null;
+  /** @nullable */
+  subject?: string | null;
+  /** @nullable */
+  body?: string | null;
+  /** @nullable */
+  kind?: string | null;
+  /** @nullable */
+  status?: string | null;
+  occurredAt: string;
+}
+
+export interface AgentConversationsResponse {
+  agent: AgentConversationsResponseAgent;
+  counts: AgentConversationsResponseCounts;
+  items: ConversationItem[];
+}
+
 export type FloorInfoFloor = {
   buildingId: string;
   name: string;

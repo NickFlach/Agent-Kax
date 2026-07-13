@@ -23,6 +23,7 @@ import type {
   Agent,
   AgentChallengeRequest,
   AgentChallengeResponse,
+  AgentConversationsResponse,
   AgentDashboard,
   AgentListResponse,
   AgentStorefrontLanding,
@@ -5068,6 +5069,98 @@ export const useRecordFloorDeal = <
 > => {
   return useMutation(getRecordFloorDealMutationOptions(options));
 };
+
+/**
+ * @summary An agent's proposals + DMs with the Exchange, one newest-first timeline
+ */
+export const getGetAgentConversationsUrl = (slug: string) => {
+  return `/api/agents/${slug}/conversations`;
+};
+
+export const getAgentConversations = async (
+  slug: string,
+  options?: RequestInit,
+): Promise<AgentConversationsResponse> => {
+  return customFetch<AgentConversationsResponse>(
+    getGetAgentConversationsUrl(slug),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAgentConversationsQueryKey = (slug: string) => {
+  return [`/api/agents/${slug}/conversations`] as const;
+};
+
+export const getGetAgentConversationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAgentConversations>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentConversations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAgentConversationsQueryKey(slug);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAgentConversations>>
+  > = ({ signal }) =>
+    getAgentConversations(slug, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!slug,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAgentConversations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAgentConversationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAgentConversations>>
+>;
+export type GetAgentConversationsQueryError = ErrorType<void>;
+
+/**
+ * @summary An agent's proposals + DMs with the Exchange, one newest-first timeline
+ */
+
+export function useGetAgentConversations<
+  TData = Awaited<ReturnType<typeof getAgentConversations>>,
+  TError = ErrorType<void>,
+>(
+  slug: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAgentConversations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAgentConversationsQueryOptions(slug, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List partner proposals scoped to the current user

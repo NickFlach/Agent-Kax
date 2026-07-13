@@ -2321,6 +2321,36 @@ export const RecordFloorDealBody = zod.object({
 });
 
 /**
+ * @summary An agent's proposals + DMs with the Exchange, one newest-first timeline
+ */
+export const GetAgentConversationsParams = zod.object({
+  slug: zod.coerce.string(),
+});
+
+export const GetAgentConversationsResponse = zod.object({
+  agent: zod.object({
+    slug: zod.string(),
+    displayName: zod.string().nullable(),
+  }),
+  counts: zod.object({
+    proposals: zod.number(),
+    dms: zod.number(),
+  }),
+  items: zod.array(
+    zod.object({
+      type: zod.enum(["proposal", "dm"]),
+      id: zod.string(),
+      from: zod.string().nullable(),
+      subject: zod.string().nullish(),
+      body: zod.string().nullish(),
+      kind: zod.string().nullish(),
+      status: zod.string().nullish(),
+      occurredAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
  * @summary List partner proposals scoped to the current user
  */
 export const ListProposalsQueryParams = zod.object({
