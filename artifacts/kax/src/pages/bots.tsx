@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { BotsManager } from "@/components/bots-manager";
 import { SignInMethodsCard } from "@/components/sign-in-methods";
+import { IdentityTokenCard } from "@/components/identity-token-card";
 import { shortAddress } from "@/lib/wallet";
 
 export default function BotsPage() {
@@ -20,6 +21,7 @@ export default function BotsPage() {
       </div>
       <SignInMethodsCard />
       <BotsManager />
+      <IdentityTokenCard />
     </div>
   );
 }
