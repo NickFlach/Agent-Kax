@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
+import { db, runMigrations, listMigrationFiles, listAppliedMigrations, backfillJournal } from "@workspace/db";
 import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
@@ -148,6 +148,57 @@ router.get("/admin/repair-agent-names/status", requireAdminOrServiceToken, (_req
     return;
   }
   res.json(repairJob);
+});
+
+// ---------------------------------------------------------------------------
+// Migration journal recovery — the prod schema has historically been managed
+// via drizzle-push, so `schema_migrations` there is empty. That makes the
+// boot auto-migrate re-attempt every migration and die at the first
+// non-idempotent one (0003), which silently blocks genuinely-pending
+// migrations (e.g. 0009_floor_prediction_kind: the enum value the floor
+// route's kind="prediction" 500s without). Recovery flow:
+//
+//   GET  /admin/db/migrations           — on-disk files vs journal rows
+//   POST /admin/db/journal-backfill     — { files: [...] } mark as applied
+//                                         WITHOUT executing (explicit list;
+//                                         unknown filenames are rejected)
+//   POST /admin/db/migrate              — run pending migrations now
+//
+// Service token or admin session; these are maintenance ops driven from
+// constellation scripts.
+// ---------------------------------------------------------------------------
+
+router.get("/admin/db/migrations", requireAdminOrServiceToken, async (_req, res) => {
+  const onDisk = listMigrationFiles();
+  const applied = new Set(await listAppliedMigrations());
+  res.json({
+    migrations: onDisk.map((filename) => ({ filename, journaled: applied.has(filename) })),
+    journaledUnknown: [...applied].filter((f) => !onDisk.includes(f)),
+  });
+});
+
+router.post("/admin/db/journal-backfill", requireAdminOrServiceToken, async (req, res) => {
+  const files: unknown = (req.body as { files?: unknown })?.files;
+  if (!Array.isArray(files) || files.length === 0 || !files.every((f) => typeof f === "string")) {
+    res.status(400).json({ error: "files (non-empty string array) required" });
+    return;
+  }
+  try {
+    const result = await backfillJournal(files);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/admin/db/migrate", requireAdminOrServiceToken, async (_req, res) => {
+  const log: string[] = [];
+  try {
+    const result = await runMigrations({ log: (m) => log.push(m) });
+    res.json({ ...result, log });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err), log });
+  }
 });
 
 // ---------------------------------------------------------------------------

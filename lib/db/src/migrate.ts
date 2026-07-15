@@ -69,6 +69,52 @@ export interface MigrateResult {
   skipped: string[];
 }
 
+/** On-disk migration filenames in apply order. */
+export function listMigrationFiles(): string[] {
+  return listOnDisk();
+}
+
+/** Filenames currently recorded in the journal. */
+export async function listAppliedMigrations(): Promise<string[]> {
+  await ensureJournalTable();
+  return [...(await listApplied())].sort();
+}
+
+/**
+ * Mark migrations as applied WITHOUT executing them. Recovery tool for the
+ * prod journal: the schema there was historically managed via drizzle-push,
+ * so it is already past most migrations, but the empty journal makes the
+ * boot runner re-attempt everything and die at the first non-idempotent
+ * file (0003) — which blocks genuinely-pending migrations (0009+) forever.
+ * Backfilling the already-in-effect files unblocks the runner.
+ *
+ * Only filenames that exist on disk are accepted; unknown names throw
+ * before anything is written.
+ */
+export async function backfillJournal(filenames: string[]): Promise<{ journaled: string[]; alreadyJournaled: string[] }> {
+  const onDisk = new Set(listOnDisk());
+  const unknown = filenames.filter((f) => !onDisk.has(f));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown migration file(s): ${unknown.join(", ")}`);
+  }
+  await ensureJournalTable();
+  const applied = await listApplied();
+  const journaled: string[] = [];
+  const alreadyJournaled: string[] = [];
+  for (const f of filenames) {
+    if (applied.has(f)) {
+      alreadyJournaled.push(f);
+      continue;
+    }
+    await pool.query(
+      "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+      [f],
+    );
+    journaled.push(f);
+  }
+  return { journaled, alreadyJournaled };
+}
+
 /** Run all pending migrations. Returns which were applied vs already-applied. */
 export async function runMigrations(opts: { log?: (m: string) => void } = {}): Promise<MigrateResult> {
   const log = opts.log ?? (() => {});
