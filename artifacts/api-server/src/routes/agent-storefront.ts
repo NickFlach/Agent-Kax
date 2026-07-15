@@ -10,7 +10,7 @@ import {
   type AgentStorefrontSettings,
   type Agent,
 } from "@workspace/db/schema";
-import { eq, and, desc, count, gte, isNotNull, inArray, sql } from "drizzle-orm";
+import { eq, and, desc, count, gte, isNotNull, inArray, or, sql } from "drizzle-orm";
 import { decayedHeatSignal } from "../lib/tasteEngine";
 import {
   GetAgentStorefrontSettingsParams,
@@ -34,7 +34,6 @@ import { formatArtifact } from "./artifacts";
 import { KANNAKA_SYSTEM_USER_ID, KANNAKA_AGENT_SLUG } from "../lib/backfill";
 import { isPublishableStatus, PUBLISHABLE_STATUSES } from "../lib/visibility";
 import { listObcStorefronts } from "../lib/storefrontDirectory";
-import { or } from "drizzle-orm";
 
 function isAgentClaimed(agent: Agent): boolean {
   if (agent.slug === KANNAKA_AGENT_SLUG) return true;
