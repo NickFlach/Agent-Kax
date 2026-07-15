@@ -14,13 +14,35 @@
  *     adopting drizzle-kit's full conventions retroactively.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pool } from "./index";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = resolve(HERE, "../migrations");
+
+// When this module runs from source, `../migrations` (relative to
+// lib/db/src) is correct. In the api-server esbuild bundle,
+// `import.meta.url` is the bundle's own path under artifacts/api-server,
+// so the relative hop lands on a directory that doesn't exist — which made
+// boot auto-migrate ENOENT silently on every Replit deploy (and is why
+// 0009_floor_prediction_kind never applied in prod). Resolve against the
+// workspace cwd as a fallback, with an env override as the escape hatch.
+const MIGRATIONS_DIR = (() => {
+  const candidates = [
+    process.env["KAX_MIGRATIONS_DIR"],
+    resolve(HERE, "../migrations"),
+    resolve(process.cwd(), "lib/db/migrations"),
+  ].filter((c): c is string => !!c);
+  for (const c of candidates) {
+    try {
+      if (statSync(c).isDirectory()) return c;
+    } catch {
+      // keep looking
+    }
+  }
+  return candidates[1]!; // original behavior; errors surface at read time
+})();
 
 interface MigrationRow {
   filename: string;
