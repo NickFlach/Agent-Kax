@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { floorLedgerTable, type FloorLedgerEntry } from "@workspace/db/schema";
-import { desc, count } from "drizzle-orm";
+import { desc, count, eq } from "drizzle-orm";
 import {
   ListFloorLedgerQueryParams,
   RecordFloorDealBody,
@@ -81,15 +81,31 @@ router.post("/floor/ledger", requireAdminOrServiceToken, async (req, res) => {
     witnesses: body.witnesses ?? null,
     closedAt: body.closedAt ? new Date(body.closedAt) : null,
   };
-  const [entry] = await db
+  // ADR-0041: the Floor Ledger is an append-only WITNESS record. A deal is
+  // recorded once; re-posting the same dealUuid is an idempotent no-op that
+  // returns the existing row UNCHANGED — it must never silently rewrite a
+  // witnessed settlement (which onConflictDoUpdate did). Corrections are new
+  // superseding rows, never in-place edits. A DB trigger (migration 0012)
+  // enforces the same invariant against any other writer.
+  const [inserted] = await db
     .insert(floorLedgerTable)
     .values(values)
-    .onConflictDoUpdate({
-      target: floorLedgerTable.dealUuid,
-      set: values,
-    })
+    .onConflictDoNothing({ target: floorLedgerTable.dealUuid })
     .returning();
-  res.status(201).json(formatEntry(entry));
+  if (inserted) {
+    res.status(201).json(formatEntry(inserted));
+    return;
+  }
+  const [existing] = await db
+    .select()
+    .from(floorLedgerTable)
+    .where(eq(floorLedgerTable.dealUuid, body.dealUuid))
+    .limit(1);
+  if (!existing) {
+    res.status(500).json({ error: "conflict on dealUuid but no existing row found" });
+    return;
+  }
+  res.status(200).json(formatEntry(existing));
 });
 
 export default router;
