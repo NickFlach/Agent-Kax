@@ -8,6 +8,7 @@ import { startKannakaArtworkResponseScheduler } from "./lib/kannakaArtworkRespon
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
+import { verifyLedgerChain } from "./lib/ledger";
 import { writeSync as fsWriteSync } from "node:fs";
 
 // process.stderr.write is asynchronous when stderr is a pipe (which it
@@ -165,6 +166,23 @@ async function autoMigrateOrExit(): Promise<void> {
   }
 }
 
+// Verify the credit-ledger hash chain at boot (ADR-0041 Phase 2). Non-fatal —
+// a broken chain is logged loudly for investigation but must not stop the
+// server (the ledger isn't yet load-bearing; a false alarm shouldn't take the
+// app down). Empty ledger verifies trivially.
+async function verifyLedgerChainAtBoot(): Promise<void> {
+  try {
+    const r = await verifyLedgerChain();
+    if (r.ok) {
+      logger.info({ head: r.head, entries: r.entries }, "credit_ledger: chain verified at boot");
+    } else {
+      logger.error({ error: r.error }, "credit_ledger: CHAIN VERIFICATION FAILED at boot — investigate");
+    }
+  } catch (err) {
+    logger.error({ err }, "credit_ledger: boot chain verification errored");
+  }
+}
+
 // Background warm-up. Intentionally NOT awaited before app.listen() —
 // each of these calls out to the partner API (replay walks paginated
 // event feeds; backfill calls getPartnerAgent) or to NATS (constellation
@@ -235,6 +253,7 @@ async function boot(): Promise<void> {
     // per-step isolated inside warmUpInBackground.
     void (async () => {
       await autoMigrateOrExit();
+      await verifyLedgerChainAtBoot();
       await warmUpInBackground();
     })();
   });
