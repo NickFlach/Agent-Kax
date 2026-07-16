@@ -1,4 +1,5 @@
 import { type Request, type Response, type NextFunction } from "express";
+import crypto from "node:crypto";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
@@ -91,4 +92,59 @@ export function requireAdminOrServiceToken(req: Request, res: Response, next: Ne
     return;
   }
   requireAdmin(req, res, next);
+}
+
+/**
+ * Constant-time Bearer-token compare. Returns false for a missing/unset
+ * expected value or a length/content mismatch. Uses `timingSafeEqual` so the
+ * comparison doesn't leak the token prefix via response timing.
+ */
+function bearerEquals(req: Request, expected: string | undefined): boolean {
+  if (!expected) return false;
+  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "");
+  if (!m) return false;
+  const a = Buffer.from(m[1]);
+  const b = Buffer.from(expected);
+  // timingSafeEqual throws on unequal lengths — guard first (length isn't secret).
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Guards the ledger MINT surface (`/ledger/grant`, `/ledger/escrow`) — the only
+ * endpoints that move value OUT of the house account, i.e. that create credits.
+ * Gated on a DEDICATED `KAX_LEDGER_MINT_TOKEN`, deliberately NOT the shared
+ * service token and with NO `FLOOR_LEDGER_TOKEN` fallback, so a leaked
+ * read/trade credential cannot mint. Fails CLOSED (503) when the env var is
+ * unset — the mint surface is off until an operator explicitly arms it.
+ */
+export function requireLedgerMintToken(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.KAX_LEDGER_MINT_TOKEN;
+  if (!expected) {
+    res.status(503).json({ error: "ledger mint surface disabled (KAX_LEDGER_MINT_TOKEN unset)" });
+    return;
+  }
+  if (!bearerEquals(req, expected)) {
+    res.status(401).json({ error: "invalid or missing ledger mint token" });
+    return;
+  }
+  next();
+}
+
+/**
+ * Guards the ledger TRADE surface (`/ledger/trade`, `/ledger/payout`) — value
+ * moves only BETWEEN non-house accounts (trader <-> amm), never minted, so the
+ * overdraft guard in postTransaction fully bounds it. Dedicated
+ * `KAX_LEDGER_TRADE_TOKEN`, no fallback. Fails CLOSED (503) when unset.
+ */
+export function requireLedgerTradeToken(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.KAX_LEDGER_TRADE_TOKEN;
+  if (!expected) {
+    res.status(503).json({ error: "ledger trade surface disabled (KAX_LEDGER_TRADE_TOKEN unset)" });
+    return;
+  }
+  if (!bearerEquals(req, expected)) {
+    res.status(401).json({ error: "invalid or missing ledger trade token" });
+    return;
+  }
+  next();
 }

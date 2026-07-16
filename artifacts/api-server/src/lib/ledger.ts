@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { creditLedgerTable, creditLedgerTxidsTable } from "@workspace/db/schema";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import {
   GENESIS_HASH,
   HOUSE_ACCOUNT,
@@ -160,6 +160,28 @@ export async function getTransaction(txId: string): Promise<{ txId: string; head
     .where(eq(creditLedgerTxidsTable.txId, txId))
     .limit(1);
   return rec ? { txId: rec.txId, head: rec.head, count: rec.entryCount, postingsHash: rec.postingsHash } : null;
+}
+
+/**
+ * Total value that has left the house account for a given kind+asset since an
+ * instant — i.e. the positive outflow (house debits are negative; we negate the
+ * sum). Used to enforce a per-day mint cap on `/ledger/grant` so a compromised
+ * mint token can't drain the house in one burst. Best-effort (a small race
+ * window across concurrent grants is acceptable for play credits).
+ */
+export async function houseOutflow(kind: string, asset: string, since: Date): Promise<bigint> {
+  const [row] = await db
+    .select({ s: sql<string>`COALESCE(SUM(${creditLedgerTable.amount}), 0)` })
+    .from(creditLedgerTable)
+    .where(
+      and(
+        eq(creditLedgerTable.account, HOUSE_ACCOUNT),
+        eq(creditLedgerTable.asset, asset),
+        eq(creditLedgerTable.kind, kind),
+        gte(creditLedgerTable.createdAt, since),
+      ),
+    );
+  return -BigInt(row?.s ?? "0");
 }
 
 /** An account's balance for an asset, derived by summing its postings in the DB. */
