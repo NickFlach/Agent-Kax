@@ -9,6 +9,15 @@ import crypto from "node:crypto";
 // The chain's genesis: the prevHash of the very first entry.
 export const GENESIS_HASH = "GENESIS::credit-ledger::v1";
 
+// The single designated issuer/mint account. It is exempt from the
+// non-negativity (overdraft) guard — it is allowed to go negative, because it
+// IS the source of minted credits. Every other account must stay >= 0.
+export const HOUSE_ACCOUNT = "house";
+
+// Upper bound on postings in one transaction, so a single request can't blow up
+// memory / boot verification. Generous enough for a batched resolve.
+export const MAX_POSTINGS_PER_TX = 10_000;
+
 export interface Posting {
   account: string;
   amount: bigint; // signed integer minor units
@@ -56,6 +65,9 @@ export function validatePostings(postings: Posting[], asset: string): void {
   if (!Array.isArray(postings) || postings.length < 2) {
     throw new Error("a transaction needs at least two postings (double-entry)");
   }
+  if (postings.length > MAX_POSTINGS_PER_TX) {
+    throw new Error(`too many postings in one transaction (max ${MAX_POSTINGS_PER_TX})`);
+  }
   if (!asset) throw new Error("asset is required");
   let sum = 0n;
   for (const p of postings) {
@@ -64,6 +76,21 @@ export function validatePostings(postings: Posting[], asset: string): void {
     sum += p.amount;
   }
   if (sum !== 0n) throw new Error(`postings must sum to zero (double-entry); got ${sum.toString()}`);
+}
+
+/**
+ * A canonical hash of a transaction's *content* (txId + asset + ordered
+ * postings). Stored in the idempotency registry so a replayed txId can be
+ * confirmed to carry the SAME postings — a replay with different content is a
+ * bug and must be rejected, not silently succeed.
+ */
+export function canonicalPostingsHash(txId: string, asset: string, postings: Posting[]): string {
+  const body = JSON.stringify([
+    txId,
+    asset,
+    postings.map((p) => [p.account, p.amount.toString(), p.kind, p.ref ?? null]),
+  ]);
+  return crypto.createHash("sha256").update(body).digest("hex");
 }
 
 export interface ChainRow extends HashedEntry {

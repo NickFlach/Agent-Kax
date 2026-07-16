@@ -1,9 +1,11 @@
 import { db } from "@workspace/db";
-import { creditLedgerTable } from "@workspace/db/schema";
+import { creditLedgerTable, creditLedgerTxidsTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import {
   GENESIS_HASH,
+  HOUSE_ACCOUNT,
   buildTransactionRows,
+  canonicalPostingsHash,
   deriveBalance,
   validatePostings,
   verifyChain,
@@ -11,11 +13,30 @@ import {
   type Posting,
 } from "./ledger-core";
 
-/** True for a Postgres unique-constraint violation (SQLSTATE 23505). */
-function isUniqueViolation(err: unknown): boolean {
-  const code = (err as { code?: string; cause?: { code?: string } })?.code
-    ?? (err as { cause?: { code?: string } })?.cause?.code;
-  return code === "23505";
+// A single advisory-lock key serializes ALL ledger appends into a FIFO queue,
+// so concurrent transactions never optimistically collide on UNIQUE(prev_hash)
+// (which caused retry-thrash / spurious failures under load — a review finding).
+// The UNIQUE(prev_hash) constraint stays as an integrity backstop.
+const LEDGER_ADVISORY_KEY = 0x1ed6e401;
+
+/** Business errors the write endpoints map to specific HTTP statuses. */
+export class LedgerInsufficientFunds extends Error {
+  readonly code = "insufficient_funds";
+  constructor(public account: string) {
+    super(`insufficient funds: ${account} would go negative`);
+  }
+}
+export class LedgerIdempotencyConflict extends Error {
+  readonly code = "idempotency_conflict";
+  constructor(public txId: string) {
+    super(`txId ${txId} already recorded with DIFFERENT postings`);
+  }
+}
+
+/** SQLSTATE + violated-constraint name of a pg error, if any. */
+function pgError(err: unknown): { code?: string; constraint?: string } {
+  const e = err as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
+  return { code: e?.code ?? e?.cause?.code, constraint: e?.constraint ?? e?.cause?.constraint };
 }
 
 export interface PostTxInput {
@@ -31,12 +52,49 @@ export interface PostTxInput {
  * a UNIQUE(prevHash) violation), we re-read the new head and retry, so the
  * chain stays linear and fork-free.
  */
-export async function postTransaction(input: PostTxInput): Promise<{ txId: string; head: string; count: number }> {
+export interface PostResult {
+  txId: string;
+  head: string;
+  count: number;
+  idempotentReplay: boolean;
+}
+
+export async function postTransaction(input: PostTxInput): Promise<PostResult> {
   validatePostings(input.postings, input.asset);
+  const postingsHash = canonicalPostingsHash(input.txId, input.asset, input.postings);
   let lastErr: unknown;
+
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       return await db.transaction(async (tx) => {
+        // Serialize ALL appends FIFO — no optimistic prev_hash collisions.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${LEDGER_ADVISORY_KEY})`);
+
+        // Idempotency: a replay of this txId returns the ORIGINAL result and
+        // applies nothing. A replay with different postings is a caller bug.
+        const [rec] = await tx
+          .select()
+          .from(creditLedgerTxidsTable)
+          .where(eq(creditLedgerTxidsTable.txId, input.txId))
+          .limit(1);
+        if (rec) {
+          if (rec.postingsHash !== postingsHash) throw new LedgerIdempotencyConflict(input.txId);
+          return { txId: input.txId, head: rec.head, count: rec.entryCount, idempotentReplay: true };
+        }
+
+        // Overdraft guard: every debited non-house account must stay >= 0. The
+        // SUM is consistent because we hold the advisory lock, so no other
+        // append can commit between this read and our insert.
+        for (const p of input.postings) {
+          if (p.amount < 0n && p.account !== HOUSE_ACCOUNT) {
+            const [b] = await tx
+              .select({ bal: sql<string>`COALESCE(SUM(${creditLedgerTable.amount}), 0)` })
+              .from(creditLedgerTable)
+              .where(and(eq(creditLedgerTable.account, p.account), eq(creditLedgerTable.asset, input.asset)));
+            if (BigInt(b?.bal ?? "0") + p.amount < 0n) throw new LedgerInsufficientFunds(p.account);
+          }
+        }
+
         const [head] = await tx
           .select({ entryHash: creditLedgerTable.entryHash })
           .from(creditLedgerTable)
@@ -44,6 +102,8 @@ export async function postTransaction(input: PostTxInput): Promise<{ txId: strin
           .limit(1);
         const headHash = head ? head.entryHash : GENESIS_HASH;
         const rows = buildTransactionRows(headHash, input.txId, input.asset, input.postings);
+        const newHead = rows[rows.length - 1].entryHash;
+
         await tx.insert(creditLedgerTable).values(
           rows.map((r) => ({
             entryHash: r.entryHash,
@@ -56,15 +116,50 @@ export async function postTransaction(input: PostTxInput): Promise<{ txId: strin
             ref: r.ref ?? null,
           })),
         );
-        return { txId: input.txId, head: rows[rows.length - 1].entryHash, count: rows.length };
+        await tx.insert(creditLedgerTxidsTable).values({
+          txId: input.txId,
+          postingsHash,
+          head: newHead,
+          entryCount: rows.length,
+        });
+        return { txId: input.txId, head: newHead, count: rows.length, idempotentReplay: false };
       });
     } catch (err) {
+      // Business errors propagate as-is (the route maps them to 409).
+      if (err instanceof LedgerInsufficientFunds || err instanceof LedgerIdempotencyConflict) throw err;
       lastErr = err;
-      if (isUniqueViolation(err)) continue; // fork raced — retry against the new head
+      const { code, constraint } = pgError(err);
+      if (code === "23505") {
+        // A concurrent duplicate txId committed first (should be rare under the
+        // advisory lock) — return its recorded result instead of retry-appending.
+        if (constraint === "credit_ledger_txids_pkey") {
+          const [rec] = await db
+            .select()
+            .from(creditLedgerTxidsTable)
+            .where(eq(creditLedgerTxidsTable.txId, input.txId))
+            .limit(1);
+          if (rec) {
+            if (rec.postingsHash !== postingsHash) throw new LedgerIdempotencyConflict(input.txId);
+            return { txId: input.txId, head: rec.head, count: rec.entryCount, idempotentReplay: true };
+          }
+        }
+        // prev_hash / entry_hash fork — retry against the new head.
+        continue;
+      }
       throw err;
     }
   }
   throw new Error(`ledger append failed after retries: ${(lastErr as Error)?.message ?? lastErr}`);
+}
+
+/** Fetch a recorded transaction by txId (for cross-service reconciliation). */
+export async function getTransaction(txId: string): Promise<{ txId: string; head: string; count: number; postingsHash: string } | null> {
+  const [rec] = await db
+    .select()
+    .from(creditLedgerTxidsTable)
+    .where(eq(creditLedgerTxidsTable.txId, txId))
+    .limit(1);
+  return rec ? { txId: rec.txId, head: rec.head, count: rec.entryCount, postingsHash: rec.postingsHash } : null;
 }
 
 /** An account's balance for an asset, derived by summing its postings in the DB. */

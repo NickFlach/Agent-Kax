@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, bigserial, bigint, integer, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Double-entry, append-only, hash-chained credit ledger (ADR-0041 Phase 2).
@@ -54,3 +54,22 @@ export const creditLedgerTable = pgTable(
 
 export type CreditLedgerEntry = typeof creditLedgerTable.$inferSelect;
 export type InsertCreditLedgerEntry = typeof creditLedgerTable.$inferInsert;
+
+/**
+ * Idempotency registry (ADR-0041 Phase 2 hardening). One row per transaction,
+ * written in the SAME DB transaction as its postings. A replayed `txId` returns
+ * the recorded result instead of double-applying — the fix for the review's
+ * "postTransaction is anti-idempotent" blocker (a retry chains from a moved
+ * head and would otherwise append the same postings again). `postingsHash` lets
+ * a replay with DIFFERENT postings be rejected (409) rather than silently
+ * succeeding. Append-only (migration 0014 trigger).
+ */
+export const creditLedgerTxidsTable = pgTable("credit_ledger_txids", {
+  txId: text("tx_id").primaryKey(),
+  postingsHash: text("postings_hash").notNull(),
+  head: text("head").notNull(),
+  entryCount: integer("entry_count").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type CreditLedgerTxid = typeof creditLedgerTxidsTable.$inferSelect;
