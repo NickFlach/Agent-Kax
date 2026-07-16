@@ -246,9 +246,9 @@ router.post(
     const ref = typeof req.body?.ref === "string" ? req.body.ref : null;
     const residual = nonNegativeMinor(req.body?.residual, "residual");
 
-    const winnersRaw = req.body?.winners;
-    if (!Array.isArray(winnersRaw) || winnersRaw.length === 0) {
-      throw new BadRequest("winners must be a non-empty array of { principal, amount }");
+    const winnersRaw = req.body?.winners ?? [];
+    if (!Array.isArray(winnersRaw)) {
+      throw new BadRequest("winners must be an array of { principal, amount }");
     }
     let total = 0n;
     const winnerPostings: Posting[] = winnersRaw.map((w: unknown) => {
@@ -258,13 +258,20 @@ router.post(
       total += amount;
       return { account, amount, kind: "payout", ref };
     });
+    // An upset market can resolve to a side nobody holds: no winners, but the
+    // full pool (subsidy + losers' stakes) must still be swept to house as the
+    // residual. Reject only the genuinely-empty case (no winners AND no residual),
+    // which would leave a single, unbalanced posting.
+    if (winnerPostings.length === 0 && residual === 0n) {
+      throw new BadRequest("payout must move value: provide winners and/or a residual > 0");
+    }
 
     const postings: Posting[] = [
       { account: amm, amount: -(total + residual), kind: "payout", ref },
       ...winnerPostings,
     ];
-    // Only add the house sweep when there's leftover subsidy — otherwise the
-    // pool debit already balances the winner credits (>=2 postings holds).
+    // House sweep whenever there's leftover subsidy (always present in the
+    // no-winner case) — otherwise the pool debit already balances the winners.
     if (residual > 0n) {
       postings.push({ account: HOUSE_ACCOUNT, amount: residual, kind: "payout", ref });
     }
