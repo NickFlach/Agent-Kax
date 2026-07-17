@@ -51,6 +51,17 @@ export const ISSUER = process.env["KAX_IDENTITY_ISSUER"] || "https://kax.ninja-p
 export const USER_TOKEN_TTL_SEC = 15 * 60;
 export const AGENT_TOKEN_TTL_SEC = 15 * 60;
 
+// How long a token LINEAGE may live across refreshes. A still-valid token can
+// be exchanged for a fresh one (POST /auth/token/refresh) so CLI/swarm agents
+// can run autonomously — but the `oat` (original-auth-time) claim is carried
+// through every refresh, and once `now - oat` exceeds this, the lineage dies
+// and the human must re-authenticate. Bounds the blast radius of a stolen
+// token that keeps refreshing itself.
+export const MAX_TOKEN_LIFETIME_SEC = (() => {
+  const raw = Number(process.env["KAX_TOKEN_MAX_LIFETIME_SEC"]);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30 * 24 * 3600; // 30 days
+})();
+
 export type PrincipalKind = "user" | "agent" | "service";
 
 export interface IdentityClaims extends JWTPayload {
@@ -59,6 +70,8 @@ export interface IdentityClaims extends JWTPayload {
   bot_id?: string;
   /** Capability scopes, e.g. ["propose", "trade"]. */
   scopes?: string[];
+  /** Original-auth-time (epoch secs): when this token's lineage first authed. */
+  oat?: number;
 }
 
 interface SigningKey {
@@ -172,6 +185,12 @@ export interface IssueOptions {
   ttlSeconds: number;
   /** Seconds since epoch; injectable for deterministic tests. */
   now?: number;
+  /**
+   * Original-auth-time to carry through a refresh. Omitted on a fresh mint
+   * (defaults to `now`); a refresh passes the incoming token's `oat` so the
+   * lineage's age is preserved.
+   */
+  originalAuthTime?: number;
 }
 
 /**
@@ -188,6 +207,7 @@ export async function issueToken(opts: IssueOptions): Promise<string> {
   const claims: IdentityClaims = { kind: opts.kind };
   if (opts.botId) claims.bot_id = opts.botId;
   if (opts.scopes && opts.scopes.length) claims.scopes = opts.scopes;
+  claims.oat = opts.originalAuthTime ?? now;
 
   return new SignJWT(claims as JWTPayload)
     .setProtectedHeader({ alg: IDENTITY_ALG, kid: signer.kid, typ: "JWT" })
