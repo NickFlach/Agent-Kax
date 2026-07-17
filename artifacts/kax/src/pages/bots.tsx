@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { BotsManager } from "@/components/bots-manager";
 import { SignInMethodsCard } from "@/components/sign-in-methods";
 import { IdentityTokenCard } from "@/components/identity-token-card";
+import { SpacechildLinkCard } from "@/components/spacechild-link-card";
 import { shortAddress } from "@/lib/wallet";
 
 export default function BotsPage() {
@@ -22,6 +23,7 @@ export default function BotsPage() {
       <SignInMethodsCard />
       <BotsManager />
       <IdentityTokenCard />
+      <SpacechildLinkCard />
     </div>
   );
 }

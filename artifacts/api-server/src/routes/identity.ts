@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { usersTable, userBotsTable } from "@workspace/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
   getPublicJwks,
@@ -199,8 +199,15 @@ router.post("/auth/token/exchange", async (req, res) => {
     return;
   }
 
-  // Map by email; auto-provision a passwordless row for first-time federated users.
-  let [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  // Map by email — CASE-INSENSITIVELY (Postgres `=` is case-sensitive and KAX
+  // rows may carry MixedCase emails from earlier auth flows; a case miss here
+  // silently forks a duplicate identity). Auto-provision only when no row
+  // matches at all.
+  let [user] = await db
+    .select()
+    .from(usersTable)
+    .where(sql`lower(${usersTable.email}) = ${email}`)
+    .limit(1);
   if (!user) {
     try {
       const displayName = intro.firstName || email.split("@")[0];
