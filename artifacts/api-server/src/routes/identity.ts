@@ -7,8 +7,10 @@ import {
   getPublicJwks,
   issueToken,
   issuingEnabled,
+  verifyToken,
   USER_TOKEN_TTL_SEC,
   AGENT_TOKEN_TTL_SEC,
+  MAX_TOKEN_LIFETIME_SEC,
 } from "../lib/identity";
 import { postTransaction } from "../lib/ledger";
 import { HOUSE_ACCOUNT } from "../lib/ledger-core";
@@ -123,6 +125,94 @@ router.post("/auth/token", requireAuth, async (req, res) => {
   } catch (err) {
     req.log?.error?.({ err, userId }, "token issue failed");
     res.status(500).json({ error: "failed to issue token" });
+  }
+});
+
+/**
+ * Refresh a STILL-VALID identity token — the autonomy path for CLI / swarm
+ * agents (ADR-0041). The 15-minute TTL is right for humans pasting tokens into
+ * a dashboard but unusable for an unattended agent; this lets an agent present
+ * its current (unexpired) token and receive a fresh one with the same claims.
+ *
+ * Bounds and checks:
+ *  - The incoming token must VERIFY (signature, issuer, exp) — an expired or
+ *    forged token cannot refresh. No session cookie needed: the token IS the
+ *    credential.
+ *  - The `oat` (original-auth-time) claim is carried through every refresh;
+ *    once the lineage is older than MAX_TOKEN_LIFETIME_SEC (default 30 days)
+ *    refreshing refuses and the human must re-authenticate. A stolen token
+ *    can't ride refreshes forever.
+ *  - The subject must still be a live, non-disabled user; agent tokens must
+ *    still have their bot attached (detaching a bot revokes its lineage).
+ */
+router.post("/auth/token/refresh", async (req, res) => {
+  if (!issuingEnabled()) {
+    res.status(503).json({ error: "identity issuing disabled: KAX_IDENTITY_PRIVATE_JWK unset" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const bearer = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "")?.[1];
+  const token = typeof body.token === "string" && body.token ? body.token : bearer;
+  if (!token) {
+    res.status(400).json({ error: "provide the current token (body.token or Authorization: Bearer)" });
+    return;
+  }
+
+  const v = await verifyToken(token);
+  if (!v.ok) {
+    res.status(401).json({ error: `token did not verify: ${v.error} — re-authenticate on KAX to mint a new one` });
+    return;
+  }
+  const claims = v.claims;
+  const now = Math.floor(Date.now() / 1000);
+  // Legacy tokens (pre-oat) age from their iat.
+  const oat = typeof claims.oat === "number" ? claims.oat : (claims.iat as number);
+  if (now - oat > MAX_TOKEN_LIFETIME_SEC) {
+    res.status(401).json({ error: "token lineage exceeded its maximum lifetime — re-authenticate on KAX" });
+    return;
+  }
+
+  // The subject must still be in good standing (this is the revocation hook:
+  // disable the user, or detach the bot, and the lineage dies at next refresh).
+  const userId = claims.sub as string;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!user || user.disabledAt) {
+    res.status(403).json({ error: "account disabled or gone" });
+    return;
+  }
+  if (claims.kind === "agent") {
+    const botId = (claims.bot_id || "").toLowerCase();
+    const [owned] = await db
+      .select()
+      .from(userBotsTable)
+      .where(and(eq(userBotsTable.userId, userId), eq(userBotsTable.obcBotId, botId)))
+      .limit(1);
+    if (!owned) {
+      res.status(403).json({ error: "bot no longer attached to this account" });
+      return;
+    }
+  }
+
+  try {
+    const ttl = claims.kind === "agent" ? AGENT_TOKEN_TTL_SEC : USER_TOKEN_TTL_SEC;
+    const fresh = await issueToken({
+      kind: claims.kind,
+      subject: userId,
+      botId: claims.kind === "agent" ? (claims.bot_id as string) : undefined,
+      scopes: Array.isArray(claims.scopes) ? (claims.scopes as string[]) : undefined,
+      ttlSeconds: ttl,
+      originalAuthTime: oat,
+    });
+    res.json({
+      token: fresh,
+      kind: claims.kind,
+      ...(claims.kind === "agent" ? { botId: claims.bot_id } : {}),
+      expiresInSec: ttl,
+      lineageExpiresInSec: Math.max(0, MAX_TOKEN_LIFETIME_SEC - (now - oat)),
+    });
+  } catch (err) {
+    req.log?.error?.({ err, userId }, "token refresh failed");
+    res.status(500).json({ error: "failed to refresh token" });
   }
 });
 
