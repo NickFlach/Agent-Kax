@@ -284,6 +284,36 @@ router.post(
 // ---------------------------------------------------------------------------
 
 /**
+ * A principal's OWN wallet, authenticated by their identity token (not the
+ * service token) — the browser/dashboard surface. Verifies the Bearer JWT,
+ * derives the canonical principal (kax:user:<sub> / kax:agent:<bot_id>), and
+ * returns the play-credit balance. Safe to expose: a caller can only ever see
+ * the balance of the principal their token proves.
+ */
+router.get("/ledger/my", async (req, res) => {
+  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "");
+  if (!m) {
+    res.status(401).json({ error: "identity token required (Authorization: Bearer)" });
+    return;
+  }
+  const { verifyToken } = await import("../lib/identity");
+  const v = await verifyToken(m[1]);
+  if (!v.ok) {
+    res.status(401).json({ error: `token did not verify: ${v.error}` });
+    return;
+  }
+  const c = v.claims;
+  const principal = c.kind === "agent" && c.bot_id ? `kax:agent:${c.bot_id}` : `kax:${c.kind}:${c.sub}`;
+  const bal = await balance(`trader:${principal}`, "play_credit");
+  res.json({
+    principal,
+    asset: "play_credit",
+    balance: bal.toString(),
+    credits: Number(bal) / 1_000_000, // display convenience (float)
+  });
+});
+
+/**
  * Derived balance for an account + asset (ADR-0041 Phase 2). Read-only,
  * service/admin gated. Balances are computed from the ledger postings, never
  * stored — this endpoint just runs the SUM. bigint is returned as a string so
