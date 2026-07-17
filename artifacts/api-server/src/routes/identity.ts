@@ -128,6 +128,123 @@ router.post("/auth/token", requireAuth, async (req, res) => {
   }
 });
 
+// ── SpaceChild federation (ADR-0041 Phase B) ────────────────────────────
+// SpaceChild Auth (auth.spacechild.love) signs HS256 tokens with a shared
+// secret and publishes no usable public key, so KAX cannot verify them
+// locally the way peers verify KAX's EdDSA tokens. Federation therefore runs
+// on REMOTE INTROSPECTION: KAX posts the presented token to SpaceChild's own
+// /auth/sso/verify and trusts the authoritative answer. Mapping is by EMAIL
+// (unique on both sides); unknown emails are auto-provisioned as passwordless
+// email-provider users (they can't log in through the password door — the
+// federation IS their door). Deliberately no new auth_provider enum value:
+// adding pg enum values breaks the Replit deploy flow (see floor_deal_kind).
+const SPACECHILD_AUTH_URL = (process.env.SPACECHILD_AUTH_URL || "https://auth.spacechild.love").replace(/\/+$/, "");
+const SPACECHILD_FEDERATION_ENABLED = process.env.KAX_SPACECHILD_FEDERATION !== "0";
+
+/**
+ * Exchange a SpaceChild access token for a KAX identity token.
+ *
+ *   POST /auth/token/exchange { spacechild_token }
+ *
+ * The one endpoint that lets constellation CLI/swarm agents reach the market
+ * with only `kannaka identity login` — no browser, no KAX password. Response
+ * shape mirrors /auth/token; the signup grant fires for first-time principals
+ * (idempotent, deterministic txId).
+ */
+router.post("/auth/token/exchange", async (req, res) => {
+  if (!SPACECHILD_FEDERATION_ENABLED) {
+    res.status(503).json({ error: "SpaceChild federation disabled (KAX_SPACECHILD_FEDERATION=0)" });
+    return;
+  }
+  if (!issuingEnabled()) {
+    res.status(503).json({ error: "identity issuing disabled: KAX_IDENTITY_PRIVATE_JWK unset" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const scToken = typeof body.spacechild_token === "string" ? body.spacechild_token.trim() : "";
+  if (!scToken) {
+    res.status(400).json({ error: "spacechild_token required" });
+    return;
+  }
+
+  // Remote introspection — SpaceChild is the authority on its own tokens.
+  let intro: { valid?: boolean; userId?: string; email?: string; firstName?: string; lastName?: string };
+  try {
+    const r = await fetch(`${SPACECHILD_AUTH_URL}/auth/sso/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: scToken }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (r.status === 401) {
+      res.status(401).json({ error: "SpaceChild token invalid or expired — run `kannaka identity login` again" });
+      return;
+    }
+    if (!r.ok) {
+      res.status(502).json({ error: `SpaceChild verify responded ${r.status}` });
+      return;
+    }
+    intro = (await r.json()) as typeof intro;
+  } catch (err) {
+    res.status(502).json({ error: `SpaceChild unreachable: ${err instanceof Error ? err.message : String(err)}` });
+    return;
+  }
+  if (!intro.valid) {
+    res.status(401).json({ error: "SpaceChild token did not verify" });
+    return;
+  }
+  const email = (intro.email || "").trim().toLowerCase();
+  if (!email) {
+    res.status(422).json({ error: "SpaceChild account has no email — cannot federate" });
+    return;
+  }
+
+  // Map by email; auto-provision a passwordless row for first-time federated users.
+  let [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  if (!user) {
+    try {
+      const displayName = intro.firstName || email.split("@")[0];
+      const inserted = await db
+        .insert(usersTable)
+        .values({ email, authProvider: "email", displayName, firstName: intro.firstName ?? null, lastName: intro.lastName ?? null })
+        .returning();
+      user = inserted[0]!;
+      req.log?.info?.({ email, spacechildUserId: intro.userId }, "federated user auto-provisioned");
+    } catch {
+      // Raced a concurrent provision — re-read.
+      [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+      if (!user) {
+        res.status(500).json({ error: "failed to provision federated user" });
+        return;
+      }
+    }
+  }
+  if (user.disabledAt) {
+    res.status(403).json({ error: "account disabled" });
+    return;
+  }
+
+  try {
+    const token = await issueToken({
+      kind: "user",
+      subject: user.id,
+      scopes: ["propose", "trade"],
+      ttlSeconds: USER_TOKEN_TTL_SEC,
+    });
+    await grantSignupCredits(`kax:user:${user.id}`, req.log?.info?.bind(req.log));
+    res.json({
+      token,
+      kind: "user",
+      expiresInSec: USER_TOKEN_TTL_SEC,
+      federated: "spacechild",
+      spacechildUserId: intro.userId ?? null,
+    });
+  } catch (err) {
+    req.log?.error?.({ err, email }, "federated token issue failed");
+    res.status(500).json({ error: "failed to issue token" });
+  }
+});
+
 /**
  * Refresh a STILL-VALID identity token — the autonomy path for CLI / swarm
  * agents (ADR-0041). The 15-minute TTL is right for humans pasting tokens into
