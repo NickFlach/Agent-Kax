@@ -10,8 +10,34 @@ import {
   USER_TOKEN_TTL_SEC,
   AGENT_TOKEN_TTL_SEC,
 } from "../lib/identity";
+import { postTransaction } from "../lib/ledger";
+import { HOUSE_ACCOUNT } from "../lib/ledger-core";
 
 const router: IRouter = Router();
+
+// Starting play credits granted once per principal, the first time they mint
+// an identity token (100 credits in minor units). The txId is DETERMINISTIC
+// (`grant:signup:<principal>`), so the ledger's idempotency registry makes the
+// grant exactly-once no matter how many tokens the principal mints — no flag
+// column, no separate bookkeeping. Best-effort: a ledger hiccup never blocks
+// token issuance.
+const SIGNUP_GRANT_MINOR = 100_000_000n;
+
+async function grantSignupCredits(principal: string, log?: (obj: unknown, msg: string) => void): Promise<void> {
+  try {
+    const r = await postTransaction({
+      txId: `grant:signup:${principal}`,
+      asset: "play_credit",
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -SIGNUP_GRANT_MINOR, kind: "grant", ref: "signup grant" },
+        { account: `trader:${principal}`, amount: SIGNUP_GRANT_MINOR, kind: "grant", ref: "signup grant" },
+      ],
+    });
+    if (!r.idempotentReplay) log?.({ principal }, "signup grant issued");
+  } catch (err) {
+    log?.({ err, principal }, "signup grant failed (token still issued)");
+  }
+}
 
 const BOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -80,6 +106,8 @@ router.post("/auth/token", requireAuth, async (req, res) => {
         scopes: ["propose", "trade"],
         ttlSeconds: AGENT_TOKEN_TTL_SEC,
       });
+      // Principal grammar mirrors the hub's traderIdFromClaims exactly.
+      await grantSignupCredits(`kax:agent:${obcBotId}`, req.log?.info?.bind(req.log));
       res.json({ token, kind: "agent", botId: obcBotId, expiresInSec: AGENT_TOKEN_TTL_SEC });
       return;
     }
@@ -90,6 +118,7 @@ router.post("/auth/token", requireAuth, async (req, res) => {
       scopes: ["propose", "trade"],
       ttlSeconds: USER_TOKEN_TTL_SEC,
     });
+    await grantSignupCredits(`kax:user:${userId}`, req.log?.info?.bind(req.log));
     res.json({ token, kind: "user", expiresInSec: USER_TOKEN_TTL_SEC });
   } catch (err) {
     req.log?.error?.({ err, userId }, "token issue failed");
