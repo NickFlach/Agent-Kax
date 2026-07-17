@@ -50,6 +50,10 @@ const corsAllowlist = new Set([
   ...corsAllowlistEnv.split(",").map((s) => s.trim()).filter(Boolean),
   "https://kax.ninja-portal.com",
   "https://openclawcity.ai",
+  // Constellation dashboards read identity-scoped endpoints (e.g. the
+  // observatory wallet card calling GET /api/ledger/my with a Bearer token).
+  "https://observatory.ninja-portal.com",
+  "https://radio.ninja-portal.com",
   "http://localhost:3000",
   "http://localhost:5173",
   "http://127.0.0.1:3000",
