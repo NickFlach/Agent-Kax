@@ -51,15 +51,20 @@ router.get("/floor/info", async (_req, res) => {
 
 router.get("/floor/ledger", async (req, res) => {
   const { limit, offset } = ListFloorLedgerQueryParams.parse(req.query);
-  const entries = await db
+  // Optional kind filter (ux-batch2: the /predictions page reads settled
+  // prediction history). Parsed alongside the generated params — an unknown
+  // kind simply matches nothing, which is safe.
+  const kind = typeof req.query["kind"] === "string" ? req.query["kind"] : undefined;
+  const whereKind = kind ? eq(floorLedgerTable.kind, kind as FloorLedgerEntry["kind"]) : undefined;
+  const base = db
     .select()
     .from(floorLedgerTable)
     .orderBy(desc(floorLedgerTable.closedAt), desc(floorLedgerTable.id))
     .limit(limit)
     .offset(offset);
-  const [{ total }] = await db
-    .select({ total: count() })
-    .from(floorLedgerTable);
+  const entries = await (whereKind ? base.where(whereKind) : base);
+  const totalQ = db.select({ total: count() }).from(floorLedgerTable);
+  const [{ total }] = await (whereKind ? totalQ.where(whereKind) : totalQ);
   res.json({ entries: entries.map(formatEntry), total });
 });
 

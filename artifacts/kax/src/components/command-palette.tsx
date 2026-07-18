@@ -19,6 +19,7 @@ const PUBLIC_ROUTES = [
   { href: "/", label: "Landing" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/floor", label: "The Floor — deal ledger" },
+  { href: "/predictions", label: "Resonance Futures — prediction markets" },
   { href: "/city", label: "Enter City 3D" },
   { href: "/s/kannaka", label: "Kannaka storefront" },
 ];

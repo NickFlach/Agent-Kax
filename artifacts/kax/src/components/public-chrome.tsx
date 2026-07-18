@@ -16,6 +16,7 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
   const navLinks = [
     { href: "/marketplace", label: "Marketplace" },
     { href: "/floor", label: "The Floor" },
+    { href: "/predictions", label: "Futures" },
     { href: "/city", label: "Enter City 3D" },
   ];
 
