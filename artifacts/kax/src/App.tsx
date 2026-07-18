@@ -38,6 +38,8 @@ import ResetPasswordPage from "@/pages/reset-password";
 import BotsPage from "@/pages/bots";
 import FloorPage from "@/pages/floor";
 import LandingPage from "@/pages/landing";
+import { MobileNav } from "@/components/mobile-nav";
+import { CommandPalette } from "@/components/command-palette";
 
 const queryClient = new QueryClient();
 
@@ -163,9 +165,32 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
       <nav className="border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-50" aria-label="Primary">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-12">
-          <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-logo">KAX</Link>
-          <div className="flex items-center gap-1">
+        <div className="max-w-7xl mx-auto px-4 lg:px-6 flex items-center justify-between h-12">
+          <div className="flex items-center gap-2">
+            {/* ux-batch1: 13 links overflow small screens — drawer below lg */}
+            <div className="lg:hidden">
+              <MobileNav
+                title="KAX Studio"
+                links={[
+                  { href: "/dashboard", label: "Dashboard" },
+                  { href: "/artifacts", label: "Artifacts" },
+                  { href: "/drops", label: "Drops" },
+                  { href: "/agents", label: "Agents" },
+                  { href: "/bots", label: "Bots" },
+                  { href: "/inbox", label: "Inbox", badge: dmsUnread },
+                  { href: "/proposals", label: "Proposals", badge: proposalsPending },
+                  { href: "/harvester", label: "Harvester" },
+                  { href: "/vault", label: "Vault" },
+                  ...(isAdmin ? [{ href: "/admin/users", label: "Users" }] : []),
+                  { href: "/marketplace", label: "Marketplace" },
+                  { href: "/floor", label: "Floor" },
+                  { href: "/s/kannaka", label: "Storefront" },
+                ]}
+              />
+            </div>
+            <Link href="/" className="font-bold tracking-widest text-sm" data-testid="link-logo">KAX</Link>
+          </div>
+          <div className="hidden lg:flex items-center gap-1">
             <NavLink href="/dashboard">Dashboard</NavLink>
             <NavLink href="/artifacts">Artifacts</NavLink>
             <NavLink href="/drops">Drops</NavLink>
@@ -182,8 +207,12 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
             <NavLink href="/s/kannaka">Storefront</NavLink>
             <AuthControls />
           </div>
+          <div className="lg:hidden">
+            <AuthControls />
+          </div>
         </div>
       </nav>
+      <CommandPalette />
       <main id="admin-main" className="max-w-7xl mx-auto px-6 py-6 pb-20">
         {children}
       </main>

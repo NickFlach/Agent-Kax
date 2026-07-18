@@ -177,17 +177,18 @@ export default function Dashboard() {
             ) : distribution?.buckets ? (
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={distribution.buckets}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 10% 15%)" />
-                  <XAxis dataKey="range" tick={{ fill: "hsl(240 5% 65%)", fontSize: 12 }} />
-                  <YAxis tick={{ fill: "hsl(240 5% 65%)", fontSize: 12 }} />
+                  {/* Brand tokens, not hardcoded purple/grey (ux-batch1) */}
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="range" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
+                  <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                   <ChartTooltip
                     contentStyle={{
-                      backgroundColor: "hsl(240 10% 6%)",
-                      border: "1px solid hsl(240 10% 15%)",
-                      color: "hsl(0 0% 95%)",
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      color: "hsl(var(--foreground))",
                     }}
                   />
-                  <Bar dataKey="count" fill="hsl(270 100% 60%)" />
+                  <Bar dataKey="count" fill="hsl(var(--chart-1))" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (

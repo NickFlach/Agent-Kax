@@ -1,6 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
+import { MobileNav } from "@/components/mobile-nav";
+import { CommandPalette } from "@/components/command-palette";
 
 export function PublicChrome({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -20,8 +22,12 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono selection:bg-primary/30">
       <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-6">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3 md:gap-6">
+            {/* ux-batch1: nav was hidden on mobile with no replacement */}
+            <div className="md:hidden">
+              <MobileNav title="KAX" links={navLinks} />
+            </div>
             <Link href="/" className="font-bold tracking-[0.3em] uppercase text-primary hover:text-primary/80 transition-colors" data-testid="link-home">
               KAX
             </Link>
@@ -60,6 +66,7 @@ export function PublicChrome({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      <CommandPalette />
 
       <main className="flex-1">
         {children}
