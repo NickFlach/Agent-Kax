@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   useGetFloorInfo,
   useListFloorLedger,
@@ -6,6 +7,7 @@ import {
 } from "@workspace/api-client-react";
 import type { FloorLedgerEntry } from "@workspace/api-client-react";
 import { PublicChrome } from "@/components/public-chrome";
+import { toast } from "@/hooks/use-toast";
 
 function LedgerRow({ entry, isFirst }: { entry: FloorLedgerEntry; isFirst: boolean }) {
   const closed = entry.closedAt ? new Date(entry.closedAt).toUTCString() : "pending";
@@ -43,13 +45,32 @@ export default function FloorPage() {
   const { data: info, isLoading } = useGetFloorInfo({
     query: { queryKey: getGetFloorInfoQueryKey() },
   });
+  // ux-batch3 (survey #5): a trading floor should feel alive. 15s refetch
+  // + a witness toast when a new deal lands at the top of the ledger.
   const { data: ledger } = useListFloorLedger(
     { limit: 50, offset: 0 },
-    { query: { queryKey: getListFloorLedgerQueryKey({ limit: 50, offset: 0 }) } },
+    {
+      query: {
+        queryKey: getListFloorLedgerQueryKey({ limit: 50, offset: 0 }),
+        refetchInterval: 15_000,
+      },
+    },
   );
 
   const floor = info?.floor;
   const entries = ledger?.entries ?? [];
+
+  const lastSeenDeal = useRef<string | null>(null);
+  useEffect(() => {
+    const top = entries[0]?.dealUuid ?? null;
+    if (top && lastSeenDeal.current && top !== lastSeenDeal.current) {
+      toast({
+        title: "Deal witnessed on the floor",
+        description: entries[0]?.title ?? "A new entry just closed.",
+      });
+    }
+    if (top) lastSeenDeal.current = top;
+  }, [entries]);
 
   return (
     <PublicChrome>
@@ -96,7 +117,13 @@ export default function FloorPage() {
 
         <section className="flex flex-col gap-6">
           <div className="flex items-baseline justify-between border-b border-border pb-4">
-            <h2 className="text-2xl font-bold uppercase tracking-tighter">Public Ledger</h2>
+            <h2 className="text-2xl font-bold uppercase tracking-tighter">
+              Public Ledger
+              <span className="ml-3 align-middle text-[10px] font-normal uppercase tracking-widest text-accent">
+                <span className="inline-block w-1.5 h-1.5 bg-accent animate-pulse mr-1" aria-hidden />
+                live · 15s
+              </span>
+            </h2>
             <span className="text-[10px] uppercase tracking-widest text-primary font-mono font-bold bg-primary/10 px-3 py-1 border border-primary/20" data-testid="text-floor-deal-count">
               {info ? `${info.dealCount} deals witnessed` : "Syncing..."}
             </span>
