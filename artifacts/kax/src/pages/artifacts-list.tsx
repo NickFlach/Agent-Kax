@@ -147,7 +147,10 @@ export default function ArtifactsList() {
           <SelectContent>
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="image">Art</SelectItem>
-            <SelectItem value="audio">Music</SelectItem>
+            <SelectItem value="audio">Audio</SelectItem>
+            <SelectItem value="music">Music</SelectItem>
+            <SelectItem value="text">Text</SelectItem>
+            <SelectItem value="furniture">Furniture</SelectItem>
           </SelectContent>
         </Select>
         <Select value={editionFilter} onValueChange={setEditionFilter}>
