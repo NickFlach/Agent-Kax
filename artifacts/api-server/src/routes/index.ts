@@ -24,6 +24,7 @@ import constellationRouter from "./constellation";
 import connectorsRouter from "./connectors";
 import marketplaceCombinedRouter from "./marketplace-combined";
 import floorRouter from "./floor";
+import predictionsRouter from "./predictions";
 
 const router: IRouter = Router();
 
@@ -52,5 +53,6 @@ router.use(constellationRouter);
 router.use(connectorsRouter);
 router.use(marketplaceCombinedRouter);
 router.use(floorRouter);
+router.use(predictionsRouter);
 
 export default router;

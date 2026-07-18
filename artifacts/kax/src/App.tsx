@@ -37,6 +37,7 @@ import LoginPage from "@/pages/login";
 import ResetPasswordPage from "@/pages/reset-password";
 import BotsPage from "@/pages/bots";
 import FloorPage from "@/pages/floor";
+import PredictionsPage from "@/pages/predictions";
 import LandingPage from "@/pages/landing";
 import { MobileNav } from "@/components/mobile-nav";
 import { CommandPalette } from "@/components/command-palette";
@@ -393,6 +394,9 @@ function Router() {
       </Route>
       <Route path="/floor">
         <FloorPage />
+      </Route>
+      <Route path="/predictions">
+        <PredictionsPage />
       </Route>
       <Route path="/marketplace/list">
         <Marketplace />
