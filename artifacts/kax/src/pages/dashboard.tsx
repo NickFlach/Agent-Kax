@@ -9,6 +9,7 @@ import { PartnerSyncWidget } from "@/components/partner-sync-widget";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
 import { NotificationPrefsCard } from "@/components/notification-prefs-card";
 import { BotsManager } from "@/components/bots-manager";
+import { CapabilityChecklist } from "@/components/capability-checklist";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TrendingDown } from "lucide-react";
 
@@ -80,6 +81,11 @@ export default function Dashboard() {
           <StatCard label="Avg Score" value={`${(summary.averageScore * 100).toFixed(0)}%`} />
         </div>
       ) : null}
+
+      <CapabilityChecklist
+        totalArtifacts={summary?.totalArtifacts ?? 0}
+        publishedDrops={summary?.publishedDrops ?? 0}
+      />
 
       {inboxCounts && (inboxCounts.proposalsPending > 0 || inboxCounts.dmsUnread > 0 || inboxCounts.matchesTotal > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="inbox-counts">
