@@ -69,6 +69,8 @@ export const authChallengeKindEnum = pgEnum("auth_challenge_kind", [
   "wallet_nonce",
   "agent_challenge",
   "password_reset",
+  // ADR-0043: nonce a Nostr npub schnorr-signs to bind itself to an OBC bot.
+  "npub_bind_challenge",
 ]);
 
 export const authChallengesTable = pgTable(
@@ -114,6 +116,12 @@ export const userBotsTable = pgTable(
     obcBotId: varchar("obc_bot_id").notNull().unique(),
     displayName: varchar("display_name"),
     attachedAt: timestamp("attached_at", { withTimezone: true }).notNull().defaultNow(),
+    // ADR-0043 npub↔bot attestation. Nullable: a bot need not have a bound
+    // Nostr key. Set only after a valid three-legged Schnorr proof. Unique
+    // (partial, non-null) via idx_user_bots_npub_unique — an npub attests to
+    // at most one bot.
+    npub: varchar("npub"),
+    npubVerifiedAt: timestamp("npub_verified_at", { withTimezone: true }),
   },
   (table) => [index("idx_user_bots_user").on(table.userId)],
 );
