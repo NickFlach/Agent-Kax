@@ -8,12 +8,20 @@ import {
 } from "@workspace/db";
 import { getPartnerArtifact, partnerApiAvailable } from "../lib/partnerClient";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
+import { npubBindDigest, verifyNpubBinding } from "../lib/npubBind";
 
 const router: Router = Router();
 
 const CHALLENGE_TTL_MS = 30 * 60 * 1000; // 30 min — user must create an OBC artifact in this window
 const BOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID_RE = BOT_ID_RE;
+
+// ADR-0043 npub↔bot attestation.
+const NPUB_BIND_TTL_MS = 15 * 60 * 1000; // 15 min to sign the nonce
+const NPUB_RE = /^npub1[02-9ac-hj-np-z]{58}$/; // bech32, 32-byte payload
+// The domain string mixed into the binding commitment. Fixed per deployment so
+// a signature gathered for kax cannot be replayed at another verifier.
+const NPUB_BIND_DOMAIN = process.env["KAX_NPUB_DOMAIN"] ?? "kax.ninja-portal.com";
 
 function generateChallenge(): string {
   // 6-char hex (~16M combos): brute-force-injecting it into someone
@@ -251,6 +259,183 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
     .where(eq(userBotsTable.userId, userId))
     .orderBy(userBotsTable.attachedAt);
   res.json({ ok: true, bots });
+});
+
+/**
+ * npub binding, step 1 (ADR-0043 Plane 1). A signed-in wallet user who has
+ * ALREADY attached `obcBotId` (via the artifact flow above) requests a nonce
+ * to bind a Nostr `npub` to that bot. We return the exact commitment digest
+ * the npub must sign. Requiring the bot be pre-attached is the second leg of
+ * the three-legged proof; the wallet session is the first.
+ */
+router.post("/auth/agent/npub/challenge", requireWalletAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obcBotIdRaw = typeof body.obcBotId === "string" ? body.obcBotId : "";
+  const npub = typeof body.npub === "string" ? body.npub : "";
+  if (!BOT_ID_RE.test(obcBotIdRaw)) {
+    res.status(400).json({ error: "obcBotId must be an OBC bot UUID" });
+    return;
+  }
+  if (!NPUB_RE.test(npub)) {
+    res.status(400).json({ error: "npub must be a bech32 npub1… key" });
+    return;
+  }
+  const obcBotId = obcBotIdRaw.toLowerCase();
+  const userId = req.user!.id;
+
+  // Leg 2: the bot must already belong to this user.
+  const [bot] = await db
+    .select()
+    .from(userBotsTable)
+    .where(and(eq(userBotsTable.obcBotId, obcBotId), eq(userBotsTable.userId, userId)))
+    .limit(1);
+  if (!bot) {
+    res.status(403).json({ error: "attach this bot to your account first (agent-verify), then bind an npub" });
+    return;
+  }
+
+  // Refuse if this npub is already bound to a DIFFERENT bot (partial-unique
+  // would reject at verify anyway; fail early and clearly).
+  const [npubOwner] = await db
+    .select()
+    .from(userBotsTable)
+    .where(eq(userBotsTable.npub, npub))
+    .limit(1);
+  if (npubOwner && npubOwner.obcBotId !== obcBotId) {
+    res.status(409).json({ error: "this npub is already bound to a different bot" });
+    return;
+  }
+
+  const subject = `${userId}:${obcBotId}:${npub}`;
+  // Sweep expired rows for this subject. Bounded, cheap.
+  await db.delete(authChallengesTable).where(and(
+    eq(authChallengesTable.kind, "npub_bind_challenge"),
+    eq(authChallengesTable.claimSubject, subject),
+    lt(authChallengesTable.expiresAt, new Date()),
+  ));
+
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const issuedAt = new Date();
+  const expiresAt = new Date(issuedAt.getTime() + NPUB_BIND_TTL_MS);
+  await db.insert(authChallengesTable).values({
+    kind: "npub_bind_challenge",
+    challenge: nonce,
+    claimSubject: subject,
+    consumed: false,
+    expiresAt,
+  });
+
+  const digest = npubBindDigest({ domain: NPUB_BIND_DOMAIN, npub, botId: obcBotId, userId, nonce });
+  res.json({
+    nonce,
+    domain: NPUB_BIND_DOMAIN,
+    // The 32-byte BIP-340 message the npub must schnorr-sign. The client MUST
+    // rebuild this from (tag, domain, npub, botId, userId, nonce) rather than
+    // trust it blindly — it is returned only so a correct client can assert it
+    // reconstructed the same commitment.
+    bindDigestHex: digest.toString("hex"),
+    expiresAt: expiresAt.toISOString(),
+    instruction:
+      "Schnorr-sign the bind digest with the npub's secret key (BIP-340 over the raw 32 bytes), " +
+      "then POST { obcBotId, npub, sig } to /api/auth/agent/npub/verify.",
+  });
+});
+
+/**
+ * npub binding, step 2. Verify the three-legged proof and record the binding:
+ *   1. wallet session (requireWalletAuth)
+ *   2. bot owned by this user (re-checked here)
+ *   3. schnorr sig from `npub` over the commitment digest (fresh nonce)
+ * On success the npub is written to the user_bots row. Idempotent for the same
+ * (bot, npub); 409 if the npub is bound elsewhere.
+ */
+router.post("/auth/agent/npub/verify", requireWalletAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obcBotIdRaw = typeof body.obcBotId === "string" ? body.obcBotId : "";
+  const npub = typeof body.npub === "string" ? body.npub : "";
+  const sig = typeof body.sig === "string" ? body.sig : "";
+  if (!BOT_ID_RE.test(obcBotIdRaw)) {
+    res.status(400).json({ error: "obcBotId must be an OBC bot UUID" });
+    return;
+  }
+  if (!NPUB_RE.test(npub)) {
+    res.status(400).json({ error: "npub must be a bech32 npub1… key" });
+    return;
+  }
+  if (!/^[0-9a-f]{128}$/i.test(sig)) {
+    res.status(400).json({ error: "sig must be a 64-byte hex schnorr signature" });
+    return;
+  }
+  const obcBotId = obcBotIdRaw.toLowerCase();
+  const userId = req.user!.id;
+  const subject = `${userId}:${obcBotId}:${npub}`;
+
+  const [challenge] = await db
+    .select()
+    .from(authChallengesTable)
+    .where(and(
+      eq(authChallengesTable.kind, "npub_bind_challenge"),
+      eq(authChallengesTable.claimSubject, subject),
+      eq(authChallengesTable.consumed, false),
+    ))
+    .orderBy(desc(authChallengesTable.createdAt))
+    .limit(1);
+  if (!challenge || challenge.expiresAt < new Date()) {
+    res.status(401).json({ error: "no active npub challenge — request /auth/agent/npub/challenge first" });
+    return;
+  }
+
+  // Leg 2 re-check: bot still owned by this user.
+  const [bot] = await db
+    .select()
+    .from(userBotsTable)
+    .where(and(eq(userBotsTable.obcBotId, obcBotId), eq(userBotsTable.userId, userId)))
+    .limit(1);
+  if (!bot) {
+    res.status(403).json({ error: "bot is not attached to your account" });
+    return;
+  }
+
+  // Leg 3: the schnorr signature over the commitment.
+  const valid = verifyNpubBinding({
+    npub,
+    sigHex: sig,
+    domain: NPUB_BIND_DOMAIN,
+    botId: obcBotId,
+    userId,
+    nonce: challenge.challenge,
+  });
+  if (!valid) {
+    res.status(403).json({ error: "npub signature does not verify against the binding commitment" });
+    return;
+  }
+
+  // Consume the nonce atomically (single-use).
+  const consumed = await db
+    .update(authChallengesTable)
+    .set({ consumed: true })
+    .where(and(eq(authChallengesTable.id, challenge.id), eq(authChallengesTable.consumed, false)))
+    .returning();
+  if (consumed.length === 0) {
+    res.status(409).json({ error: "challenge raced — please try again" });
+    return;
+  }
+
+  // Record the binding. The partial-unique index guards npub→one-bot; a
+  // conflict means it's bound elsewhere.
+  try {
+    await db
+      .update(userBotsTable)
+      .set({ npub, npubVerifiedAt: new Date() })
+      .where(and(eq(userBotsTable.obcBotId, obcBotId), eq(userBotsTable.userId, userId)));
+  } catch (err) {
+    // Unique violation → npub already attests to a different bot.
+    req.log.error({ err, userId, obcBotId, npub }, "npub binding write failed");
+    res.status(409).json({ error: "this npub is already bound to a different bot" });
+    return;
+  }
+
+  res.json({ ok: true, obcBotId, npub, npubVerifiedAt: new Date().toISOString() });
 });
 
 export default router;
