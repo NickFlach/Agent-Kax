@@ -311,12 +311,21 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
     return;
   }
   const state = await getSyncState();
-  let cursor: string | null = state?.lastEventUuid ?? null;
+  const savedCursors = state?.eventCursors ?? {};
+  // Fall back to the old global cursor for a type with no recorded position, so
+  // the first run after this deploy resumes where the single cursor left off
+  // rather than replaying every type from zero.
+  const legacyCursor: string | null = state?.lastEventUuid ?? null;
   let processed = 0;
   let totalSeen = 0;
   const maxPagesPerType = 100;
+  const finalCursors: Record<string, string | null> = {};
 
   for (const eventType of eventTypes) {
+    // Per type, not shared. One cursor across all types meant the second type
+    // started from wherever the first type's stream ended — and since the
+    // cursor is persisted per event, that skip was durable. (#67)
+    let cursor: string | null = savedCursors[eventType] ?? legacyCursor;
     try {
       for (let pageIdx = 0; pageIdx < maxPagesPerType; pageIdx++) {
         const page = await listPartnerEventsSince(cursor, eventType);
@@ -334,7 +343,7 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
               source: "replay",
             });
             cursor = ev.event_uuid;
-            await recordEventCursor(cursor);
+            await recordEventCursor(cursor, eventType);
             if (result.status === "handled" || result.status === "unhandled") processed++;
             consecutiveFailures = 0;
           } catch (err) {
@@ -348,7 +357,7 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
             // upstream problem, not a one-off bad event.
             logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed — skipping event");
             cursor = ev.event_uuid;
-            await recordEventCursor(cursor).catch(() => {});
+            await recordEventCursor(cursor, eventType).catch(() => {});
             consecutiveFailures++;
             if (consecutiveFailures >= 5) {
               logger.warn({ eventType, consecutiveFailures }, "5 consecutive replay failures — skipping rest of this event type");
@@ -359,12 +368,16 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
 
         if (!page.next_cursor) break;
         cursor = page.next_cursor;
-        await recordEventCursor(cursor);
+        await recordEventCursor(cursor, eventType);
       }
     } catch (err) {
       logger.warn({ err, eventType }, "Skipping event type during startup replay");
     }
+    finalCursors[eventType] = cursor;
   }
 
-  logger.info({ processed, totalSeen, finalCursor: cursor, eventTypes }, "Replayed missed partner events");
+  // Per type, not one value: a single "finalCursor" was exactly the conflation
+  // that caused #67, and logging it that way hid the skip from anyone reading
+  // the boot output.
+  logger.info({ processed, totalSeen, finalCursors, eventTypes }, "Replayed missed partner events");
 }

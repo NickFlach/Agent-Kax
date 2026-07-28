@@ -446,11 +446,43 @@ export async function recordPollSuccess(cursor: string | null): Promise<void> {
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
 }
 
-export async function recordEventCursor(eventUuid: string): Promise<void> {
+/**
+ * Record replay progress.
+ *
+ * `eventType` advances that type's own cursor. Replay used to share one global
+ * `lastEventUuid` across every type, and because it is persisted per event, the
+ * second type in the loop started from wherever the first type's stream ended —
+ * skipping its backlog and persisting the skip. (#67)
+ *
+ * `lastEventUuid` is still written as the most-recently-processed marker, since
+ * /admin and /dashboard display it.
+ *
+ * The read-modify-write is done in SQL (`jsonb_set` on a coalesced object) so
+ * two concurrent writers cannot clobber each other's types the way a
+ * read-then-write in JS would.
+ */
+export async function recordEventCursor(eventUuid: string, eventType?: string): Promise<void> {
   await ensureSyncRow();
   await db
     .update(partnerSyncStateTable)
-    .set({ lastEventUuid: eventUuid, updatedAt: new Date() })
+    .set({
+      lastEventUuid: eventUuid,
+      ...(eventType
+        ? {
+            // ARRAY[...]::text[] as a bound parameter, never string-built SQL.
+            // Event types are code-controlled today, but a jsonb path spliced
+            // in as raw text is an injection surface waiting for the day they
+            // are not.
+            eventCursors: sql`jsonb_set(
+              coalesce(${partnerSyncStateTable.eventCursors}, '{}'::jsonb),
+              ARRAY[${eventType}]::text[],
+              to_jsonb(${eventUuid}::text),
+              true
+            )`,
+          }
+        : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
 }
 
