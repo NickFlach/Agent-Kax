@@ -84,6 +84,30 @@ function fmtOutbound(o: OutboundMessage) {
   };
 }
 
+/**
+ * The slug of the local agent an inbound event was addressed to.
+ *
+ * Inbound proposals and DMs record which of the owner's agents received them
+ * (`agentId`), and the partner client already supports `from_agent_slug` on
+ * outbound sends — but the reply routes never connected the two. An owner with
+ * several registered agents therefore replied from OBC's default identity
+ * instead of the bot that was actually written to, even though the row knew
+ * exactly which one that was. (#78)
+ *
+ * Returns undefined when the event was never attributed to a local agent, so
+ * the reply omits `from_agent_slug` and behaves exactly as it does today rather
+ * than guessing at an identity.
+ */
+async function replyFromAgentSlug(agentId: number | null): Promise<string | undefined> {
+  if (agentId === null) return undefined;
+  const [agent] = await db
+    .select({ slug: agentsTable.slug })
+    .from(agentsTable)
+    .where(eq(agentsTable.id, agentId))
+    .limit(1);
+  return agent?.slug ?? undefined;
+}
+
 function partnerErrorResponse(err: unknown): { status: number; body: { error: string } } {
   if (err instanceof PartnerApiBudgetError) {
     return { status: 503, body: { error: "Partner API daily request budget exhausted" } };
@@ -224,6 +248,7 @@ router.post("/proposals/:id/decision", requireAuth, async (req, res) => {
         proposalUuid: row.sourceUuid,
         body: replyMessage,
         decision,
+        fromAgentSlug: await replyFromAgentSlug(row.agentId),
       });
       const [inserted] = await db
         .insert(outboundMessagesTable)
@@ -285,6 +310,7 @@ router.post("/proposals/:id/reply", requireAuth, async (req, res) => {
     const sent = await sendPartnerProposalReply({
       proposalUuid: row.sourceUuid,
       body: text,
+      fromAgentSlug: await replyFromAgentSlug(row.agentId),
     });
     const [inserted] = await db
       .insert(outboundMessagesTable)
@@ -391,6 +417,7 @@ router.post("/dms/:id/reply", requireAuth, async (req, res) => {
       toAgentSlug: row.fromAgentSlug,
       body: text,
       inReplyToUuid: row.sourceUuid,
+      fromAgentSlug: await replyFromAgentSlug(row.agentId),
     });
     const [inserted] = await db
       .insert(outboundMessagesTable)
