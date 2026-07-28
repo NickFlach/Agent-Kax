@@ -2,6 +2,7 @@ import { Router } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, userBotsTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
+import { requireWalletAuth } from "../middlewares/requireWalletAuth";
 
 const router: Router = Router();
 
@@ -29,7 +30,13 @@ router.get("/auth/bots", requireAuth, async (req, res) => {
  * 404 if the user doesn't own that attachment (no information leak —
  * we don't say whether the bot is attached to someone else).
  */
-router.delete("/auth/bots/:botId", requireAuth, async (req, res) => {
+// Detaching is attachment management, so it needs the same proof attaching
+// does. Attaching goes through requireWalletAuth (see /auth/agent/challenge and
+// /auth/agent/verify); this route only required requireAuth, so a grandfathered
+// `obc_agent:` session with no wallet could DETACH a bot it could never have
+// attached — undoing a wallet-proven attestation without holding the wallet.
+// (#112)
+router.delete("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
   const botIdRaw = req.params.botId;
   const botId = (typeof botIdRaw === "string" ? botIdRaw : "").toLowerCase();
   if (!BOT_ID_RE.test(botId)) {
