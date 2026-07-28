@@ -199,20 +199,6 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
     res.status(403).json({ error: "artifact pre-dates the challenge — please create a fresh artifact" });
     return;
   }
-  // Atomically consume the challenge.
-  const consumed = await db
-    .update(authChallengesTable)
-    .set({ consumed: true })
-    .where(and(
-      eq(authChallengesTable.id, challenge.id),
-      eq(authChallengesTable.consumed, false),
-    ))
-    .returning();
-  if (consumed.length === 0) {
-    res.status(409).json({ error: "challenge raced — please try again" });
-    return;
-  }
-
   // Attach the bot. Idempotent if this user already has it attached
   // (the duplicate insert hits the unique index and we no-op).
   // Then re-read the row and confirm the owner is us — closes the race
@@ -246,6 +232,27 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
     res.status(409).json({ error: "this bot is already attached to a different account" });
     return;
   }
+
+  // Consume the challenge only now that the attachment is CONFIRMED.
+  //
+  // This used to run before the insert, so any failure afterwards -- a DB
+  // blip on the insert, or losing the owner re-read race -- burned the
+  // challenge anyway. And because verification also requires
+  // `artifact.created_at >= challenge.createdAt`, the user's existing OBC
+  // artifact became useless: they had to request a new challenge AND publish
+  // a brand new artifact for it. A transient error cost real work. (#111)
+  //
+  // Deferring is safe because a challenge is scoped to one (user, bot) pair.
+  // Reusing it can only re-attach the same bot to the same user, and the
+  // insert is onConflictDoNothing followed by an owner check -- idempotent.
+  // The attachment, not the challenge row, is the thing being protected.
+  await db
+    .update(authChallengesTable)
+    .set({ consumed: true })
+    .where(and(
+      eq(authChallengesTable.id, challenge.id),
+      eq(authChallengesTable.consumed, false),
+    ));
 
   // Return the user's full attached-bot list, ordered for stable UX.
   const bots = await db
