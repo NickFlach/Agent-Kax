@@ -69,6 +69,21 @@ function listOnDisk(): string[] {
     .sort(); // lex order; the leading 000N keeps this deterministic
 }
 
+/**
+ * The captured starting schema. Every other migration is incremental on top of
+ * it, and it is the only file that may be journaled without being executed —
+ * see the note in runMigrations().
+ */
+export const BASELINE_MIGRATION = "0000_baseline.sql";
+
+/** Record a migration as applied without running it. */
+async function journalWithoutApplying(filename: string): Promise<void> {
+  await pool.query(
+    "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+    [filename],
+  );
+}
+
 async function applyOne(filename: string, log: (m: string) => void): Promise<void> {
   const sql = readFileSync(resolve(MIGRATIONS_DIR, filename), "utf8");
   const client = await pool.connect();
@@ -151,12 +166,38 @@ export async function runMigrations(opts: { log?: (m: string) => void } = {}): P
     return { applied: [], skipped };
   }
 
-  log(`schema_migrations: applying ${pending.length} new migration(s)`);
+  // A database that already has migrations recorded PREDATES the baseline —
+  // its schema is the baseline, by definition. Executing 0000_baseline.sql
+  // there would try to CREATE TABLE over live tables and fail the whole run
+  // (and, under KAX_AUTO_MIGRATE=1, the boot with it).
+  //
+  // So it is journaled without being executed. This is what makes adding the
+  // baseline safe on production with no operator step and no ordering hazard:
+  // deploy order does not matter, because the file can never run against a
+  // database that already has a history. A genuinely blank database has an
+  // empty journal and applies it for real.
+  const toApply: string[] = [];
   for (const f of pending) {
+    if (f === BASELINE_MIGRATION && applied.size > 0) {
+      await journalWithoutApplying(f);
+      log(`  = ${f} (pre-existing schema — recorded, not executed)`);
+      skipped.push(f);
+      continue;
+    }
+    toApply.push(f);
+  }
+
+  if (toApply.length === 0) {
+    log(`schema_migrations: up to date (${skipped.length} already applied)`);
+    return { applied: [], skipped };
+  }
+
+  log(`schema_migrations: applying ${toApply.length} new migration(s)`);
+  for (const f of toApply) {
     await applyOne(f, log);
   }
 
-  return { applied: pending, skipped };
+  return { applied: toApply, skipped };
 }
 
 // CLI mode — `pnpm db:migrate` runs this directly. The `basename` guard is

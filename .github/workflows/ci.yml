@@ -84,32 +84,16 @@ jobs:
       # queries through test-helpers. Hence the service container below plus
       # the migration step: the same hand-rolled runner the deploy path uses
       # (lib/db/src/migrate.ts, which already names CI as a target).
-      # Schema for the throwaway container comes from `drizzle-kit push`, NOT
-      # from the migration runner. `migrations/*.sql` are incremental on top of
-      # a baseline that predates them and was never captured as a migration —
-      # against an empty database 0001 fails immediately with
-      # `relation "users" does not exist`.
-      #
-      # drizzle.config.ts carries a loud warning against `push`, and it stands:
-      # never point this at production. That warning is about a live database
-      # with existing rows — push cannot express the `ALTER TYPE ... ADD VALUE`
-      # that migration 0009 applied, so it tries to rebuild the enum and fails
-      # on rows already using the new value. An empty container has no such
-      # rows: push simply creates the enum with every value from the schema
-      # definition. DATABASE_URL here is the local service container.
-      #
-      # Trade-off worth knowing: CI therefore tests against the schema
-      # DEFINITIONS while production runs the migrations, so drift between the
-      # two is not caught here. Capturing a baseline migration would fix that
-      # and is the better long-term answer.
-      - name: Provision test database schema
-        run: pnpm --filter @workspace/db run push-force
+      # Real migrations, from the captured baseline forward — the same chain
+      # production runs. This replaced `drizzle-kit push`, which reproduced
+      # tables/columns/enums from the drizzle schema but not the hand-written
+      # function and trigger DDL the migrations carry, so CI was testing the
+      # schema DEFINITIONS while prod ran the MIGRATIONS and drift between them
+      # was invisible. (#126)
+      - name: Apply database migrations
+        run: pnpm --filter @workspace/db run migrate
 
-      # Tells vitest the schema came from push, so the one suite that depends
-      # on trigger DDL push cannot create (ledger) is skipped. See the comment
-      # in artifacts/api-server/vitest.config.ts. Everything else runs: 20 of
-      # 21 files, 200 assertions.
+      # No KAX_SCHEMA_FROM_PUSH: the schema now comes from the migrations, so
+      # the trigger-dependent suites (ledger) run too.
       - name: Test
-        env:
-          KAX_SCHEMA_FROM_PUSH: '1'
         run: pnpm -r --if-present run test

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { creditLedgerTable } from "@workspace/db/schema";
+import { HOUSE_ACCOUNT } from "./ledger-core";
 import {
   postTransaction,
   balance,
@@ -11,26 +12,36 @@ import {
   LedgerIdempotencyConflict,
 } from "./ledger";
 
-// DB-backed (needs DATABASE_URL + migration 0013). Not run in CI (typecheck +
-// build only); runs on Replit / any env with the DB. The ledger is append-only,
-// so tests use unique account names per run rather than cleaning up.
+// DB-backed (needs DATABASE_URL + migration 0013). Runs in CI since #126 gave
+// the workflow a real Postgres built from the captured baseline. The ledger is
+// append-only, so tests use unique account names per run rather than cleaning
+// up.
+//
+// The funding side of every grant must be HOUSE_ACCOUNT. The overdraft guard
+// exempts exactly that account (`p.account !== HOUSE_ACCOUNT`, an exact match,
+// not a `house:` prefix), so any other account debited from zero is correctly
+// rejected as insufficient funds — which is what production does too: the
+// signup grant in routes/identity.ts posts from HOUSE_ACCOUNT. These tests
+// previously funded from `house:test:<random>` and only ever passed against a
+// long-lived database where those accounts happened to carry a balance.
 const uniq = () => Math.random().toString(36).slice(2, 10);
 
 describe("credit ledger (DB)", () => {
   it("posts a balanced transaction and derives balances", async () => {
     const asset = "play_credit";
-    const house = `house:test:${uniq()}`;
     const user = `user:test:${uniq()}`;
+    // Shared, so measure the delta rather than an absolute balance.
+    const houseBefore = await balance(HOUSE_ACCOUNT, asset);
     await postTransaction({
       txId: `grant-${uniq()}`,
       asset,
       postings: [
-        { account: house, amount: -100n, kind: "grant" },
+        { account: HOUSE_ACCOUNT, amount: -100n, kind: "grant" },
         { account: user, amount: 100n, kind: "grant" },
       ],
     });
     expect(await balance(user, asset)).toBe(100n);
-    expect(await balance(house, asset)).toBe(-100n);
+    expect(await balance(HOUSE_ACCOUNT, asset)).toBe(houseBefore - 100n);
     // A second posting reduces the user's derived balance.
     await postTransaction({
       txId: `spend-${uniq()}`,
@@ -61,7 +72,7 @@ describe("credit ledger (DB)", () => {
       txId: `chain-${uniq()}`,
       asset: "play_credit",
       postings: [
-        { account: `x:${uniq()}`, amount: -5n, kind: "grant" },
+        { account: HOUSE_ACCOUNT, amount: -5n, kind: "grant" },
         { account: `y:${uniq()}`, amount: 5n, kind: "grant" },
       ],
     });
@@ -71,9 +82,33 @@ describe("credit ledger (DB)", () => {
 
   it("rejects UPDATE/DELETE (append-only trigger)", async () => {
     // Any mutation of the ledger must be refused at the DB level.
-    await expect(
-      db.execute(sql`UPDATE credit_ledger SET amount = amount WHERE seq = (SELECT MIN(seq) FROM credit_ledger)`),
-    ).rejects.toThrow(/append-only/);
+    //
+    // Post first so the table is guaranteed non-empty: the trigger is BEFORE
+    // UPDATE FOR EACH ROW, so against an empty ledger `MIN(seq)` is NULL, the
+    // UPDATE matches zero rows, and the statement resolves without the trigger
+    // ever firing — the assertion would pass for the wrong reason on a fresh
+    // database, and fail as "resolved instead of rejecting" here.
+    await postTransaction({
+      txId: `trigger-${uniq()}`,
+      asset: "play_credit",
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -1n, kind: "grant" },
+        { account: `sink:${uniq()}`, amount: 1n, kind: "grant" },
+      ],
+    });
+    // drizzle wraps driver errors, replacing the message with "Failed query:
+    // ...", so the trigger's own RAISE text ("credit_ledger is append-only: %
+    // is not permitted") lands on `.cause`. Asserting on the top-level message
+    // would fail even though the trigger fired correctly — so check both that
+    // it rejects AND that the rejection is genuinely the append-only guard
+    // rather than any other query error.
+    const err = await db
+      .execute(sql`UPDATE credit_ledger SET amount = amount WHERE seq = (SELECT MIN(seq) FROM credit_ledger)`)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err, "the append-only trigger did not reject the UPDATE").not.toBe(null);
+    const cause = (err as { cause?: { message?: string } })?.cause;
+    expect(`${cause?.message ?? ""}${(err as Error)?.message ?? ""}`).toMatch(/append-only/);
   });
 
   it("is idempotent: a replayed txId applies nothing and returns the original", async () => {
