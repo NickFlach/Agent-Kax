@@ -903,14 +903,11 @@ CREATE SEQUENCE public.reactions_id_seq
 ALTER SEQUENCE public.reactions_id_seq OWNED BY public.reactions.id;
 
 
---
--- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.schema_migrations (
-    filename text NOT NULL,
-    applied_at timestamp without time zone DEFAULT now() NOT NULL
-);
+-- NOTE: public.schema_migrations is deliberately omitted from this baseline.
+-- It is the migration runner's OWN journal, not application schema, and
+-- ensureJournalTable() creates it (IF NOT EXISTS) before any migration is
+-- applied. Including the pg_dump copy made 0000 fail on a blank database with
+-- `relation "schema_migrations" already exists`.
 
 
 --
@@ -1261,12 +1258,7 @@ ALTER TABLE ONLY public.reactions
     ADD CONSTRAINT reactions_source_uuid_unique UNIQUE (source_uuid);
 
 
---
--- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.schema_migrations
-    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (filename);
+-- (schema_migrations pkey omitted with its table -- see the note above.)
 
 
 --
