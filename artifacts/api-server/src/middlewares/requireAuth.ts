@@ -87,7 +87,7 @@ export async function getOptionalAuth(req: Request): Promise<{ id: string; role:
  */
 export function requireAdminOrServiceToken(req: Request, res: Response, next: NextFunction) {
   const token = process.env.KAX_SERVICE_TOKEN || process.env.FLOOR_LEDGER_TOKEN;
-  if (token && req.headers.authorization === `Bearer ${token}`) {
+  if (bearerEquals(req, token)) {
     next();
     return;
   }
