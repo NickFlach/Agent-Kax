@@ -96,9 +96,19 @@ describe("credit ledger (DB)", () => {
         { account: `sink:${uniq()}`, amount: 1n, kind: "grant" },
       ],
     });
-    await expect(
-      db.execute(sql`UPDATE credit_ledger SET amount = amount WHERE seq = (SELECT MIN(seq) FROM credit_ledger)`),
-    ).rejects.toThrow(/append-only/);
+    // drizzle wraps driver errors, replacing the message with "Failed query:
+    // ...", so the trigger's own RAISE text ("credit_ledger is append-only: %
+    // is not permitted") lands on `.cause`. Asserting on the top-level message
+    // would fail even though the trigger fired correctly — so check both that
+    // it rejects AND that the rejection is genuinely the append-only guard
+    // rather than any other query error.
+    const err = await db
+      .execute(sql`UPDATE credit_ledger SET amount = amount WHERE seq = (SELECT MIN(seq) FROM credit_ledger)`)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err, "the append-only trigger did not reject the UPDATE").not.toBe(null);
+    const cause = (err as { cause?: { message?: string } })?.cause;
+    expect(`${cause?.message ?? ""}${(err as Error)?.message ?? ""}`).toMatch(/append-only/);
   });
 
   it("is idempotent: a replayed txId applies nothing and returns the original", async () => {
