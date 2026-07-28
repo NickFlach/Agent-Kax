@@ -16,18 +16,43 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
 
   const editionType = pa.edition?.type ?? "open";
 
-  const creatorSlug = pa.creator?.id ?? null;
+  // `PartnerArtifact.creator.id` is the OBC bot UUID, not a slug — partnerClient
+  // normalises it from `creator.id ?? creator_bot_id ?? fallback.creatorBotId`.
+  // This used to be matched against `agents.slug`, which is a different
+  // namespace, so the lookup essentially never hit: every webhook-ingested
+  // artifact landed with `agentId: null`, owned by the system user, and the
+  // agent's `artifactsHarvested` counter never moved. (#102)
+  //
+  // `obc_bot_id` is the right key — the schema calls it out as the identifier
+  // that survives when "OBC slugs/display names can change or 404", and
+  // backfill.ts already joins `artifacts.creator_bot_id -> agents.obc_bot_id`.
+  const creatorBotId = pa.creator?.id ?? null;
   let ownerId: string = KANNAKA_SYSTEM_USER_ID;
   let agentId: number | null = null;
-  if (creatorSlug) {
+  if (creatorBotId) {
     const [agent] = await db
       .select()
       .from(agentsTable)
-      .where(eq(agentsTable.slug, creatorSlug))
+      .where(eq(agentsTable.obcBotId, creatorBotId))
       .limit(1);
     if (agent) {
       ownerId = agent.ownerId;
       agentId = agent.id;
+    } else {
+      // Slug fallback, kept deliberately. An agent row whose `obc_bot_id` is
+      // still null (backfill records those: slugs that no longer resolve on
+      // OBC) can only be reached by slug, and a partner that really does send a
+      // slug here should not start failing to attribute. Bot id is tried first
+      // so the correct key always wins.
+      const [bySlug] = await db
+        .select()
+        .from(agentsTable)
+        .where(eq(agentsTable.slug, creatorBotId))
+        .limit(1);
+      if (bySlug) {
+        ownerId = bySlug.ownerId;
+        agentId = bySlug.id;
+      }
     }
   }
 
@@ -43,6 +68,10 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
       connectorId: "obc_partner",
       title: pa.title || "Untitled",
       creatorName: pa.creator?.display_name || "Unknown",
+      // The harvester stamps this (harvesterJob.ts) and backfill repairs
+      // attribution by joining on it. Leaving it null on the webhook path meant
+      // a mis-attributed artifact could not even be repaired later. (#102)
+      creatorBotId,
       publicUrl: pa.public_url,
       thumbnailUrl: pa.thumbnail_url ?? pa.public_url,
       reactionCount: pa.reaction_count ?? 0,
