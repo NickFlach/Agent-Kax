@@ -252,10 +252,46 @@ export async function listPartnerArtifacts(opts: {
 export interface PartnerArtifactDetail {
   id: string;
   creator_bot_id?: string | null;
+  creator_id?: string | null;
+  creator_display_name?: string | null;
+  display_name?: string | null;
+  /**
+   * The nested shape. `getPartnerArtifact` returns the artifact-detail payload
+   * raw, unlike the list endpoint which `normalizeArtifact` flattens — so
+   * callers see whichever shape the partner API actually sent.
+   */
+  creator?: { id?: string | null; display_name?: string | null } | null;
   title?: string | null;
   description?: string | null;
   created_at?: string | null;
   [k: string]: unknown;
+}
+
+/**
+ * The creator's OBC bot id, across every shape the partner API sends.
+ *
+ * Detail responses are not normalised, so the nested `creator.id` form — the
+ * one `PartnerArtifact` models and `normalizeArtifact` produces for list
+ * responses — reaches callers as-is. Reading only the top-level keys meant a
+ * legitimate ownership proof could be rejected. (#81)
+ */
+export function creatorBotIdOf(detail: PartnerArtifactDetail | null | undefined): string | null {
+  if (!detail) return null;
+  const candidates = [detail.creator_bot_id, detail.creator_id, detail.creator?.id];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim() !== "") return c;
+  }
+  return null;
+}
+
+/** The creator's display name, across the same set of shapes. */
+export function creatorDisplayNameOf(detail: PartnerArtifactDetail | null | undefined): string | null {
+  if (!detail) return null;
+  const candidates = [detail.creator_display_name, detail.display_name, detail.creator?.display_name];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim() !== "") return c;
+  }
+  return null;
 }
 
 export async function getPartnerArtifact(artifactUuid: string): Promise<PartnerArtifactDetail | null> {
