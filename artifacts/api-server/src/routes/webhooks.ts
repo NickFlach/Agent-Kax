@@ -19,11 +19,37 @@ function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): 
   }
 }
 
+/** Just enough of express's Request to look a header up. */
+export interface HeaderReader {
+  header(name: string): string | undefined;
+}
+
+/**
+ * Read a webhook header under either vendor prefix.
+ *
+ * The route, the partner API base and the rest of this integration are named
+ * OpenBotCity, but the headers read here were `x-openclawcity-*` only. If the
+ * live sender uses the OpenBotCity spelling, every delivery is rejected with
+ * `401 Invalid signature`, `recordWebhookReceived()` never runs, and KAX
+ * silently degrades to replay/polling instead of the live bridge. (#82)
+ *
+ * Both spellings are accepted rather than swapping the primary, because which
+ * one the live sender actually uses is not verifiable from this repo — and
+ * guessing wrong would break a working integration rather than fix a broken
+ * one. Accepting both is correct under either answer.
+ *
+ * This does not weaken the signature check: the HMAC still has to verify
+ * against the shared secret. Only where the value is looked up changes.
+ */
+export function vendorHeader(req: HeaderReader, suffix: string): string | undefined {
+  return req.header(`x-openbotcity-${suffix}`) ?? req.header(`x-openclawcity-${suffix}`);
+}
+
 router.post(
   "/webhooks/openbotcity",
   raw({ type: "application/json" }),
   async (req: Request, res: Response) => {
-    const sig = req.header("x-openclawcity-signature");
+    const sig = vendorHeader(req, "signature");
     const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
 
     if (!verifySignature(rawBody, sig)) {
@@ -56,7 +82,7 @@ router.post(
       envelope.event_type ||
       envelope.event ||
       envelope.type ||
-      req.header("x-openclawcity-event") ||
+      vendorHeader(req, "event") ||
       undefined;
     const eventData =
       (envelope.data as unknown) ?? (envelope.payload as unknown) ?? (envelope.artifact as unknown);
