@@ -227,12 +227,35 @@ router.patch("/drops/:id", requireAuth, async (req, res) => {
   res.json(result);
 });
 
+/**
+ * The status an artifact should return to when it leaves a drop.
+ *
+ * Both removal paths used to set `status: "narrated"` unconditionally, which
+ * invented state: an artifact that was only ever `scored` came back claiming a
+ * narration it does not have. `narrated` is also a PUBLISHABLE status, so the
+ * lie was load-bearing — re-adding that artifact to a published drop would
+ * surface it publicly as narrated work.
+ *
+ * Derive it from what the row actually carries instead. Expressed as SQL so
+ * both call sites stay single-statement bulk updates rather than read-modify-
+ * write loops.
+ *
+ * The explicit ::artifact_status cast is load-bearing: a CASE yields text and
+ * `status` is a pgEnum column, so Postgres rejects the assignment without it.
+ * (#99)
+ */
+const restoredStatus = sql`CASE
+  WHEN ${artifactsTable.narrative} IS NOT NULL THEN 'narrated'
+  WHEN ${artifactsTable.kannakaScore} IS NOT NULL THEN 'scored'
+  ELSE 'raw'
+END::artifact_status`;
+
 router.delete("/drops/:id", requireAuth, async (req, res) => {
   const { id } = DeleteDropParams.parse(req.params);
   if (!(await checkDropOwnership(req, res, id))) return;
   await db
     .update(artifactsTable)
-    .set({ dropId: null, status: "narrated" })
+    .set({ dropId: null, status: restoredStatus })
     .where(eq(artifactsTable.dropId, id));
   await db.delete(dropsTable).where(eq(dropsTable.id, id));
   res.status(204).send();
@@ -316,7 +339,7 @@ router.delete("/drops/:dropId/artifacts/:artifactId", requireAuth, async (req, r
 
   await db
     .update(artifactsTable)
-    .set({ dropId: null, status: "narrated" })
+    .set({ dropId: null, status: restoredStatus })
     .where(
       and(
         eq(artifactsTable.id, params.artifactId),
