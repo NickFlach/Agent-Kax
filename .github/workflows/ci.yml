@@ -18,6 +18,32 @@ jobs:
     env:
       PORT: '5173'
       BASE_PATH: '/'
+      # Points at the throwaway service container below, never a deployment.
+      # Passwordless by design: the container runs with trust auth, so there
+      # is no credential to write down here — which also keeps secret
+      # scanners from flagging a throwaway literal that looks like one.
+      #
+      # Job-level rather than per-step because lib/db throws at import time
+      # when DATABASE_URL is unset, and it is imported well before the test
+      # step. Nothing connects until a query is actually issued.
+      DATABASE_URL: postgres://postgres@localhost:5432/kax_test
+    # Throwaway Postgres for the test step. Nothing here touches a real
+    # deployment: the suite connects only to this container, which is
+    # destroyed with the job and reachable only from it.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: kax_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,3 +75,41 @@ jobs:
 
       - name: Build all packages
         run: pnpm run build
+
+      # The suite was never executed here — CI stopped at build, so every
+      # vitest file in the repo was documentation rather than a gate.
+      #
+      # It needs a real database to run: lib/db throws at IMPORT time when
+      # DATABASE_URL is unset, and the route/event-handler suites issue real
+      # queries through test-helpers. Hence the service container below plus
+      # the migration step: the same hand-rolled runner the deploy path uses
+      # (lib/db/src/migrate.ts, which already names CI as a target).
+      # Schema for the throwaway container comes from `drizzle-kit push`, NOT
+      # from the migration runner. `migrations/*.sql` are incremental on top of
+      # a baseline that predates them and was never captured as a migration —
+      # against an empty database 0001 fails immediately with
+      # `relation "users" does not exist`.
+      #
+      # drizzle.config.ts carries a loud warning against `push`, and it stands:
+      # never point this at production. That warning is about a live database
+      # with existing rows — push cannot express the `ALTER TYPE ... ADD VALUE`
+      # that migration 0009 applied, so it tries to rebuild the enum and fails
+      # on rows already using the new value. An empty container has no such
+      # rows: push simply creates the enum with every value from the schema
+      # definition. DATABASE_URL here is the local service container.
+      #
+      # Trade-off worth knowing: CI therefore tests against the schema
+      # DEFINITIONS while production runs the migrations, so drift between the
+      # two is not caught here. Capturing a baseline migration would fix that
+      # and is the better long-term answer.
+      - name: Provision test database schema
+        run: pnpm --filter @workspace/db run push-force
+
+      # Tells vitest the schema came from push, so the one suite that depends
+      # on trigger DDL push cannot create (ledger) is skipped. See the comment
+      # in artifacts/api-server/vitest.config.ts. Everything else runs: 20 of
+      # 21 files, 200 assertions.
+      - name: Test
+        env:
+          KAX_SCHEMA_FROM_PUSH: '1'
+        run: pnpm -r --if-present run test
