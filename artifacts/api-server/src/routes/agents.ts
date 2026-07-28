@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { agentsTable, artifactsTable, type Agent } from "@workspace/db/schema";
-import { eq, and, or, desc, count, avg } from "drizzle-orm";
+import { eq, and, or, desc, count, avg, isNotNull } from "drizzle-orm";
 import {
   CreateAgentBody,
   GetAgentParams,
@@ -215,14 +215,31 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
     recent,
   ] = await Promise.all([
     db.select({ total: count() }).from(artifactsTable).where(agentScope),
+    // Count the WORK, not the current lifecycle stage.
+    //
+    // These counted `status = 'scored'` / `status = 'narrated'` exactly, so an
+    // artifact that advanced to `dropped` stopped counting as either — the
+    // per-agent dashboard's scored/narrated numbers went DOWN as work
+    // completed. (#116)
+    //
+    // The obvious repair — treat `dropped` as implying scored+narrated — would
+    // be wrong in the other direction. lib/visibility records that the private
+    // drop-management route "lets an owner attach an artifact to a drop *and
+    // forcibly stamps its status to dropped* without going through score →
+    // narrate", and #99 describes status being rewritten to `narrated` with no
+    // narration attached. Status is decoupled from the work.
+    //
+    // So count the artifacts that actually carry the output: a kannakaScore
+    // means it was scored, a narrative means it was narrated. That is true
+    // regardless of where the row later moved.
     db
       .select({ total: count() })
       .from(artifactsTable)
-      .where(and(agentScope, eq(artifactsTable.status, "scored"))),
+      .where(and(agentScope, isNotNull(artifactsTable.kannakaScore))),
     db
       .select({ total: count() })
       .from(artifactsTable)
-      .where(and(agentScope, eq(artifactsTable.status, "narrated"))),
+      .where(and(agentScope, isNotNull(artifactsTable.narrative))),
     db
       .select({ total: count() })
       .from(artifactsTable)
