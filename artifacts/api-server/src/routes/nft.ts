@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { artifactsTable, nftMintsTable, activitiesTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import { artifactsTable, nftMintsTable, activitiesTable, agentsTable } from "@workspace/db/schema";
+import { eq, and, or } from "drizzle-orm";
 import { canMutate, requireAuth, getOwnerScope } from "../middlewares/requireAuth";
 import { publicArtifactWhere } from "../lib/visibility";
 import { publish as publishConstellation } from "../lib/constellationBridge";
@@ -117,11 +117,45 @@ router.get("/nft/metadata/:artifactId.json", async (req, res) => {
     return;
   }
   const base = publicBaseUrl(req);
+
+  // `external_url` is followed by marketplace visitors who are not signed in,
+  // so it must land on a public page. It pointed at `/artifacts/:id`, which the
+  // frontend mounts inside AdminRoutes behind <RequireAuth> — every OpenSea
+  // visitor hit a login wall. The public artifact page is
+  // `/s/:slug/artifacts/:id`. (#88)
+  //
+  // Resolve the storefront slug by harvest attribution first, then by OBC
+  // creator identity, mirroring how the storefront itself attributes work.
+  const [owningAgent] = a.agentId !== null || a.creatorBotId !== null
+    ? await db
+        .select({ slug: agentsTable.slug })
+        .from(agentsTable)
+        .where(
+          or(
+            ...(a.agentId !== null ? [eq(agentsTable.id, a.agentId)] : []),
+            ...(a.creatorBotId !== null ? [eq(agentsTable.obcBotId, a.creatorBotId)] : []),
+          ),
+        )
+        .limit(1)
+    : [];
+
+  // Audio and music artifacts have no image at `publicUrl` — it is the audio
+  // file. ERC-721 consumers render `image` as a still and play `animation_url`,
+  // so serving the track as `image` gave marketplaces a broken thumbnail. (#31)
+  const isTimeBased = a.artifactType === "audio" || a.artifactType === "music";
+
   res.json({
     name: a.narrativeTitle ?? a.title,
     description: a.narrative ?? `1-of-1 OpenBotCity artifact "${a.title}" by ${a.creatorName}, curated by KAX.`,
-    image: a.publicUrl,
-    external_url: `${base}/artifacts/${a.id}`,
+    // thumbnailUrl falls back to publicUrl at ingest when OBC supplies no
+    // separate thumbnail, so this is best-effort rather than a guarantee — but
+    // it is never worse than publicUrl, and is a real cover image when one
+    // exists.
+    image: isTimeBased ? (a.thumbnailUrl ?? a.publicUrl) : a.publicUrl,
+    ...(isTimeBased ? { animation_url: a.publicUrl } : {}),
+    // Omitted rather than pointed at the admin page when no storefront can be
+    // resolved: a dead-end link is better than one that demands a login.
+    ...(owningAgent ? { external_url: `${base}/s/${owningAgent.slug}/artifacts/${a.id}` } : {}),
     attributes: [
       { trait_type: "Creator", value: a.creatorName },
       { trait_type: "Edition", value: a.editionType },
