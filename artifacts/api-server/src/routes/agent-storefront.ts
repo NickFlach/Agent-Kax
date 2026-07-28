@@ -617,33 +617,27 @@ router.get("/storefront/by-agent/:slug/artifacts/:id", async (req, res) => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
+  // This is the detail view for the works listing directly above, so it must
+  // resolve exactly what that listing renders — same predicate, same formatter.
+  //
+  // It previously required the artifact to sit in a *published drop* and
+  // matched on `agentId` alone, while `/works` applies no drop or status floor
+  // ("the storefront IS the agent's harvested body of work") and also attributes
+  // by `creatorBotId`. The storefront therefore listed works whose own detail
+  // page 404'd — every harvested piece that was never put in a drop, plus
+  // anything attributed only by OBC creator identity. (#114)
+  //
+  // Aligning the two exposes nothing new: `/works` already enumerates these
+  // rows publicly through the same `formatArtifact` payload. If that listing is
+  // itself judged too permissive, that is one decision to take across both
+  // endpoints rather than a divergence to preserve here.
   const [artifact] = await db
     .select()
     .from(artifactsTable)
-    .where(and(eq(artifactsTable.id, id), eq(artifactsTable.agentId, agent.id)))
+    .where(and(eq(artifactsTable.id, id), agentWorksWhere(agent)))
     .limit(1);
   if (!artifact) {
     res.status(404).json({ error: "Artifact not found" });
-    return;
-  }
-  if (artifact.dropId) {
-    const [drop] = await db
-      .select({ status: dropsTable.status })
-      .from(dropsTable)
-      .where(eq(dropsTable.id, artifact.dropId))
-      .limit(1);
-    if (!drop || drop.status !== "published") {
-      res.status(404).json({ error: "Artifact not published" });
-      return;
-    }
-    // Publishable-status floor (#9): the artifact's own status must also
-    // be in the publishable set even when its drop is published.
-    if (!isPublishableStatus(artifact.status)) {
-      res.status(404).json({ error: "Artifact not published" });
-      return;
-    }
-  } else {
-    res.status(404).json({ error: "Artifact not published" });
     return;
   }
   res.json(formatArtifact(artifact));
