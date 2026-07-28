@@ -5,6 +5,7 @@ import {
   type AuthUser,
 } from "@workspace/api-client-react";
 import { getInjectedProvider, personalSign, requestAccounts } from "@/lib/wallet";
+import { appUrl } from "@/lib/urls";
 
 export type { AuthUser };
 
@@ -30,14 +31,13 @@ interface AuthState {
   refresh: () => Promise<void>;
 }
 
-const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/+$/, "") || "";
 const AUTH_QUERY_KEY = getGetCurrentAuthUserQueryKey();
 
 async function fetchAuthEnvelope(): Promise<AuthEnvelope> {
   // Use raw fetch (instead of the generated hook) so a 401 collapses to
   // `{ user: null }` rather than throwing — the rest of the SPA treats
   // logged-out as a normal state, not an error.
-  const res = await fetch("/api/auth/user", { credentials: "include" });
+  const res = await fetch(appUrl("/api/auth/user"), { credentials: "include" });
   if (!res.ok) return { user: null };
   return (await res.json()) as AuthEnvelope;
 }
@@ -54,7 +54,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 async function postJson(path: string, body: unknown): Promise<Response> {
-  return fetch(path, {
+  return fetch(appUrl(path), {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -101,19 +101,19 @@ export function useAuth(): AuthState {
   }, [refetch]);
 
   const login = useCallback(() => {
-    const target = `${BASE}/login`;
+    const target = appUrl("/login");
     window.location.href = target;
   }, []);
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/logout", { method: "POST", credentials: "include" }).catch(
+      await fetch(appUrl("/api/logout"), { method: "POST", credentials: "include" }).catch(
         () => undefined,
       );
     } finally {
       qc.setQueryData(AUTH_QUERY_KEY, { user: null } satisfies AuthEnvelope);
       qc.clear();
-      window.location.href = `${BASE}/`;
+      window.location.href = appUrl("/");
     }
   }, [qc]);
 

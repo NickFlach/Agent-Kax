@@ -12,6 +12,7 @@ import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { StorefrontTheme } from "@/components/storefront-theme";
+import { absoluteUrl } from "@/lib/urls";
 
 export default function AgentStorefrontDrop() {
   const { slug, id: idStr } = useParams<{ slug: string; id: string }>();
@@ -53,7 +54,7 @@ export default function AgentStorefrontDrop() {
   );
   const isAudio = (t: string) => t === "audio" || t === "music";
   const getShareUrl = (artifactId: number) =>
-    `${window.location.origin}/api/share/artifact/${artifactId}`;
+    absoluteUrl(`/api/share/artifact/${artifactId}`);
 
   if (isLoading) {
     return (
@@ -163,7 +164,7 @@ export default function AgentStorefrontDrop() {
                     <ShareButtons
                       inline
                       url={getShareUrl(artifact.id)}
-                      pageUrl={`${window.location.origin}/s/${slug}/drops/${id}#artifact-${artifact.id}`}
+                      pageUrl={absoluteUrl(`/s/${slug}/drops/${id}#artifact-${artifact.id}`)}
                       title={`${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
                     />
                   </div>

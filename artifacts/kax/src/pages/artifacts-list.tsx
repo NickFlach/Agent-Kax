@@ -13,6 +13,7 @@ import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { AdminScopeToggle } from "@/components/admin-scope-toggle";
+import { absoluteUrl } from "@/lib/urls";
 
 function getPageItems(current: number, totalPages: number): (number | "ellipsis")[] {
   // current/totalPages are 1-indexed.
@@ -119,7 +120,7 @@ export default function ArtifactsList() {
 
   const isAudio = (type: string) => type === "audio" || type === "music";
   const getShareUrl = (artifactId: number) =>
-    `${window.location.origin}/api/share/artifact/${artifactId}`;
+    absoluteUrl(`/api/share/artifact/${artifactId}`);
 
   return (
     <div className="space-y-6">
@@ -247,7 +248,7 @@ export default function ArtifactsList() {
                   <ShareButtons
                     compact
                     url={getShareUrl(artifact.id)}
-                    pageUrl={`${window.location.origin}/artifacts/${artifact.id}`}
+                    pageUrl={absoluteUrl(`/artifacts/${artifact.id}`)}
                     title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
                   />
                 </div>
