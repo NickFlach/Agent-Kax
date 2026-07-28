@@ -1,6 +1,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import { and, eq, lt } from "drizzle-orm";
+import { resolveSiweDomain } from "../lib/siweDomain";
 import {
   db,
   usersTable,
@@ -41,9 +42,17 @@ function buildSiweMessage(opts: {
   ].join("\n");
 }
 
+/**
+ * SIWE domain for the message we issue.
+ *
+ * This used to return `x-forwarded-host ?? host` — both attacker-controlled —
+ * so a nonce could be minted for an arbitrary domain and the resulting
+ * signature replayed here for a real session. Resolution now lives in
+ * lib/siweDomain and is driven by KAX_PUBLIC_URL, consulting the request host
+ * only against an explicit KAX_ALLOWED_SIWE_DOMAINS allowlist. (#29)
+ */
 function publicDomain(req: { headers: { host?: string; "x-forwarded-host"?: string | string[] } }): string {
-  const h = (req.headers["x-forwarded-host"] ?? req.headers.host) as string | undefined;
-  return h ?? "kax.local";
+  return resolveSiweDomain(req.headers["x-forwarded-host"] ?? req.headers.host);
 }
 
 /**
