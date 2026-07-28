@@ -1,6 +1,5 @@
 import { Router } from "express";
 import crypto from "node:crypto";
-import { ethers } from "ethers";
 import { and, eq, lt } from "drizzle-orm";
 import {
   db,
@@ -14,7 +13,6 @@ const router: Router = Router();
 
 const NONCE_TTL_MS = 10 * 60 * 1000; // 10 min — generous for slow human flows
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
-const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/; // 65 bytes hex = 130 chars
 
 /**
  * The SIWE message the user signs. Plain English on top so the wallet
