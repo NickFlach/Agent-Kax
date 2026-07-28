@@ -34,18 +34,15 @@ SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
+-- pg_dump emits `set_config('search_path', '', false)` here to force fully
+-- qualified names. It is dropped: the setting persists for the whole
+-- connection, so applyOne's own `INSERT INTO schema_migrations` afterwards
+-- failed with `relation "schema_migrations" does not exist`. Every object
+-- below is already public.-qualified, so nothing depends on it.
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: _system; Type: SCHEMA; Schema: -; Owner: -
---
-
-CREATE SCHEMA _system;
-
 
 --
 -- Name: activity_type; Type: TYPE; Schema: public; Owner: -
@@ -235,38 +232,6 @@ $$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
-
---
--- Name: replit_database_migrations_v1; Type: TABLE; Schema: _system; Owner: -
---
-
-CREATE TABLE _system.replit_database_migrations_v1 (
-    id bigint NOT NULL,
-    build_id text NOT NULL,
-    deployment_id text NOT NULL,
-    statement_count bigint NOT NULL,
-    applied_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
-);
-
-
---
--- Name: replit_database_migrations_v1_id_seq; Type: SEQUENCE; Schema: _system; Owner: -
---
-
-CREATE SEQUENCE _system.replit_database_migrations_v1_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: replit_database_migrations_v1_id_seq; Type: SEQUENCE OWNED BY; Schema: _system; Owner: -
---
-
-ALTER SEQUENCE _system.replit_database_migrations_v1_id_seq OWNED BY _system.replit_database_migrations_v1.id;
-
 
 --
 -- Name: activities; Type: TABLE; Schema: public; Owner: -
@@ -962,13 +927,6 @@ CREATE TABLE public.users (
 
 
 --
--- Name: replit_database_migrations_v1 id; Type: DEFAULT; Schema: _system; Owner: -
---
-
-ALTER TABLE ONLY _system.replit_database_migrations_v1 ALTER COLUMN id SET DEFAULT nextval('_system.replit_database_migrations_v1_id_seq'::regclass);
-
-
---
 -- Name: activities id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1064,14 +1022,6 @@ ALTER TABLE ONLY public.proposals ALTER COLUMN id SET DEFAULT nextval('public.pr
 --
 
 ALTER TABLE ONLY public.reactions ALTER COLUMN id SET DEFAULT nextval('public.reactions_id_seq'::regclass);
-
-
---
--- Name: replit_database_migrations_v1 replit_database_migrations_v1_pkey; Type: CONSTRAINT; Schema: _system; Owner: -
---
-
-ALTER TABLE ONLY _system.replit_database_migrations_v1
-    ADD CONSTRAINT replit_database_migrations_v1_pkey PRIMARY KEY (id);
 
 
 --
@@ -1315,13 +1265,6 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_wallet_address_key UNIQUE (wallet_address);
-
-
---
--- Name: idx_replit_database_migrations_v1_build_id; Type: INDEX; Schema: _system; Owner: -
---
-
-CREATE UNIQUE INDEX idx_replit_database_migrations_v1_build_id ON _system.replit_database_migrations_v1 USING btree (build_id);
 
 
 --
