@@ -9,6 +9,7 @@ import { AudioPlayer } from "@/components/audio-player";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { NftMintPanel } from "@/components/nft-mint-panel";
+import { absoluteUrl } from "@/lib/urls";
 
 export default function ArtifactDetail() {
   const params = useParams<{ id: string }>();
@@ -202,7 +203,7 @@ export default function ArtifactDetail() {
           )}
 
           <ShareButtons
-            url={`${window.location.origin}/api/share/artifact/${artifact.id}`}
+            url={absoluteUrl(`/api/share/artifact/${artifact.id}`)}
             pageUrl={window.location.href}
             title={`${artifact.narrative ? `"${artifact.narrative.slice(0, 200)}" — ` : ""}${artifact.narrativeTitle || artifact.title} by ${artifact.creatorName}`}
           />
