@@ -6,7 +6,12 @@ import {
   authChallengesTable,
   userBotsTable,
 } from "@workspace/db";
-import { getPartnerArtifact, partnerApiAvailable } from "../lib/partnerClient";
+import {
+  getPartnerArtifact,
+  partnerApiAvailable,
+  creatorBotIdOf,
+  creatorDisplayNameOf,
+} from "../lib/partnerClient";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
 import { npubBindDigest, verifyNpubBinding } from "../lib/npubBind";
 
@@ -169,10 +174,12 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
     res.status(404).json({ error: "artifact not found on partner API" });
     return;
   }
-  // Verify creator_bot_id (defensively accept the common shapes).
-  const creator =
-    (artifact.creator_bot_id ?? (artifact as Record<string, unknown>).creator_id ?? "") as string;
-  if (typeof creator !== "string" || creator.toLowerCase() !== obcBotId) {
+  // Verify creator_bot_id across every shape the partner API sends, including
+  // the nested `creator.id` this repo models as canonical elsewhere. Detail
+  // responses come back un-normalised, so reading only the top-level keys
+  // rejected legitimate ownership proofs with "creator does not match". (#81)
+  const creator = creatorBotIdOf(artifact) ?? "";
+  if (creator.toLowerCase() !== obcBotId) {
     res.status(403).json({ error: "artifact creator does not match claimed bot id" });
     return;
   }
@@ -204,11 +211,11 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
   // Then re-read the row and confirm the owner is us — closes the race
   // where another user may have attached this bot between the earlier
   // pre-check and now. If it's owned by someone else we return 409.
-  const ad = artifact as Record<string, unknown>;
-  const inferredName =
-    (ad.creator_display_name as string | undefined) ??
-    (ad.display_name as string | undefined) ??
-    null;
+  // Same shape problem as the id above: a nested `creator.display_name` was
+  // ignored, so an attachment could succeed while storing a null bot name,
+  // which makes multi-bot management and reply routing harder to reason
+  // about. (#81)
+  const inferredName = creatorDisplayNameOf(artifact);
   try {
     await db
       .insert(userBotsTable)
