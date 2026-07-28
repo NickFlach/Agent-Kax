@@ -67,7 +67,10 @@ router.get("/drops/suggestions", requireAuth, async (req, res) => {
     sql`${artifactsTable.dropId} IS NULL`,
     inArray(artifactsTable.status, ["scored", "narrated"]),
   ];
-  if (req.user!.role !== "admin") {
+  // Live role read, not the cached session role — a demoted admin must stop
+  // seeing every owner's suggestions immediately, not at session expiry. (#106)
+  const viewer = await getOptionalAuth(req);
+  if (!viewer || viewer.role !== "admin") {
     conditions.push(eq(artifactsTable.ownerId, req.user!.id));
   }
   const limited = await db

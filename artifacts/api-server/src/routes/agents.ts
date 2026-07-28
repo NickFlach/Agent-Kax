@@ -194,7 +194,12 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Agent not found" });
     return;
   }
-  if (req.user!.role !== "admin" && agent.ownerId !== req.user!.id) {
+  // Live role read, not the cached session role. `req.user.role` is restored
+  // from the session payload, so an admin who is demoted to `user` kept
+  // cross-owner read access here until their session expired. canMutate()
+  // re-reads users.role (and users.disabledAt) per request, which is what the
+  // rest of the codebase already does. (#106)
+  if (!(await canMutate(req, agent.ownerId))) {
     res.status(403).json({ error: "Not authorized to view this agent" });
     return;
   }
