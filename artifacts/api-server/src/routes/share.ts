@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { db } from "@workspace/db";
 import { artifactsTable, dropsTable, agentsTable, agentStorefrontSettingsTable } from "@workspace/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { publicArtifactWhere, isPublishableStatus } from "../lib/visibility";
 
 const router: IRouter = Router();
