@@ -31,7 +31,7 @@ import {
   harvestInFlight,
   manualHarvestCooldown,
 } from "../lib/harvesterJob";
-import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
+import { KANNAKA_SYSTEM_USER_ID, routeUnroutedPartnerEvents } from "../lib/backfill";
 import { formatArtifact } from "./artifacts";
 
 const router: IRouter = Router();
@@ -222,6 +222,14 @@ router.post("/agents", requireAuth, async (req, res) => {
         res.status(409).json({ error: `Agent "${byBot.slug}" is already claimed` });
         return;
       }
+      // Partner events that arrived before this agent existed were stored
+      // unrouted (agentId/ownerId null) and nothing ever reattached them, so
+      // the new owner could not see or act on any of it. (#100)
+      await routeUnroutedPartnerEvents({
+        slug: upgraded.slug,
+        agentId: upgraded.id,
+        ownerId: req.user!.id,
+      });
       res.status(200).json(formatAgent(upgraded));
       return;
     }
@@ -249,6 +257,9 @@ router.post("/agents", requireAuth, async (req, res) => {
       ownerId: req.user!.id,
     })
     .returning();
+  // Same sweep for a fresh onboard — the events may predate the agent row by
+  // any amount of time. (#100)
+  await routeUnroutedPartnerEvents({ slug: agent.slug, agentId: agent.id, ownerId: req.user!.id });
   res.status(201).json(formatAgent(agent));
 });
 

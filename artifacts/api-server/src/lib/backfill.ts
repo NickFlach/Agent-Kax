@@ -178,6 +178,81 @@ export async function reattributeArtifactsByCreator(opts: {
   };
 }
 
+export interface UnroutedSweepResult {
+  proposals: number;
+  dms: number;
+  matches: number;
+}
+
+/**
+ * Attach partner events that arrived before their agent existed (#100).
+ *
+ * `proposal.created`, `dm.received` and `match.completed` deliberately persist
+ * with `agentId`/`ownerId` null when the recipient slug is not registered yet —
+ * dropping them would be worse. But nothing ever reattached them, and every
+ * read path scopes regular users by `ownerId`, so once the agent WAS claimed
+ * its owner still could not see or act on any of it. `requireAuth`'s
+ * `canMutate` also refuses a null `ownerId`, so they were unactionable even if
+ * surfaced.
+ *
+ * The recipient slug is not a column on any of the three tables — only the
+ * sender is — so it is recovered from the raw `payload`, which is exactly the
+ * event body the handlers received. That keeps this migration-free and lets it
+ * repair rows already sitting in production.
+ *
+ * Only rows that are still unrouted are touched (`owner_id IS NULL`), so this
+ * can never steal an event that already belongs to someone, and is idempotent.
+ */
+export async function routeUnroutedPartnerEvents(opts: {
+  slug: string;
+  agentId: number;
+  ownerId: string;
+}): Promise<UnroutedSweepResult> {
+  const { slug, agentId, ownerId } = opts;
+  if (!slug) return { proposals: 0, dms: 0, matches: 0 };
+
+  // Proposals and DMs carry the recipient as to_agent_slug/recipient_slug;
+  // matches use agent_slug. Same keys the handlers read on the way in.
+  const proposals = await db
+    .update(proposalsTable)
+    .set({ agentId, ownerId })
+    .where(
+      and(
+        isNull(proposalsTable.ownerId),
+        sql`COALESCE(${proposalsTable.payload}->>'to_agent_slug', ${proposalsTable.payload}->>'recipient_slug') = ${slug}`,
+      ),
+    )
+    .returning({ id: proposalsTable.id });
+
+  const dms = await db
+    .update(dmsTable)
+    .set({ agentId, ownerId })
+    .where(
+      and(
+        isNull(dmsTable.ownerId),
+        sql`COALESCE(${dmsTable.payload}->>'to_agent_slug', ${dmsTable.payload}->>'recipient_slug') = ${slug}`,
+      ),
+    )
+    .returning({ id: dmsTable.id });
+
+  const matches = await db
+    .update(matchesTable)
+    .set({ agentId, ownerId })
+    .where(
+      and(
+        isNull(matchesTable.ownerId),
+        sql`${matchesTable.payload}->>'agent_slug' = ${slug}`,
+      ),
+    )
+    .returning({ id: matchesTable.id });
+
+  const result = { proposals: proposals.length, dms: dms.length, matches: matches.length };
+  if (result.proposals || result.dms || result.matches) {
+    logger.info({ slug, agentId, ownerId, ...result }, "routed previously-unrouted partner events");
+  }
+  return result;
+}
+
 export const KANNAKA_SYSTEM_USER_ID = "kannaka-system";
 export const KANNAKA_AGENT_SLUG = "kannaka";
 
