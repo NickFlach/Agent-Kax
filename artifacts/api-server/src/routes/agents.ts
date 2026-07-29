@@ -1,12 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import {
-  agentsTable,
-  artifactsTable,
-  userBotsTable,
-  usersTable,
-  type Agent,
-} from "@workspace/db/schema";
+import { agentsTable, artifactsTable, userBotsTable, type Agent } from "@workspace/db/schema";
 import { eq, and, or, desc, count, avg, isNotNull } from "drizzle-orm";
 import {
   CreateAgentBody,
@@ -36,15 +30,6 @@ import { formatArtifact } from "./artifacts";
 
 const router: IRouter = Router();
 
-/** Authoritative admin check — see the note at the /agents ownership gate. */
-async function isAdminUser(userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ role: usersTable.role })
-    .from(usersTable)
-    .where(eq(usersTable.id, userId))
-    .limit(1);
-  return row?.role === "admin";
-}
 
 function formatAgent(a: Agent) {
   return {
@@ -65,7 +50,17 @@ function formatAgent(a: Agent) {
 }
 
 router.get("/agents", requireAuth, async (req, res) => {
-  const user = req.user!;
+  // Live role read, not the cached session role (#137). `req.user` is restored
+  // from the session payload and `AuthUser.role` is OPTIONAL — nothing in the
+  // session-creation path populates it — so `req.user.role === "admin"` was
+  // never true and this branch was dead: an admin saw only their own agents.
+  //
+  // The same read on the detail route was fixed under #106, whose reasoning
+  // applies here too: an admin demoted to `user` kept cross-owner read access
+  // until their session expired. `getOptionalAuth` re-reads users.role AND
+  // users.disabledAt per request, and is already what /harvester/run and the
+  // harvest-cooldown check use.
+  const user = (await getOptionalAuth(req))!;
   const rows =
     user.role === "admin"
       ? await db.select().from(agentsTable).orderBy(desc(agentsTable.createdAt))
@@ -136,7 +131,14 @@ router.post("/agents", requireAuth, async (req, res) => {
   // is optional and `createSession` does not populate it, so a session-derived
   // check would silently gate admins too — a bypass that never fires is worse
   // than no bypass, because it reads as if it works.
-  if (!(await isAdminUser(req.user!.id))) {
+  //
+  // Via `getOptionalAuth` rather than a local helper so there is ONE way to
+  // resolve a live role in this file. It also rejects a disabled account, which
+  // the local helper did not — harmless here because `requireAuth` already
+  // gates on `disabledAt`, but not a difference worth keeping around for a
+  // future caller to trip over.
+  const liveAuth = await getOptionalAuth(req);
+  if (liveAuth?.role !== "admin") {
     // No canonical bot id means the partner lookup fell back to the anonymous
     // public profile, which cannot be tied to a verified attachment at all.
     // Failing closed is the point of the issue: there is no weaker signal to
