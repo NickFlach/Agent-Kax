@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { detectNonPublic } from "../lib/artifactPublication";
 import crypto from "node:crypto";
 import { and, desc, eq, lt } from "drizzle-orm";
 import {
@@ -181,6 +182,25 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
   const creator = creatorBotIdOf(artifact) ?? "";
   if (creator.toLowerCase() !== obcBotId) {
     res.status(403).json({ error: "artifact creator does not match claimed bot id" });
+    return;
+  }
+  // The instructions say "publish an artifact", so an artifact that declares
+  // itself private/draft/unlisted is not the proof the user was asked for —
+  // nobody outside this server's partner integration could ever see it. (#115)
+  //
+  // Rejects only on a POSITIVE non-public signal. An artifact carrying no
+  // visibility information is accepted exactly as before, deliberately: see
+  // lib/artifactPublication.ts for why requiring proof-of-publication would be
+  // the more dangerous choice.
+  const publication = detectNonPublic(artifact);
+  if (publication.nonPublic) {
+    req.log.info(
+      { obcBotId, signal: publication.signal },
+      "agent verify rejected a non-public artifact",
+    );
+    res.status(403).json({
+      error: `artifact is not public (${publication.signal}) — publish it so the proof is visible, then retry`,
+    });
     return;
   }
   // Phrase must appear in description or title.
