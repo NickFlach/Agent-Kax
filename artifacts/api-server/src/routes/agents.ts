@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { agentsTable, artifactsTable, type Agent } from "@workspace/db/schema";
+import {
+  agentsTable,
+  artifactsTable,
+  userBotsTable,
+  usersTable,
+  type Agent,
+} from "@workspace/db/schema";
 import { eq, and, or, desc, count, avg, isNotNull } from "drizzle-orm";
 import {
   CreateAgentBody,
@@ -29,6 +35,16 @@ import { KANNAKA_SYSTEM_USER_ID } from "../lib/backfill";
 import { formatArtifact } from "./artifacts";
 
 const router: IRouter = Router();
+
+/** Authoritative admin check — see the note at the /agents ownership gate. */
+async function isAdminUser(userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  return row?.role === "admin";
+}
 
 function formatAgent(a: Agent) {
   return {
@@ -100,6 +116,59 @@ router.post("/agents", requireAuth, async (req, res) => {
       return;
     }
     throw err;
+  }
+
+  // ── ownership gate (#101) ────────────────────────────────────────────
+  //
+  // Everything above only established that this OBC slug EXISTS. Public
+  // existence is not proof of control, and without this gate the first
+  // signed-in user to name a real creator slug claimed it: future partner
+  // proposals, DMs and matches route to that owner, and the real owner is
+  // locked out with "already registered".
+  //
+  // The proof already exists elsewhere — /auth/agent/challenge +
+  // /auth/agent/verify writes a `user_bots` row only after the claimant
+  // produces a fresh artifact from the bot. Registration is now tied to that
+  // row instead of re-inventing a second, weaker notion of ownership.
+  // Admins keep the un-gated path for support/backfill.
+  //
+  // The role is read from the DB rather than `req.user.role`: `AuthUser.role`
+  // is optional and `createSession` does not populate it, so a session-derived
+  // check would silently gate admins too — a bypass that never fires is worse
+  // than no bypass, because it reads as if it works.
+  if (!(await isAdminUser(req.user!.id))) {
+    // No canonical bot id means the partner lookup fell back to the anonymous
+    // public profile, which cannot be tied to a verified attachment at all.
+    // Failing closed is the point of the issue: there is no weaker signal to
+    // accept here, because the weaker signal WAS the vulnerability.
+    if (!botId) {
+      res.status(403).json({
+        error:
+          `Ownership of "${slug}" cannot be verified (no canonical bot id available). ` +
+          `Attach the bot via /auth/agent/challenge and /auth/agent/verify first.`,
+      });
+      return;
+    }
+    // `user_bots.obc_bot_id` is stored lowercased by the verify handler;
+    // compare in the same space or a legitimately-verified owner gets a 403.
+    const [attached] = await db
+      .select({ id: userBotsTable.id })
+      .from(userBotsTable)
+      .where(
+        and(
+          eq(userBotsTable.obcBotId, botId.toLowerCase()),
+          eq(userBotsTable.userId, req.user!.id),
+        ),
+      )
+      .limit(1);
+    if (!attached) {
+      res.status(403).json({
+        error:
+          `You have not verified control of "${slug}". ` +
+          `Complete /auth/agent/challenge and /auth/agent/verify for this bot first.`,
+      });
+      return;
+    }
   }
 
   // Upgrade path: a placeholder agent for this bot already exists (auto-created
