@@ -2,7 +2,7 @@ import { db } from "@workspace/db";
 import { artifactsTable, reactionsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { runTasteEngineFor } from "../tasteEngine";
-import type { EventHandler } from "../eventDispatcher";
+import { EventDeferredError, type EventHandler } from "../eventDispatcher";
 
 export interface ReactionReceivedPayload {
   reaction_uuid?: string;
@@ -27,8 +27,17 @@ export const handleReactionReceived: EventHandler = async (data, { log }) => {
     .where(eq(artifactsTable.obcArtifactUuid, artifactUuid))
     .limit(1);
   if (!artifact) {
-    log.info({ artifactUuid }, "reaction.received for unknown artifact, skipping");
-    return;
+    // OBC webhook delivery is not ordered, so a reaction can legitimately
+    // arrive before its artifact.created — or before the harvester has pulled
+    // the artifact in. Returning here used to mark the event processed with
+    // nothing written, which meant the reaction was lost for good: the
+    // reactions row, reactionCount, heat and lastReactionAt all stayed behind,
+    // and replay could not repair it because processed_events already held the
+    // uuid.
+    //
+    // Deferring leaves the event unrecorded so a replay re-delivers it once
+    // the artifact lands. (#103)
+    throw new EventDeferredError(`artifact ${artifactUuid} not ingested yet`);
   }
 
   const now = new Date();

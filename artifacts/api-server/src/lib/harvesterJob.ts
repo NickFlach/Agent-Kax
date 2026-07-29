@@ -326,6 +326,9 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
     // started from wherever the first type's stream ended — and since the
     // cursor is persisted per event, that skip was durable. (#67)
     let cursor: string | null = savedCursors[eventType] ?? legacyCursor;
+    // Once an event of this type defers, the cursor stops advancing for the
+    // rest of this run so the deferred event is re-offered next time (#103).
+    let deferred = false;
     try {
       for (let pageIdx = 0; pageIdx < maxPagesPerType; pageIdx++) {
         const page = await listPartnerEventsSince(cursor, eventType);
@@ -342,8 +345,26 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
               log: logger,
               source: "replay",
             });
-            cursor = ev.event_uuid;
-            await recordEventCursor(cursor, eventType);
+            // Hold the cursor at the FIRST deferred event of this run.
+            //
+            // Leaving a deferred event out of processed_events is only half of
+            // what makes it retryable — the replay cursor is the other half.
+            // Advancing past it would mean the next replay starts after it and
+            // it is never re-offered, so the deferral would achieve nothing.
+            //
+            // Later events in the page are still dispatched (they may be
+            // perfectly applicable); they are simply re-delivered next run and
+            // deduped by processed_events, which is cheap. (#103)
+            if (result.status === "deferred") {
+              deferred = true;
+              logger.info(
+                { eventType, eventUuid: ev.event_uuid, reason: result.reason },
+                "holding replay cursor at deferred event",
+              );
+            } else if (!deferred) {
+              cursor = ev.event_uuid;
+              await recordEventCursor(cursor, eventType);
+            }
             if (result.status === "handled" || result.status === "unhandled") processed++;
             consecutiveFailures = 0;
           } catch (err) {
