@@ -76,6 +76,32 @@ function listOnDisk(): string[] {
  */
 export const BASELINE_MIGRATION = "0000_baseline.sql";
 
+/**
+ * Is the baseline schema already physically present in this database?
+ *
+ * The journal is NOT a reliable answer to that question, which is what broke
+ * production deploys. `runMigrations` originally inferred "pre-existing schema"
+ * from a non-empty journal — but prod's schema was historically managed with
+ * `drizzle-kit push`, so it has every table and an EMPTY journal (that is the
+ * exact situation `backfillJournal` below exists to repair). The guard
+ * therefore did not fire, the baseline ran `CREATE TABLE` over live tables, and
+ * because a migration failure is fatal under auto-migrate the deploy exited
+ * instead of serving.
+ *
+ * Asking the database is the only answer that is true in all three states:
+ * blank (no table, no journal), migrated (table + journal), and push-managed
+ * (table, no journal).
+ *
+ * `users` is created by the baseline and by no later migration, so its presence
+ * means "the baseline's work is already done here".
+ */
+async function baselineSchemaPresent(): Promise<boolean> {
+  const res = await pool.query<{ present: boolean }>(
+    "SELECT to_regclass('public.users') IS NOT NULL AS present",
+  );
+  return res.rows[0]?.present === true;
+}
+
 /** Record a migration as applied without running it. */
 async function journalWithoutApplying(filename: string): Promise<void> {
   await pool.query(
@@ -166,19 +192,27 @@ export async function runMigrations(opts: { log?: (m: string) => void } = {}): P
     return { applied: [], skipped };
   }
 
-  // A database that already has migrations recorded PREDATES the baseline —
-  // its schema is the baseline, by definition. Executing 0000_baseline.sql
-  // there would try to CREATE TABLE over live tables and fail the whole run
-  // (and, under KAX_AUTO_MIGRATE=1, the boot with it).
+  // A database that already HAS the baseline's tables must not run the
+  // baseline again — `CREATE TABLE` over live tables fails the whole run, and
+  // under auto-migrate a migration failure is fatal, so the deploy exits
+  // instead of serving.
   //
-  // So it is journaled without being executed. This is what makes adding the
-  // baseline safe on production with no operator step and no ordering hazard:
-  // deploy order does not matter, because the file can never run against a
-  // database that already has a history. A genuinely blank database has an
-  // empty journal and applies it for real.
+  // This originally tested `applied.size > 0`, i.e. it inferred "schema exists"
+  // from "journal is non-empty". That is wrong for the one database that
+  // matters: prod's schema was built with `drizzle-kit push`, so it has every
+  // table and an EMPTY journal, and the guard silently did not fire. Ask the
+  // database directly instead — that is correct for a blank database (no
+  // table ⇒ apply for real), a migrated one, and a push-managed one alike.
+  //
+  // The journal check is kept as a cheap short-circuit so the common case
+  // costs no extra query.
+  const baselinePending = pending.includes(BASELINE_MIGRATION);
+  const baselineAlreadyDone =
+    baselinePending && (applied.size > 0 || (await baselineSchemaPresent()));
+
   const toApply: string[] = [];
   for (const f of pending) {
-    if (f === BASELINE_MIGRATION && applied.size > 0) {
+    if (f === BASELINE_MIGRATION && baselineAlreadyDone) {
       await journalWithoutApplying(f);
       log(`  = ${f} (pre-existing schema — recorded, not executed)`);
       skipped.push(f);
