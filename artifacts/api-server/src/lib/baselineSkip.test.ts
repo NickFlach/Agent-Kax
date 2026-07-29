@@ -69,6 +69,46 @@ describe("baseline is never re-applied to an existing database (#126)", () => {
     }
   });
 
+  it("skips the baseline when the schema exists but the journal is EMPTY", async () => {
+    // The production state that broke deploys. Prod's schema was built with
+    // `drizzle-kit push`, so it has every table and NO journal rows — and the
+    // original guard inferred "schema exists" from "journal is non-empty", so
+    // it did not fire. The baseline then ran CREATE TABLE over live tables,
+    // and because a migration failure is fatal under auto-migrate the deploy
+    // exited instead of serving.
+    //
+    // Reproduced by clearing the journal entirely while leaving the schema up.
+    const before = await journalled();
+    expect(before.length, "a history is required to restore afterwards").toBeGreaterThan(1);
+
+    await db.execute(sql`DELETE FROM schema_migrations`);
+    try {
+      expect(await journalled(), "journal must be empty for this scenario").toEqual([]);
+
+      const result = await runMigrations();
+
+      // Had the baseline executed, this would have thrown
+      // 'relation "users" already exists' and taken the boot with it.
+      expect(result.applied).not.toContain("0000_baseline.sql");
+      expect(result.skipped).toContain("0000_baseline.sql");
+
+      // ...and the pre-existing schema is untouched.
+      const probe = await db.execute(
+        sql`SELECT to_regclass(${BASELINE_TABLE}) IS NOT NULL AS present`,
+      );
+      const rows = (probe as unknown as { rows?: { present: boolean }[] }).rows ?? [];
+      expect(rows[0]?.present, `${BASELINE_TABLE} must still exist`).toBe(true);
+    } finally {
+      // Restore every journal row so later tests see a normal history.
+      for (const f of before) {
+        await db.execute(sql`
+          INSERT INTO schema_migrations (filename) VALUES (${f})
+          ON CONFLICT (filename) DO NOTHING
+        `);
+      }
+    }
+  });
+
   it("is idempotent once everything is recorded", async () => {
     const result = await runMigrations();
     expect(result.applied).toEqual([]);
