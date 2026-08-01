@@ -117,9 +117,7 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
         return false;
       });
       if (toDelete.length > 0) {
-        for (const row of toDelete) {
-          await db.delete(artifactsTable).where(eq(artifactsTable.id, row.id));
-        }
+        await db.delete(artifactsTable).where(inArray(artifactsTable.id, toDelete.map((r) => r.id)));
         newArtifacts -= toDelete.length;
       }
     }
@@ -220,15 +218,13 @@ async function pairAudioToArt(logger: { info: (...a: unknown[]) => void; error: 
       }
     }
 
-    let updated = 0;
     for (const p of pairings) {
       await db.update(artifactsTable)
         .set({ thumbnailUrl: p.imgUrl })
         .where(eq(artifactsTable.id, p.songId));
-      updated++;
     }
-    logger.info({ paired: updated }, "Auto-paired audio tracks to artwork");
-    return updated;
+    logger.info({ paired: pairings.length }, "Auto-paired audio tracks to artwork");
+    return pairings.length;
   } catch (err) {
     logger.error({ err }, "Error auto-pairing audio to art");
     return 0;
