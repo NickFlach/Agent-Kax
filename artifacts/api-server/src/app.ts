@@ -1,8 +1,10 @@
-import express, {
+import express,
+  {
   type Express,
   type Request,
   type Response,
   type NextFunction,
+  type RequestHandler,
 } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -74,20 +76,22 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/webhooks/")) {
-    next();
-    return;
-  }
-  express.json()(req, res, next);
-});
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/webhooks/")) {
-    next();
-    return;
-  }
-  express.urlencoded({ extended: true })(req, res, next);
-});
+
+// Webhook routes consume the raw body themselves (signature verification
+// needs the untouched bytes). Wrap each body parser so it no-ops on the
+// /api/webhooks/ prefix, keeping a single skip-condition in one place.
+function skipForWebhooks(middleware: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    if (req.path.startsWith("/api/webhooks/")) return next();
+    middleware(req, res, next);
+  };
+}
+
+const jsonParser = express.json();
+const urlencodedParser = express.urlencoded({ extended: true });
+app.use(skipForWebhooks(jsonParser));
+app.use(skipForWebhooks(urlencodedParser));
+
 app.use(authMiddleware);
 
 app.get(/^\/storefront(\/.*)?$/, (req, res) => {
