@@ -1,11 +1,10 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@workspace/db";
-import { proposalsTable, dmsTable, matchesTable } from "@workspace/db/schema";
-import partnerEventsRouter from "./partner-events";
+import { proposalsTable, dmsTable, matchesTable, outboundMessagesTable } from "@workspace/db/schema";
 // Import the real auth middleware module purely for its `declare global`
 // side-effect so `req.isAuthenticated` / `req.user` are typed in this test.
 import "../middlewares/authMiddleware";
@@ -15,6 +14,27 @@ import {
   createTestUser,
   makeUuid,
 } from "../test-helpers";
+
+// Stub the partner client BEFORE the routes that import it are loaded.
+//
+// `POST /proposals/:id/decision` now syncs every accept/decline upstream, not
+// just the ones carrying a reply note (#145), so these tests have to model the
+// partner call. Without the stub the route would 503 on a missing API key and
+// the decision assertions would be testing the unconfigured path.
+vi.mock("../lib/partnerClient", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return {
+    ...actual,
+    partnerApiAvailable: () => true,
+    sendPartnerProposalReply: vi.fn(),
+    sendPartnerDm: vi.fn(),
+  };
+});
+
+const partnerClient = await import("../lib/partnerClient");
+const sendProposalReplyMock = partnerClient.sendPartnerProposalReply as ReturnType<typeof vi.fn>;
+
+const partnerEventsRouter = (await import("./partner-events")).default;
 
 /**
  * Build a test app that mounts the partner-events router with a fake auth
@@ -166,6 +186,8 @@ describe("partner-events routes", () => {
   beforeEach(async () => {
     await cleanupTestData();
     app = buildTestApp();
+    sendProposalReplyMock.mockReset();
+    sendProposalReplyMock.mockResolvedValue({ uuid: makeUuid(), raw: {} });
   });
   afterAll(async () => {
     await cleanupTestData();
@@ -338,6 +360,105 @@ describe("partner-events routes", () => {
         .send({ decision: "declined" });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe("declined");
+    });
+
+    // A bare accept/decline — no replyMessage — is what the UI's decline
+    // button sends, and what accept sends when the optional note is left
+    // blank. Syncing only the ones with a note left OBC pending while KAX
+    // showed resolved. (#145)
+    describe("syncs the decision upstream even without a reply note (#145)", () => {
+      for (const decision of ["accepted", "declined"] as const) {
+        it(`sends the partner reply for a bare "${decision}"`, async () => {
+          const s = await seed();
+          const res = await request(app)
+            .post(`/proposals/${s.proposalRegular.id}/decision`)
+            .set("x-test-user", s.regular.id)
+            .send({ decision });
+          expect(res.status).toBe(200);
+          expect(sendProposalReplyMock).toHaveBeenCalledTimes(1);
+          const arg = sendProposalReplyMock.mock.calls[0][0];
+          expect(arg.proposalUuid).toBe(s.proposalRegular.sourceUuid);
+          expect(arg.decision).toBe(decision);
+        });
+      }
+
+      it("does not thread an outbound message for a bare decision", async () => {
+        // The decision is a status change, not something the owner wrote.
+        const s = await seed();
+        const res = await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "accepted" });
+        expect(res.status).toBe(200);
+        expect(res.body.outbound).toBeNull();
+        const rows = await db
+          .select()
+          .from(outboundMessagesTable)
+          .where(eq(outboundMessagesTable.proposalId, s.proposalRegular.id));
+        expect(rows).toHaveLength(0);
+      });
+
+      it("leaves the proposal pending when the partner call fails", async () => {
+        // The invariant behind the fix: KAX must never record a decision that
+        // OBC never received, or the two inboxes disagree permanently.
+        sendProposalReplyMock.mockRejectedValue(new Error("partner down"));
+        const s = await seed();
+        const res = await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "accepted" });
+        expect(res.status).toBeGreaterThanOrEqual(500);
+        const [row] = await db
+          .select()
+          .from(proposalsTable)
+          .where(eq(proposalsTable.id, s.proposalRegular.id));
+        expect(row.status).toBe("pending");
+        expect(row.decidedAt).toBeNull();
+      });
+    });
+
+    // A decision is final. A stale tab, a retry, or automation could otherwise
+    // rewrite a resolved proposal — and push OBC a contradictory reply after
+    // the fact. (#146)
+    describe("rejects a second decision on a resolved proposal (#146)", () => {
+      it("409s and keeps the first outcome", async () => {
+        const s = await seed();
+        const first = await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "accepted" });
+        expect(first.status).toBe(200);
+
+        const second = await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "declined" });
+        expect(second.status).toBe(409);
+        expect(second.body.status).toBe("accepted");
+
+        const [row] = await db
+          .select()
+          .from(proposalsTable)
+          .where(eq(proposalsTable.id, s.proposalRegular.id));
+        expect(row.status).toBe("accepted");
+      });
+
+      it("does not send a contradictory reply upstream", async () => {
+        // The stronger half: the 409 must land before the partner call, or the
+        // conflict response would arrive after OBC was already told otherwise.
+        const s = await seed();
+        await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "accepted" });
+        expect(sendProposalReplyMock).toHaveBeenCalledTimes(1);
+
+        await request(app)
+          .post(`/proposals/${s.proposalRegular.id}/decision`)
+          .set("x-test-user", s.regular.id)
+          .send({ decision: "declined", replyMessage: "actually no" });
+        expect(sendProposalReplyMock).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

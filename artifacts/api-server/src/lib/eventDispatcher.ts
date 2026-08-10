@@ -76,11 +76,19 @@ export async function dispatchPartnerEvent(args: {
 
   const handler = handlers.get(args.eventType);
   if (!handler) {
-    log.info({ eventType: args.eventType, eventUuid: args.eventUuid }, "No handler registered for event type");
-    await db
-      .insert(processedEventsTable)
-      .values({ eventUuid: args.eventUuid, eventType: args.eventType })
-      .onConflictDoNothing();
+    // Deliberately NOT recorded as processed — for the same reason a deferral
+    // isn't. `processed_events` is the dedupe gate for both webhook retries and
+    // startup replay, so writing an event here that no business logic ever saw
+    // burned its only chance: when OBC introduces an event type, or this
+    // service boots before its handler is registered, the first delivery was
+    // permanently lost. Adding the handler later could not recover it, because
+    // replay dedupes on exactly this table.
+    //
+    // Leaving it absent means a redelivery or a replay after the handler ships
+    // re-offers it. The cost is that an event type nobody ever handles is
+    // re-dispatched on every delivery; that is one indexed SELECT and a log
+    // line, which is the cheaper side of this trade. (#164)
+    log.info({ eventType: args.eventType, eventUuid: args.eventUuid }, "No handler registered for event type — left unprocessed so it stays recoverable");
     return { status: "unhandled", eventType: args.eventType, eventUuid: args.eventUuid };
   }
 

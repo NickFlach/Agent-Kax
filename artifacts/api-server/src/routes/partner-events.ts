@@ -232,24 +232,49 @@ router.post("/proposals/:id/decision", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
+  // A decision is final. Without this guard a stale tab, a retry, or automation
+  // could rewrite a resolved proposal — and because the branch below sends
+  // upstream, a second decision would also push OBC a reply contradicting the
+  // one the owner already made. Checked after canMutate so an unauthorized
+  // caller cannot probe a proposal's state. (#146)
+  if (row.status !== "pending") {
+    res.status(409).json({
+      error: `Proposal already ${row.status}`,
+      status: row.status,
+      decidedAt: row.decidedAt?.toISOString() ?? null,
+    });
+    return;
+  }
+
+  // The decision itself is partner-significant, not just the optional note.
+  // Sending only when `replyMessage` was present meant a bare accept/decline —
+  // which is what the UI's decline button and an accept with the textbox left
+  // blank both produce — resolved the proposal in KAX while it stayed pending
+  // on OBC, permanently. (#145)
+  if (!partnerApiAvailable()) {
+    res.status(503).json({ error: "Partner API is not configured; cannot record decision." });
+    return;
+  }
+  // Only needed to address the outbound thread row written below; a bare
+  // decision does not write one, so it does not need a sender slug.
+  if (replyMessage && !row.fromAgentSlug) {
+    res.status(400).json({ error: "Cannot reply: original sender slug is unknown." });
+    return;
+  }
 
   let outbound: OutboundMessage | null = null;
-  if (replyMessage) {
-    if (!partnerApiAvailable()) {
-      res.status(503).json({ error: "Partner API is not configured; cannot send reply." });
-      return;
-    }
-    if (!row.fromAgentSlug) {
-      res.status(400).json({ error: "Cannot reply: original sender slug is unknown." });
-      return;
-    }
-    try {
-      const sent = await sendPartnerProposalReply({
-        proposalUuid: row.sourceUuid,
-        body: replyMessage,
-        decision,
-        fromAgentSlug: await replyFromAgentSlug(row.agentId),
-      });
+  try {
+    const sent = await sendPartnerProposalReply({
+      proposalUuid: row.sourceUuid,
+      // The upstream endpoint always takes a body; for a bare accept/decline
+      // it is the `decision` field that carries the meaning.
+      body: replyMessage ?? "",
+      decision,
+      fromAgentSlug: await replyFromAgentSlug(row.agentId),
+    });
+    // Thread a message only when the owner actually wrote one — a bare
+    // accept/decline is a status change, not a message in the conversation.
+    if (replyMessage) {
       const [inserted] = await db
         .insert(outboundMessagesTable)
         .values({
@@ -265,12 +290,14 @@ router.post("/proposals/:id/decision", requireAuth, async (req, res) => {
         })
         .returning();
       outbound = inserted;
-    } catch (err) {
-      const { status, body: errBody } = partnerErrorResponse(err);
-      req.log.error({ err, proposalId: id }, "proposal reply send failed");
-      res.status(status).json(errBody);
-      return;
     }
+  } catch (err) {
+    // Returning here leaves the proposal pending locally, which is the point:
+    // KAX must not record a decision OBC never received.
+    const { status, body: errBody } = partnerErrorResponse(err);
+    req.log.error({ err, proposalId: id }, "proposal decision send failed");
+    res.status(status).json(errBody);
+    return;
   }
 
   const [updated] = await db
