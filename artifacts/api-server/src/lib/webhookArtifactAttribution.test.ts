@@ -109,6 +109,58 @@ describe("webhook artifact attribution (#102)", () => {
     });
   });
 
+  describe("un-normalised webhook payloads (#151)", () => {
+    // #102 fixed WHICH COLUMN the lookup filters on. This covers a different
+    // hole in the same handler: whether the creator id is found at all.
+    //
+    // The polling path runs artifacts through `normalizeArtifact()`, which is
+    // what collapses a top-level `creator_bot_id` into `creator.id`. The webhook
+    // path does not — routes/webhooks.ts passes the envelope's `data` straight
+    // to the dispatcher — so a raw partner shape resolved to null here and the
+    // artifact landed on kannaka-system.
+    const block = lookupBlock();
+
+    it("falls back past the nested creator object", () => {
+      expect(
+        block.includes("creatorBotIdOf("),
+        "a webhook payload carrying only a top-level creator_bot_id must still " +
+          "resolve, or a webhook that beats the harvester mis-attributes the " +
+          "artifact to kannaka-system permanently",
+      ).toBe(true);
+    });
+
+    it("the webhook route still does not normalise before dispatch", () => {
+      // The premise. If webhooks.ts ever starts normalising, this fallback
+      // becomes belt-and-braces rather than load-bearing, and someone should
+      // revisit which layer owns the shape rather than trusting this test.
+      const route = code(fs.readFileSync(
+        path.join(__dirname, "..", "routes", "webhooks.ts"), "utf8"));
+      expect(route).toContain("dispatchPartnerEvent({");
+      expect(route).not.toContain("normalizeArtifact");
+    });
+
+    it("uses the same extractor the auth path uses", () => {
+      // Auth and ingestion disagreeing about which shapes carry a creator id is
+      // how this class of bug keeps recurring (#81 was the auth half).
+      const client = fs.readFileSync(path.join(__dirname, "partnerClient.ts"), "utf8");
+      expect(client).toContain("export function creatorBotIdOf");
+      const fn = client.slice(client.indexOf("export function creatorBotIdOf"));
+      const body = fn.slice(0, fn.indexOf("\n}") + 2);
+      expect(body).toContain("creator_bot_id");
+      expect(body).toContain("creator_id");
+      expect(body).toContain("creator?.id");
+    });
+
+    it("resolves the display name across the same shapes", () => {
+      // Same payload problem, quieter symptom: every webhook artifact was
+      // stored as "Unknown".
+      const src = code(HANDLER);
+      const insertAt = src.indexOf(".insert(artifactsTable)");
+      const values = src.slice(insertAt, src.indexOf(".returning(", insertAt));
+      expect(values).toContain("creatorDisplayNameOf(");
+    });
+  });
+
   describe("repairability", () => {
     it("stamps creatorBotId on the inserted artifact", () => {
       const src = code(HANDLER);
