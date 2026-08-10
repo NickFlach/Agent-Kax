@@ -305,10 +305,49 @@ export async function maybeClaimKannakaOwnership(user: {
     .where(eq(dropsTable.ownerId, KANNAKA_SYSTEM_USER_ID))
     .returning({ id: dropsTable.id });
 
+  // The partner-event tables are owner-scoped too, and were being left behind.
+  //
+  // `getOwnerScope()` filters the inbox list routes by ownerId and `canMutate()`
+  // blocks non-admins from touching rows owned by someone else — so a new owner
+  // inherited the Kannaka agent and its artifacts while every proposal, DM,
+  // match and sent message stayed on the kannaka-system placeholder. They ended
+  // up owning an agent whose conversation history they could neither see nor
+  // reply to, which is exactly the continuity the handoff exists to preserve.
+  //
+  // Same predicate and idempotence as the transfers above: once a row has moved
+  // it no longer matches, so re-running is a no-op. `claimLegacyOwnership()`
+  // already migrates this same set for the legacy-account path. (#149)
+  const moveOwned = async (
+    table:
+      | typeof proposalsTable
+      | typeof dmsTable
+      | typeof matchesTable
+      | typeof outboundMessagesTable
+      | typeof activitiesTable,
+  ) =>
+    (
+      await db
+        .update(table)
+        .set({ ownerId: user.id })
+        .where(eq(table.ownerId, KANNAKA_SYSTEM_USER_ID))
+        .returning({ id: table.id })
+    ).length;
+
+  const proposals = await moveOwned(proposalsTable);
+  const dms = await moveOwned(dmsTable);
+  const matches = await moveOwned(matchesTable);
+  const outbound = await moveOwned(outboundMessagesTable);
+  const activities = await moveOwned(activitiesTable);
+
   if (
     agentUpdate.length > 0 ||
     artifactUpdate.length > 0 ||
-    dropUpdate.length > 0
+    dropUpdate.length > 0 ||
+    proposals > 0 ||
+    dms > 0 ||
+    matches > 0 ||
+    outbound > 0 ||
+    activities > 0
   ) {
     logger.info(
       {
@@ -317,6 +356,11 @@ export async function maybeClaimKannakaOwnership(user: {
         agents: agentUpdate.length,
         artifacts: artifactUpdate.length,
         drops: dropUpdate.length,
+        proposals,
+        dms,
+        matches,
+        outbound,
+        activities,
       },
       "Transferred Kannaka ownership to logged-in owner",
     );

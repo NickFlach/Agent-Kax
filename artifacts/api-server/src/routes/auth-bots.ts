@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { and, eq } from "drizzle-orm";
-import { db, userBotsTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import { db, userBotsTable, usersTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
 
@@ -54,6 +54,25 @@ router.delete("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
     res.status(404).json({ error: "not found" });
     return;
   }
+  // Deleting the user_bots row is not enough for a grandfathered user.
+  // `users.obc_bot_id` is the legacy single-bot field, and authMiddleware
+  // lazily re-creates a user_bots row from it on EVERY request carrying an
+  // `obc_agent:` session — so the bot the owner just detached reappeared on
+  // their very next request, with no proof step, for as long as that session
+  // lived. Clearing the legacy field is what makes detach authoritative; the
+  // lazy backfill then has nothing to resurrect. (#155)
+  //
+  // Scoped to this user AND to the bot actually being detached, so a user with
+  // several bots does not lose the legacy pointer to a different one. Compared
+  // lowercased because `botId` is normalised above while the legacy column was
+  // written before that normalisation existed.
+  await db
+    .update(usersTable)
+    .set({ obcBotId: null })
+    .where(and(
+      eq(usersTable.id, req.user!.id),
+      sql`lower(${usersTable.obcBotId}) = ${botId}`,
+    ));
   res.json({ ok: true, detached: botId });
 });
 

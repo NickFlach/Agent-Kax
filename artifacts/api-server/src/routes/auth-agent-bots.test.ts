@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import request from "supertest";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { authChallengesTable, userBotsTable } from "@workspace/db/schema";
+import { authChallengesTable, userBotsTable, usersTable } from "@workspace/db/schema";
 import {
   cleanupAuthTestData,
   createWalletUser,
@@ -429,6 +429,53 @@ describe("auth-agent + auth-bots", () => {
         .from(userBotsTable)
         .where(eq(userBotsTable.obcBotId, botId.toLowerCase()));
       expect(rows.length).toBe(0);
+    });
+
+    // Deleting the user_bots row alone was not enough: authMiddleware
+    // re-creates one from `users.obc_bot_id` on every request carrying an
+    // `obc_agent:` session, so a grandfathered user's detached bot came back on
+    // their very next request. (#155)
+    it("clears the legacy users.obc_bot_id so the bot cannot be resurrected", async () => {
+      const u = await makeUser();
+      const botId = makeBotUuid();
+      await db.insert(userBotsTable).values({ userId: u.id, obcBotId: botId.toLowerCase() });
+      await db
+        .update(usersTable)
+        .set({ obcBotId: botId.toLowerCase() })
+        .where(eq(usersTable.id, u.id));
+
+      const res = await request(app)
+        .delete(`/auth/bots/${botId}`)
+        .set("Cookie", cookie(u.sid));
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(usersTable).where(eq(usersTable.id, u.id));
+      expect(
+        row.obcBotId,
+        "the legacy pointer must be cleared, or the lazy backfill re-attaches " +
+          "the bot the owner just detached",
+      ).toBeNull();
+    });
+
+    it("leaves the legacy pointer alone when it names a different bot", async () => {
+      // A user with several bots must not lose the legacy pointer to one they
+      // did not detach.
+      const u = await makeUser();
+      const detached = makeBotUuid();
+      const kept = makeBotUuid();
+      await db.insert(userBotsTable).values({ userId: u.id, obcBotId: detached.toLowerCase() });
+      await db
+        .update(usersTable)
+        .set({ obcBotId: kept.toLowerCase() })
+        .where(eq(usersTable.id, u.id));
+
+      const res = await request(app)
+        .delete(`/auth/bots/${detached}`)
+        .set("Cookie", cookie(u.sid));
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(usersTable).where(eq(usersTable.id, u.id));
+      expect(row.obcBotId).toBe(kept.toLowerCase());
     });
   });
 });
