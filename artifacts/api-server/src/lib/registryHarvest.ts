@@ -40,18 +40,20 @@ export interface RegistryHarvestResult {
   }>;
 }
 
+// Constrain to the enum types the DB knows about. Hoisted to avoid
+// re-allocating the object on every call inside the harvest loop.
+const ARTIFACT_TYPE_MAP: Record<string, "image" | "music" | "text" | "audio" | "furniture"> = {
+  image: "image",
+  music: "music",
+  audio: "audio",
+  text: "text",
+  furniture: "furniture",
+  video: "image", // best-effort — schema has no video yet; thumbnail still useful
+  glyph: "image",
+};
+
 /** Map the connector's normalized shape onto the DB row shape. */
 function rowFor(connectorId: string, a: ConnectorArtifact, ownerId: string) {
-  // Constrain to the enum types the DB knows about.
-  const typeMap: Record<string, "image" | "music" | "text" | "audio" | "furniture"> = {
-    image: "image",
-    music: "music",
-    audio: "audio",
-    text: "text",
-    furniture: "furniture",
-    video: "image", // best-effort — schema has no video yet; thumbnail still useful
-    glyph: "image",
-  };
   const editionType =
     a.edition?.type === "limited" ? "limited" :
     a.edition?.type === "1_of_1" ? "1_of_1" :
@@ -64,7 +66,7 @@ function rowFor(connectorId: string, a: ConnectorArtifact, ownerId: string) {
     publicUrl: a.publicUrl,
     thumbnailUrl: a.thumbnailUrl ?? a.publicUrl,
     reactionCount: a.reactionCount ?? 0,
-    artifactType: typeMap[a.artifactType] ?? "image",
+    artifactType: ARTIFACT_TYPE_MAP[a.artifactType] ?? "image",
     tags: [] as string[],
     ownerId,
     editionType: editionType as "open" | "limited" | "1_of_1",
