@@ -486,14 +486,43 @@ export async function recordEventCursor(eventUuid: string, eventType?: string): 
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));
 }
 
-export async function recordWebhookReceived(eventUuid: string): Promise<void> {
+/**
+ * Record that a webhook delivery arrived.
+ *
+ * Two unrelated things live in this row and they must not move together.
+ *
+ * `lastWebhookAt` / `webhookSubscribed` are LIVENESS telemetry — the delivery
+ * genuinely arrived and was authenticated, so they always update and the
+ * dashboard's "webhook active" state stays honest even for an event this
+ * service cannot apply yet.
+ *
+ * `lastEventUuid` is a replay CURSOR. `replayMissedEventsOnStartup` falls back
+ * to it for any event type with no per-type position recorded yet, which is
+ * exactly the situation for a newly registered event type. Advancing it past an
+ * event that nothing applied therefore skipped that event permanently on the one
+ * code path where it mattered most: OBC introduces a type, the webhooks arrive
+ * unhandled, the cursor moves past them, and the handler shipped afterwards
+ * replays from a position that is already beyond the backlog it was written to
+ * collect.
+ *
+ * #164 removed the other half of this — unhandled events are no longer written
+ * to `processed_events`, so dedupe no longer blocks recovery. That fix is
+ * necessary but not sufficient: an event the cursor has skipped is never offered
+ * to the deduper in the first place. `advanceCursor` is required rather than
+ * defaulted so a new caller has to decide which of the two meanings it wants.
+ * (#169)
+ */
+export async function recordWebhookReceived(
+  eventUuid: string,
+  opts: { advanceCursor: boolean },
+): Promise<void> {
   await ensureSyncRow();
   await db
     .update(partnerSyncStateTable)
     .set({
       lastWebhookAt: new Date(),
-      lastEventUuid: eventUuid,
       webhookSubscribed: "active",
+      ...(opts.advanceCursor ? { lastEventUuid: eventUuid } : {}),
       updatedAt: new Date(),
     })
     .where(eq(partnerSyncStateTable.id, PARTNER_SYNC_ID));

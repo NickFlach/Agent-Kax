@@ -100,7 +100,22 @@ router.post(
         log: req.log,
         source: "webhook",
       });
-      await recordWebhookReceived(eventUuid);
+      // The delivery itself is always recorded as liveness; only the replay
+      // cursor is conditional.
+      //
+      //   handled  — applied, safe to advance past.
+      //   deduped  — already in processed_events from an earlier delivery, so
+      //              it was applied then; advancing is safe.
+      //   unhandled— no handler registered yet (#164).
+      //   deferred — a precondition is not met yet (#103).
+      //
+      // The last two deliberately leave the event out of `processed_events` so
+      // a later replay can re-offer it. Advancing lastEventUuid past them would
+      // quietly undo that: replay falls back to lastEventUuid for any event type
+      // with no per-type cursor, which is precisely the case for the newly
+      // registered handler that was supposed to pick the event up. (#169)
+      const applied = result.status === "handled" || result.status === "deduped";
+      await recordWebhookReceived(eventUuid, { advanceCursor: applied });
       res.json({ received: true, status: result.status });
     } catch (err) {
       req.log.error({ err, event_uuid: eventUuid, eventType }, "Webhook handler error");
