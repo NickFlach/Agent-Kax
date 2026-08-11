@@ -28,6 +28,18 @@ for enum". Most other migrations use `IF NOT EXISTS`/`DO NOTHING` and are safe.
 `[services.development.env]`) so pending migrations auto-apply on dev boot.
 Dev migration failures are non-fatal; production gates on `REPLIT_DEPLOYMENT=1`.
 
+**Opposite failure — over-backfilled journal (prod, Aug 2026):** journal rows
+can exist for migrations that never executed (July recovery backfilled too
+many). The runner then skips them forever and routes 500 on missing columns
+even though the journal looks complete. Diagnose by checking the *effect*
+(column/table) not the journal. Recover via `POST /admin/db/journal-unmark`
+(admin/service token) to delete the lying rows, then `POST /admin/db/migrate`
+— only safe because migrations 0004+ are idempotent.
+
+**Migrations dir resolution:** `migrate.ts` walks upward from cwd and the
+bundle location for `lib/db/migrations`; the dev workflow's cwd is inside
+`artifacts/api-server`, which used to ENOENT the admin migration endpoints.
+
 **How to apply:** any time the main page / a route 500s with
 `relation "..." does not exist` or `column "..." does not exist`, suspect drift
 first — check `schema_migrations` vs `lib/db/migrations/*.sql` before touching code.

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, runMigrations, listMigrationFiles, listAppliedMigrations, backfillJournal } from "@workspace/db";
+import { db, runMigrations, listMigrationFiles, listAppliedMigrations, backfillJournal, unmarkJournal } from "@workspace/db";
 import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
@@ -185,6 +185,23 @@ router.post("/admin/db/journal-backfill", requireAdminOrServiceToken, async (req
   }
   try {
     const result = await backfillJournal(files);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Inverse of journal-backfill: forget journal rows whose migration never
+// actually executed (over-backfilled journal), so /admin/db/migrate can
+// re-run them. Only for idempotent migrations; explicit list required.
+router.post("/admin/db/journal-unmark", requireAdminOrServiceToken, async (req, res) => {
+  const files: unknown = (req.body as { files?: unknown })?.files;
+  if (!Array.isArray(files) || files.length === 0 || !files.every((f) => typeof f === "string")) {
+    res.status(400).json({ error: "files (non-empty string array) required" });
+    return;
+  }
+  try {
+    const result = await unmarkJournal(files);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

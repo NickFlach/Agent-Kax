@@ -29,10 +29,25 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // 0009_floor_prediction_kind never applied in prod). Resolve against the
 // workspace cwd as a fallback, with an env override as the escape hatch.
 const MIGRATIONS_DIR = (() => {
+  // Walk upward from a starting dir looking for lib/db/migrations — covers
+  // bundles running with cwd inside artifacts/<name> (dev workflow) as well
+  // as the workspace root (deploy).
+  const upward = (start: string): string[] => {
+    const out: string[] = [];
+    let dir = start;
+    for (let i = 0; i < 6; i++) {
+      out.push(resolve(dir, "lib/db/migrations"));
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return out;
+  };
   const candidates = [
     process.env["KAX_MIGRATIONS_DIR"],
     resolve(HERE, "../migrations"),
-    resolve(process.cwd(), "lib/db/migrations"),
+    ...upward(process.cwd()),
+    ...upward(HERE),
   ].filter((c): c is string => !!c);
   for (const c of candidates) {
     try {
@@ -176,6 +191,58 @@ export async function backfillJournal(filenames: string[]): Promise<{ journaled:
     journaled.push(f);
   }
   return { journaled, alreadyJournaled };
+}
+
+/**
+ * Remove journal rows WITHOUT touching the schema, so `runMigrations` will
+ * re-execute those files. Recovery tool for the opposite failure of
+ * `backfillJournal`: a journal row exists but the migration's effect is
+ * missing (the prod journal was over-backfilled in July 2026 — 0011/0015/0016
+ * were journaled but never executed, so the harvester 500'd on the missing
+ * `partner_sync_state.event_cursors` column). Only use for migrations that
+ * are safe to re-run (IF NOT EXISTS / OR REPLACE); unknown filenames throw.
+ *
+ * Guarded by an explicit allowlist: only migrations vetted as fully
+ * idempotent may be unmarked. The baseline (unguarded CREATE TABLE) and
+ * 0003 (enum rename, non-idempotent) must never be re-run against a live
+ * database, so they are deliberately absent.
+ */
+export const UNMARK_SAFE_MIGRATIONS: ReadonlySet<string> = new Set([
+  "0009_floor_prediction_kind.sql",
+  "0010_password_reset.sql",
+  "0011_store_listings.sql",
+  "0012_floor_ledger_append_only.sql",
+  "0013_credit_ledger.sql",
+  "0014_credit_ledger_txids.sql",
+  "0015_agent_npub.sql",
+  "0016_partner_event_cursors.sql",
+]);
+
+export async function unmarkJournal(filenames: string[]): Promise<{ unmarked: string[]; notJournaled: string[] }> {
+  const onDisk = new Set(listOnDisk());
+  const unknown = filenames.filter((f) => !onDisk.has(f));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown migration file(s): ${unknown.join(", ")}`);
+  }
+  const unsafe = filenames.filter((f) => !UNMARK_SAFE_MIGRATIONS.has(f));
+  if (unsafe.length > 0) {
+    throw new Error(
+      `Not vetted as safe to re-run: ${unsafe.join(", ")}. Add to UNMARK_SAFE_MIGRATIONS only after confirming the migration is fully idempotent.`,
+    );
+  }
+  await ensureJournalTable();
+  const applied = await listApplied();
+  const unmarked: string[] = [];
+  const notJournaled: string[] = [];
+  for (const f of filenames) {
+    if (!applied.has(f)) {
+      notJournaled.push(f);
+      continue;
+    }
+    await pool.query("DELETE FROM schema_migrations WHERE filename = $1", [f]);
+    unmarked.push(f);
+  }
+  return { unmarked, notJournaled };
 }
 
 /** Run all pending migrations. Returns which were applied vs already-applied. */
