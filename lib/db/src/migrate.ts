@@ -184,10 +184,7 @@ export async function backfillJournal(filenames: string[]): Promise<{ journaled:
       alreadyJournaled.push(f);
       continue;
     }
-    await pool.query(
-      "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
-      [f],
-    );
+    await journalWithoutApplying(f);
     journaled.push(f);
   }
   return { journaled, alreadyJournaled };
