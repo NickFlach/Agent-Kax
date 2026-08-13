@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, Suspense, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Text, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
+import { OrbitControls, Text, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { useGetMarketplaceCombined } from "@workspace/api-client-react";
@@ -9,6 +9,17 @@ import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import { WasdMove } from "@/components/wasd-move";
 import { NpcFigure, WandererNpc, PlayerAvatar, PlayerTracker } from "@/components/npc";
+import {
+  asphaltTexture,
+  sidewalkTexture,
+  brickTexture,
+  stuccoTexture,
+  concreteTexture,
+  upperWindowsTexture,
+  awningTexture,
+  barkTexture,
+  repeated,
+} from "@/lib/city-textures";
 import "./marketplace-3d.css";
 
 const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
@@ -39,6 +50,28 @@ function detectWebGL(): boolean {
   }
 }
 
+/** Deterministic 0..1 hash of a string (FNV-1a) — stable per agent, no RNG. */
+function hash01(s: string, salt = 0): number {
+  let h = (2166136261 ^ salt) >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+// Real shop-awning canvas dyes and painted-sign boards — no neon.
+const AWNING_COLORS = ["#2f5d46", "#7a2e33", "#2e4468", "#9c5b2a", "#28606b", "#6b3d63", "#845d2f"];
+const SIGN_BOARDS = ["#1e2a25", "#2a1f1e", "#1d2432", "#252017", "#20262b"];
+const FADED_AWNING = "#8f887c";
+
+/**
+ * One mixed-use building: a real storefront (display glass, door, painted
+ * sign, striped awning) under brick/stucco upper floors with genuine-looking
+ * windows. Height still scales with the store's catalog; claim status shows
+ * the way it would on an actual street — lit interior and a fresh awning for
+ * claimed stores, dark glass and a FOR LEASE card for available ones.
+ */
 function Storefront({
   agent,
   position,
@@ -57,45 +90,40 @@ function Storefront({
   const isClaimed = agent.claimed;
   const isConstellation = agent.source === "constellation";
 
-  // Neon-market colour language, readable across the whole district:
-  //   claimed/secured  → cyan   (alive, owned)
-  //   available        → amber  (come claim it)
-  //   constellation    → violet (a network signal, not a shop)
-  const glowColor = isConstellation ? "#a98bff" : isClaimed ? "#00e5ff" : "#E8A33D";
-  const mainColor = isConstellation ? "#2a2140" : isClaimed ? "#0E3A40" : "#123642";
-  // Lit facade tones (lighter than the old near-black boxes)
-  const bodyColor = isConstellation ? "#2c2748" : isClaimed ? "#173f49" : "#1a3b45";
-  const bodyColor2 = isConstellation ? "#332c55" : isClaimed ? "#1d4a55" : "#204651";
-  const windowColor = isConstellation ? "#c9b6ff" : isClaimed ? "#8ff0ea" : "#f3c983";
-  const doorColor = isConstellation ? "#a98bff" : isClaimed ? "#E8A33D" : "#ffd9a0";
-
-  // Deterministic per-agent variety (stable across renders, no RNG) so no two
-  // stores look alike and the street reads as a real block of shops.
   const seed = hash01(agent.slug || agent.name, 1);
   const seed2 = hash01(agent.slug || agent.name, 7);
-  // A store's HEIGHT is its stature: it scales with how much the store holds,
-  // so Kannaka's 1,600+ piece store towers and a fresh kiosk is short.
-  const bodyH = 2.6 + Math.min(4.8, Math.log10(1 + Math.max(0, agent.artifacts)) * 1.6);
-  const bodyW = 2.5 + seed * 0.8;
-  const roofType = Math.floor(seed2 * 3); // 0 flat cap · 1 peaked · 2 spire
-  const trim = SIGN_PALETTE[Math.floor(seed * SIGN_PALETTE.length)];
-  const top = bodyH;
+  const seed3 = hash01(agent.slug || agent.name, 13);
 
-  const glyphRef = useRef<THREE.Group>(null);
-  const haloRef = useRef<THREE.Mesh>(null);
+  const bodyH = 3.4 + Math.min(4.6, Math.log10(1 + Math.max(0, agent.artifacts)) * 1.55);
+  const bodyW = 2.6 + seed * 0.9;
+  const groundH = 2.75; // storefront story height
+  const upperH = Math.max(1.1, bodyH - groundH);
+  const floors = Math.max(1, Math.min(5, Math.round(upperH / 1.15)));
+  const cols = Math.max(2, Math.min(5, Math.round(bodyW / 0.85)));
 
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    if (glyphRef.current) {
-      glyphRef.current.position.y = top + 1.1 + Math.sin(t * 2 + position[2]) * 0.18;
-    }
-    if (haloRef.current) {
-      const mat = haloRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = selected ? 0.55 + Math.sin(t * 4) * 0.2 : 0;
-    }
-  });
+  // Constellation nodes read as the street's modern infill: gray render finish.
+  const wall: "brick" | "stucco" = isConstellation ? "stucco" : seed2 > 0.45 ? "brick" : "stucco";
+  const wallVariant = isConstellation ? 3 : Math.floor(seed3 * 4);
+  const litSeed = Math.floor(seed * 10);
+
+  const awningColor = isConstellation ? null : isClaimed ? AWNING_COLORS[Math.floor(seed * AWNING_COLORS.length)] : FADED_AWNING;
+  const signBoard = SIGN_BOARDS[Math.floor(seed2 * SIGN_BOARDS.length)];
+  const roofType = Math.floor(seed2 * 3);
+
+  const textures = useMemo(() => {
+    const base = wall === "brick" ? brickTexture(wallVariant) : stuccoTexture(wallVariant);
+    return {
+      wallSide: repeated(base, Math.max(1, Math.round(bodyW / 1.4)), Math.max(1, Math.round(bodyH / 1.4))),
+      wallFront: repeated(base, Math.max(1, Math.round(bodyW / 1.4)), 2),
+      upper: upperWindowsTexture({ wall, variant: wallVariant, floors, cols, litSeed }),
+      awning: awningColor ? awningTexture(awningColor) : null,
+      concrete: concreteTexture(),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wall, wallVariant, floors, cols, litSeed, awningColor]);
 
   const initials = (agent.name || agent.slug).substring(0, 2).toUpperCase();
+  const top = bodyH;
 
   const select = (e: { stopPropagation?: () => void }) => {
     e.stopPropagation?.();
@@ -115,158 +143,203 @@ function Storefront({
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "auto")}
     >
-      {/* Invisible hit box covering the whole (variable-height) store */}
+      {/* Invisible hit box covering the whole (variable-height) building */}
       <mesh position={[0, (top + 1) / 2, 0.3]} visible={false}>
         <boxGeometry args={[bodyW + 0.6, top + 2.5, 3.6]} />
         <meshBasicMaterial />
       </mesh>
 
-      {/* Stoop / base platform with a neon edge strip */}
-      <mesh position={[0, 0.15, 0.4]}>
-        <boxGeometry args={[bodyW + 0.6, 0.3, 3.8]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.6} metalness={0.3} />
-      </mesh>
-      <mesh position={[0, 0.32, 1.85]}>
-        <boxGeometry args={[bodyW + 0.6, 0.06, 0.08]} />
-        <meshStandardMaterial color={trim} emissive={trim} emissiveIntensity={2} toneMapped={false} />
+      {/* Ground story — masonry shell */}
+      <mesh position={[0, groundH / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[bodyW, groundH, 3]} />
+        <meshStandardMaterial map={textures.wallSide} roughness={0.92} metalness={0.02} />
       </mesh>
 
-      {/* Main body — height scales with the store's catalog */}
-      <mesh position={[0, bodyH / 2 + 0.3, 0]}>
-        <boxGeometry args={[bodyW, bodyH, 3]} />
-        <meshStandardMaterial color={bodyColor} roughness={0.55} metalness={0.35} />
+      {/* Storefront: recessed dark reveal, then glass + interior */}
+      <mesh position={[0, 1.18, 1.505]}>
+        <planeGeometry args={[bodyW - 0.5, 2.1]} />
+        <meshStandardMaterial color="#241f1a" roughness={0.8} />
+      </mesh>
+      {/* Interior glow (claimed) or dark vacancy (available) behind the glass */}
+      <mesh position={[0, 1.18, 1.47]}>
+        <planeGeometry args={[bodyW - 0.6, 1.95]} />
+        {isClaimed || isConstellation ? (
+          <meshStandardMaterial color="#f7dfae" emissive="#e8b96a" emissiveIntensity={0.75} roughness={1} />
+        ) : (
+          <meshStandardMaterial color="#161514" roughness={1} />
+        )}
+      </mesh>
+      {/* Display glass */}
+      <mesh position={[-0.28, 1.18, 1.52]}>
+        <planeGeometry args={[bodyW - 1.5, 1.9]} />
+        <meshPhysicalMaterial color="#9fb4bd" transparent opacity={0.28} roughness={0.08} metalness={0.1} />
+      </mesh>
+      {/* Window mullions */}
+      <mesh position={[-0.28, 1.18, 1.53]}>
+        <boxGeometry args={[0.05, 1.9, 0.03]} />
+        <meshStandardMaterial color="#33302b" roughness={0.5} metalness={0.4} />
+      </mesh>
+      <mesh position={[-0.28, 1.18, 1.53]} rotation={[0, 0, Math.PI / 2]}>
+        <boxGeometry args={[0.05, bodyW - 1.5, 0.03]} />
+        <meshStandardMaterial color="#33302b" roughness={0.5} metalness={0.4} />
+      </mesh>
+      {/* FOR LEASE card taped inside an available store's window */}
+      {!isClaimed && !isConstellation && (
+        <group position={[-0.28, 1.45, 1.54]}>
+          <mesh>
+            <planeGeometry args={[0.72, 0.46]} />
+            <meshStandardMaterial color="#f4efe4" roughness={0.9} />
+          </mesh>
+          <Suspense fallback={null}>
+            <Text position={[0, 0.07, 0.01]} fontSize={0.13} color="#8c2f2a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+              FOR LEASE
+            </Text>
+            <Text position={[0, -0.11, 0.01]} fontSize={0.06} color="#4a4640" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+              inquire at kax
+            </Text>
+          </Suspense>
+        </group>
+      )}
+
+      {/* Door (right side of the front) with frame, kick plate and handle */}
+      <mesh position={[bodyW / 2 - 0.62, 1.05, 1.52]}>
+        <boxGeometry args={[0.86, 2.1, 0.06]} />
+        <meshStandardMaterial color="#2e2a26" roughness={0.6} />
+      </mesh>
+      <mesh position={[bodyW / 2 - 0.62, 1.05, 1.55]}>
+        <boxGeometry args={[0.68, 1.94, 0.03]} />
+        <meshStandardMaterial color={isConstellation ? "#4c565e" : "#5d4630"} roughness={0.55} metalness={0.15} />
+      </mesh>
+      <mesh position={[bodyW / 2 - 0.62, 1.7, 1.57]}>
+        <planeGeometry args={[0.5, 0.5]} />
+        <meshPhysicalMaterial color="#aebfc7" transparent opacity={0.35} roughness={0.1} />
+      </mesh>
+      <mesh position={[bodyW / 2 - 0.36, 1.0, 1.58]}>
+        <cylinderGeometry args={[0.016, 0.016, 0.28, 8]} />
+        <meshStandardMaterial color="#b8a988" metalness={0.85} roughness={0.3} />
       </mesh>
 
-      {/* Roof — one of three silhouettes for variety */}
-      {roofType === 1 ? (
-        <mesh position={[0, top + 0.9, 0.2]} rotation={[0, Math.PI / 4, 0]}>
-          <coneGeometry args={[bodyW * 0.72, 1.4, 4]} />
-          <meshStandardMaterial color={bodyColor2} roughness={0.6} metalness={0.3} />
-        </mesh>
-      ) : roofType === 2 ? (
-        <>
-          <mesh position={[0, top + 0.3, 0.2]}>
-            <boxGeometry args={[bodyW * 0.6, 0.6, 1.8]} />
-            <meshStandardMaterial color={bodyColor2} roughness={0.6} metalness={0.3} />
+      {/* Stone threshold */}
+      <mesh position={[0, 0.05, 1.65]} receiveShadow>
+        <boxGeometry args={[bodyW + 0.2, 0.1, 0.5]} />
+        <meshStandardMaterial map={textures.concrete} roughness={0.95} />
+      </mesh>
+
+      {/* Awning (shops) or a slim steel canopy (constellation nodes) */}
+      {textures.awning ? (
+        <group position={[-0.28, 2.42, 1.62]}>
+          <mesh rotation={[Math.PI / 4.2, 0, 0]} castShadow>
+            <boxGeometry args={[bodyW - 1.2, 0.9, 0.045]} />
+            <meshStandardMaterial map={textures.awning} roughness={0.95} side={THREE.DoubleSide} />
           </mesh>
-          <mesh position={[0, top + 1.5, 0.2]}>
-            <cylinderGeometry args={[0.05, 0.05, 2, 6]} />
-            <meshStandardMaterial color={trim} emissive={trim} emissiveIntensity={2} toneMapped={false} />
+          {/* Scalloped valance edge */}
+          <mesh position={[0, -0.33, 0.31]}>
+            <boxGeometry args={[bodyW - 1.2, 0.16, 0.045]} />
+            <meshStandardMaterial map={textures.awning} roughness={0.95} />
           </mesh>
-          <mesh position={[0, top + 2.5, 0.2]}>
-            <sphereGeometry args={[0.16, 12, 12]} />
-            <meshStandardMaterial color={trim} emissive={trim} emissiveIntensity={3} toneMapped={false} />
-          </mesh>
-        </>
+        </group>
       ) : (
-        <mesh position={[0, top + 0.35, 0.25]}>
-          <boxGeometry args={[bodyW * 0.75, 0.7, 2.2]} />
-          <meshStandardMaterial color={bodyColor2} roughness={0.7} metalness={0.25} />
+        <mesh position={[0, 2.48, 1.85]} castShadow>
+          <boxGeometry args={[bodyW - 0.4, 0.08, 0.8]} />
+          <meshStandardMaterial color="#5a6167" metalness={0.7} roughness={0.35} />
         </mesh>
       )}
 
-      {/* Neon roofline strip (accent + per-store trim) */}
-      <mesh position={[0, top + 0.15, 1.5]}>
-        <boxGeometry args={[bodyW, 0.09, 0.09]} />
-        <meshStandardMaterial color={glowColor} emissive={glowColor} emissiveIntensity={2.2} toneMapped={false} />
+      {/* Painted sign board over the storefront */}
+      <mesh position={[0, 3.02, 1.54]} castShadow>
+        <boxGeometry args={[bodyW - 0.15, 0.62, 0.09]} />
+        <meshStandardMaterial color={signBoard} roughness={0.7} emissive={selected ? "#c8a45c" : "#000000"} emissiveIntensity={selected ? 0.22 : 0} />
+      </mesh>
+      {/* Thin brass trim that warms up when the store is selected */}
+      <mesh position={[0, 3.02, 1.585]}>
+        <boxGeometry args={[bodyW - 0.1, 0.66, 0.012]} />
+        <meshStandardMaterial
+          color="#b39355"
+          metalness={0.8}
+          roughness={0.35}
+          transparent
+          opacity={selected ? 0.95 : 0.25}
+          emissive="#c8a45c"
+          emissiveIntensity={selected ? 0.5 : 0}
+        />
       </mesh>
 
-      {/* Lit shop windows + doorway */}
-      <mesh position={[-0.85, 1.5, 1.51]}>
-        <planeGeometry args={[0.85, 1.6]} />
-        <meshStandardMaterial color={windowColor} emissive={windowColor} emissiveIntensity={1.1} toneMapped={false} />
-      </mesh>
-      <mesh position={[0.85, 1.5, 1.51]}>
-        <planeGeometry args={[0.85, 1.6]} />
-        <meshStandardMaterial color={windowColor} emissive={windowColor} emissiveIntensity={1.1} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 1, 1.51]}>
-        <planeGeometry args={[0.9, 2]} />
-        <meshStandardMaterial color={doorColor} emissive={doorColor} emissiveIntensity={0.9} toneMapped={false} />
+      {/* Upper floors with a real window grid on the street face */}
+      <mesh position={[0, groundH + upperH / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[bodyW, upperH, 3]} />
+        <meshStandardMaterial attach="material-0" map={textures.wallSide} roughness={0.92} />
+        <meshStandardMaterial attach="material-1" map={textures.wallSide} roughness={0.92} />
+        <meshStandardMaterial attach="material-2" map={textures.wallFront} roughness={0.92} />
+        <meshStandardMaterial attach="material-3" map={textures.wallFront} roughness={0.92} />
+        <meshStandardMaterial attach="material-4" map={textures.upper} roughness={0.85} />
+        <meshStandardMaterial attach="material-5" map={textures.wallFront} roughness={0.92} />
       </mesh>
 
-      {/* Angled awning in the per-store trim colour */}
-      <mesh position={[0, 2.55, 1.75]} rotation={[Math.PI / 5, 0, 0]}>
-        <boxGeometry args={[bodyW + 0.1, 0.7, 0.08]} />
-        <meshStandardMaterial color={trim} emissive={trim} emissiveIntensity={0.9} toneMapped={false} />
+      {/* Cornice + roofline */}
+      <mesh position={[0, top + 0.09, 0.05]} castShadow>
+        <boxGeometry args={[bodyW + 0.3, 0.18, 3.25]} />
+        <meshStandardMaterial map={textures.concrete} roughness={0.9} />
       </mesh>
+      {roofType === 1 ? (
+        <mesh position={[0, top + 0.62, 0]} castShadow>
+          <boxGeometry args={[bodyW * 0.55, 0.85, 2.2]} />
+          <meshStandardMaterial color="#57504a" roughness={0.9} />
+        </mesh>
+      ) : roofType === 2 ? (
+        <group position={[bodyW * 0.18, top + 0.18, -0.4]}>
+          {/* Rooftop water tank */}
+          <mesh position={[0, 0.55, 0]} castShadow>
+            <cylinderGeometry args={[0.42, 0.46, 1.0, 12]} />
+            <meshStandardMaterial color="#5c4a38" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 1.18, 0]} castShadow>
+            <coneGeometry args={[0.5, 0.35, 12]} />
+            <meshStandardMaterial color="#4a3c2e" roughness={0.95} />
+          </mesh>
+        </group>
+      ) : (
+        <mesh position={[-bodyW * 0.2, top + 0.42, -0.5]} castShadow>
+          {/* HVAC unit */}
+          <boxGeometry args={[0.9, 0.5, 0.7]} />
+          <meshStandardMaterial color="#8d9299" metalness={0.5} roughness={0.55} />
+        </mesh>
+      )}
 
-      {/* Selection halo behind the sign */}
-      <mesh ref={haloRef} position={[0, 3.25, 1.55]}>
-        <planeGeometry args={[bodyW + 0.8, 1.7]} />
-        <meshBasicMaterial color={glowColor} transparent opacity={0} />
-      </mesh>
-
-      {/* NAME SIGN — the storefront marquee, backlit */}
-      <mesh position={[0, 3.3, 1.6]}>
-        <boxGeometry args={[bodyW - 0.1, 0.95, 0.12]} />
-        <meshStandardMaterial color={mainColor} emissive={glowColor} emissiveIntensity={1.5} transparent opacity={0.94} />
-      </mesh>
-
-      {/* Projecting blade sign — readable while walking the boulevard */}
-      <mesh position={[bodyW / 2 + 0.05, 2.9, 1.2]}>
-        <boxGeometry args={[0.08, 1.3, 1.1]} />
-        <meshStandardMaterial color={mainColor} emissive={trim} emissiveIntensity={1.2} />
-      </mesh>
-
-      {/* Labels suspend on the remote font fetch — isolate them so a slow
-          or blocked font can never blank the buildings themselves. */}
-      <Suspense fallback={null}>
-        <Text position={[0, 3.42, 1.67]} fontSize={0.3} color="#ffffff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={bodyW - 0.2}>
-          {agent.name}
-        </Text>
-        <Text position={[0, 3.02, 1.67]} fontSize={0.15} color={glowColor} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
-          {isConstellation
-            ? `Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
-            : `${agent.artifacts} WORK${agent.artifacts === 1 ? "" : "S"}`}
-        </Text>
-        {/* Blade-sign text (rotated to face down the street) */}
-        <Text
-          position={[bodyW / 2 + 0.1, 2.9, 1.2]}
-          rotation={[0, Math.PI / 2, 0]}
-          fontSize={0.34}
-          color={trim}
-          font={SPACE_MONO_WOFF}
-          anchorX="center"
-          anchorY="middle"
-        >
-          {initials}
-        </Text>
-        {isConstellation ? (
-          <Text position={[0, top + 0.55, 1.6]} fontSize={0.16} color={glowColor} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
-            [ SIGNAL ]
-          </Text>
-        ) : !isClaimed ? (
-          <Text position={[0, top + 0.55, 1.6]} fontSize={0.16} color={glowColor} font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
-            [ AVAILABLE ]
-          </Text>
-        ) : null}
-
-        <group ref={glyphRef} position={[0, top + 1.1, 1.0]}>
-          <Text position={[0, 0, 0]} fontSize={0.7} color={glowColor} font={SPACE_MONO_WOFF} fillOpacity={0.55}>
+      {/* Hanging blade sign on a bracket */}
+      <group position={[bodyW / 2 + 0.02, 2.62, 1.2]}>
+        <mesh position={[0.18, 0.32, 0]}>
+          <boxGeometry args={[0.5, 0.04, 0.04]} />
+          <meshStandardMaterial color="#2b2b2e" metalness={0.7} roughness={0.4} />
+        </mesh>
+        <mesh position={[0.34, -0.12, 0]} castShadow>
+          <boxGeometry args={[0.04, 0.85, 0.6]} />
+          <meshStandardMaterial color={signBoard} roughness={0.7} />
+        </mesh>
+        <Suspense fallback={null}>
+          <Text position={[0.37, -0.12, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.26} color="#e9dfc8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
             {initials}
           </Text>
-        </group>
+        </Suspense>
+      </group>
+
+      {/* Sign lettering + a small brass plaque for constellation nodes */}
+      <Suspense fallback={null}>
+        <Text position={[0, 3.06, 1.6]} fontSize={0.27} color="#efe6d2" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={bodyW - 0.4}>
+          {agent.name}
+        </Text>
+        <Text position={[0, 2.8, 1.6]} fontSize={0.11} color="#b9ac90" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          {isConstellation
+            ? `constellation · Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
+            : `${agent.artifacts} work${agent.artifacts === 1 ? "" : "s"}`}
+        </Text>
       </Suspense>
 
-      {/* The store's worker — an NPC standing out front on the boulevard side */}
-      <group position={[0.9, 0, 2.5]}>
-        <NpcFigure color={glowColor} />
+      {/* The shopkeeper out front */}
+      <group position={[0.9, 0, 2.5]} rotation={[0, seed3 * 1.6 - 0.8, 0]}>
+        <NpcFigure color={awningColor ?? "#4a5568"} seed={Math.floor(seed * 1e6)} />
       </group>
     </group>
   );
-}
-
-const SIGN_PALETTE = ["#00e5ff", "#E8A33D", "#a98bff", "#3ADB9E", "#ff6ec7", "#ffd93d", "#5eead4"];
-
-/** Deterministic 0..1 hash of a string (FNV-1a) — stable per agent, no RNG. */
-function hash01(s: string, salt = 0): number {
-  let h = (2166136261 ^ salt) >>> 0;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 100000) / 100000;
 }
 
 /** Reports the nearest store as you walk past it, so the HUD can offer
@@ -301,64 +374,313 @@ function ProximityDetector({
   return null;
 }
 
+/** A classic park-style lamppost — dark cast metal, glass head. Unlit props
+ *  in the afternoon sun; their job is street furniture, not illumination. */
 function StreetLamp({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
-      <mesh position={[0, 1.5, 0]}>
-        <cylinderGeometry args={[0.05, 0.08, 3, 6]} />
-        <meshStandardMaterial color="#0d2a30" metalness={0.6} roughness={0.4} />
+      <mesh position={[0, 0.09, 0]} castShadow>
+        <cylinderGeometry args={[0.14, 0.18, 0.18, 10]} />
+        <meshStandardMaterial color="#26292c" metalness={0.6} roughness={0.5} />
       </mesh>
-      <mesh position={[0, 3, 0]}>
-        <sphereGeometry args={[0.16, 12, 12]} />
-        <meshStandardMaterial color="#bff7f0" emissive="#00e5ff" emissiveIntensity={2.5} toneMapped={false} />
+      <mesh position={[0, 1.7, 0]} castShadow>
+        <cylinderGeometry args={[0.045, 0.07, 3.3, 8]} />
+        <meshStandardMaterial color="#2c3033" metalness={0.65} roughness={0.45} />
       </mesh>
-      {/* Emissive-only (no per-lamp pointLight) — 24 posts × a light would tank
-          the framerate; the glowing bulb reads as lit against the dark street. */}
+      <mesh position={[0, 3.42, 0]}>
+        <cylinderGeometry args={[0.02, 0.13, 0.16, 8]} />
+        <meshStandardMaterial color="#26292c" metalness={0.6} roughness={0.5} />
+      </mesh>
+      <mesh position={[0, 3.58, 0]}>
+        <cylinderGeometry args={[0.11, 0.15, 0.24, 8]} />
+        <meshPhysicalMaterial color="#f4ead0" transparent opacity={0.75} roughness={0.4} emissive="#e8d9a8" emissiveIntensity={0.12} />
+      </mesh>
+      <mesh position={[0, 3.74, 0]}>
+        <coneGeometry args={[0.17, 0.14, 8]} />
+        <meshStandardMaterial color="#26292c" metalness={0.6} roughness={0.5} />
+      </mesh>
     </group>
   );
 }
 
-/** Lamp posts down both sides of the boulevard + a KAX landmark pylon at the
- *  far end, so the street reads as a place, not a row of boxes on a void. */
-function StreetProps({ storeCount }: { storeCount: number }) {
+/** A street tree in a concrete planter — trunk, asymmetric canopy blobs.
+ *  Texture helpers are module-cached, so calling them in render is free. */
+function StreetTree({ position, seed }: { position: [number, number, number]; seed: number }) {
+  const bark = barkTexture();
+  const s = 0.9 + hash01(String(seed), 3) * 0.35;
+  const lean = (hash01(String(seed), 5) - 0.5) * 0.12;
+  const greens = ["#3d5a34", "#48653b", "#35502e", "#527247"];
+  const g1 = greens[seed % greens.length];
+  const g2 = greens[(seed + 1) % greens.length];
+  return (
+    <group position={position} scale={s} rotation={[0, seed, lean]}>
+      {/* Planter */}
+      <mesh position={[0, 0.22, 0]} castShadow receiveShadow>
+        <boxGeometry args={[1.05, 0.44, 1.05]} />
+        <meshStandardMaterial map={concreteTexture()} roughness={0.95} />
+      </mesh>
+      <mesh position={[0, 0.4, 0]}>
+        <boxGeometry args={[0.9, 0.1, 0.9]} />
+        <meshStandardMaterial color="#3a2e22" roughness={1} />
+      </mesh>
+      {/* Trunk + limbs */}
+      <mesh position={[0, 1.25, 0]} castShadow>
+        <cylinderGeometry args={[0.07, 0.12, 1.8, 8]} />
+        <meshStandardMaterial map={bark} roughness={0.95} />
+      </mesh>
+      <mesh position={[0.22, 1.9, 0.06]} rotation={[0, 0, -0.6]}>
+        <cylinderGeometry args={[0.03, 0.05, 0.7, 6]} />
+        <meshStandardMaterial map={bark} roughness={0.95} />
+      </mesh>
+      {/* Canopy — overlapping flattened, flat-shaded blobs read as leaf mass
+          rather than smooth "lollipop" spheres */}
+      <mesh position={[0, 2.65, 0]} scale={[1.15, 0.8, 1.1]} castShadow>
+        <sphereGeometry args={[0.95, 7, 6]} />
+        <meshStandardMaterial color={g1} roughness={1} flatShading />
+      </mesh>
+      <mesh position={[0.58, 2.4, 0.2]} scale={[1, 0.75, 1]} castShadow>
+        <sphereGeometry args={[0.62, 6, 5]} />
+        <meshStandardMaterial color={g2} roughness={1} flatShading />
+      </mesh>
+      <mesh position={[-0.55, 2.35, -0.15]} scale={[1, 0.72, 1]} castShadow>
+        <sphereGeometry args={[0.58, 6, 5]} />
+        <meshStandardMaterial color={g2} roughness={1} flatShading />
+      </mesh>
+      <mesh position={[-0.15, 3.1, 0.25]} scale={[1, 0.7, 1]} castShadow>
+        <sphereGeometry args={[0.55, 6, 5]} />
+        <meshStandardMaterial color="#2f4728" roughness={1} flatShading />
+      </mesh>
+      <mesh position={[0.2, 3.2, -0.2]} scale={[1, 0.75, 1]} castShadow>
+        <sphereGeometry args={[0.5, 6, 5]} />
+        <meshStandardMaterial color={g1} roughness={1} flatShading />
+      </mesh>
+    </group>
+  );
+}
+
+/** Wood-and-iron sidewalk bench. */
+function Bench({ position, rotation = 0 }: { position: [number, number, number]; rotation?: number }) {
+  const slat = "#7a5c3d";
+  const iron = "#2b2b2e";
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {[-0.62, 0.62].map((x) => (
+        <group key={x} position={[x, 0, 0]}>
+          <mesh position={[0, 0.22, 0]} castShadow>
+            <boxGeometry args={[0.06, 0.44, 0.5]} />
+            <meshStandardMaterial color={iron} metalness={0.6} roughness={0.45} />
+          </mesh>
+          <mesh position={[0, 0.62, -0.22]} rotation={[0.18, 0, 0]}>
+            <boxGeometry args={[0.06, 0.5, 0.05]} />
+            <meshStandardMaterial color={iron} metalness={0.6} roughness={0.45} />
+          </mesh>
+        </group>
+      ))}
+      {[0, 0.09, 0.18].map((z) => (
+        <mesh key={z} position={[0, 0.45, 0.12 - z]} castShadow>
+          <boxGeometry args={[1.5, 0.045, 0.085]} />
+          <meshStandardMaterial color={slat} roughness={0.85} />
+        </mesh>
+      ))}
+      {[0.62, 0.78].map((y) => (
+        <mesh key={y} position={[0, y, -0.26]} rotation={[0.18, 0, 0]} castShadow>
+          <boxGeometry args={[1.5, 0.075, 0.045]} />
+          <meshStandardMaterial color={slat} roughness={0.85} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Street furniture + the KAX monument closing the vista + skyline backdrop. */
+function CityProps({ storeCount }: { storeCount: number }) {
   const rows = Math.max(1, Math.ceil(storeCount / 2));
   const depth = -2 - rows * 4.5;
+  const concrete = concreteTexture();
+
   const lamps: Array<[number, number, number]> = [];
+  const trees: Array<[number, number, number]> = [];
+  const benches: Array<[number, number, number]> = [];
+  let i = 0;
   for (let z = -4; z > depth; z -= 9) {
-    lamps.push([-2.6, 0, z]);
-    lamps.push([2.6, 0, z]);
+    lamps.push([-2.95, 0.12, z]);
+    lamps.push([2.95, 0.12, z + 4.5]);
+    if (i % 2 === 0) {
+      trees.push([2.95, 0.12, z]);
+      trees.push([-2.95, 0.12, z + 4.5]);
+    } else {
+      benches.push([-2.98, 0.12, z + 2.2]);
+      benches.push([2.98, 0.12, z - 2.2]);
+    }
+    i++;
   }
+
+  // Skyline: quiet mid-rise blocks behind both storefront rows so the street
+  // sits inside a city instead of a void.
+  const skyline = useMemo(() => {
+    const blocks: Array<{ pos: [number, number, number]; w: number; h: number; d: number; v: number; f: number; c: number }> = [];
+    for (let side = 0; side < 2; side++) {
+      const x = side === 0 ? -16 : 16;
+      for (let k = 0; k < Math.max(3, Math.ceil(rows / 2)); k++) {
+        const z = 2 - k * 11 - (side === 0 ? 0 : 5);
+        if (z < depth - 14) break;
+        const h = 9 + ((k * 37 + side * 13) % 8);
+        blocks.push({
+          pos: [x + ((k % 3) - 1) * 1.4, h / 2, z],
+          w: 7.5,
+          h,
+          d: 8,
+          v: (k + side) % 4,
+          // Window grid at true city scale: ~1.35 units per story.
+          f: Math.round(h / 1.35),
+          c: 6,
+        });
+      }
+    }
+    return blocks;
+  }, [rows, depth]);
+
   return (
     <group>
-      {lamps.map((p, i) => (
-        <StreetLamp key={i} position={p} />
+      {lamps.map((p, idx) => (
+        <StreetLamp key={`l${idx}`} position={p} />
       ))}
-      {/* Entrance markers flanking the mouth of the street */}
-      <mesh position={[-2.6, 2, 3]}>
-        <boxGeometry args={[0.3, 4, 0.3]} />
-        <meshStandardMaterial color="#0E3A40" emissive="#00e5ff" emissiveIntensity={0.8} />
-      </mesh>
-      <mesh position={[2.6, 2, 3]}>
-        <boxGeometry args={[0.3, 4, 0.3]} />
-        <meshStandardMaterial color="#0E3A40" emissive="#E8A33D" emissiveIntensity={0.8} />
-      </mesh>
-      {/* Far-end landmark: the KAX pylon closing the vista */}
-      <group position={[0, 0, depth - 3]}>
-        <mesh position={[0, 4.5, 0]}>
-          <boxGeometry args={[1.4, 9, 1.4]} />
-          <meshStandardMaterial color="#0E3A40" metalness={0.5} roughness={0.5} />
+      {trees.map((p, idx) => (
+        <StreetTree key={`t${idx}`} position={p} seed={idx + 3} />
+      ))}
+      {benches.map((p, idx) => (
+        <Bench key={`b${idx}`} position={p} rotation={p[0] < 0 ? Math.PI / 2 : -Math.PI / 2} />
+      ))}
+
+      {/* Trash cans near the benches */}
+      {benches.map((p, idx) => (
+        <group key={`tc${idx}`} position={[p[0], 0.12, p[2] + 1.1]}>
+          <mesh position={[0, 0.32, 0]} castShadow>
+            <cylinderGeometry args={[0.2, 0.17, 0.64, 12]} />
+            <meshStandardMaterial color="#3a4a3c" metalness={0.4} roughness={0.6} />
+          </mesh>
+          <mesh position={[0, 0.66, 0]}>
+            <cylinderGeometry args={[0.22, 0.2, 0.06, 12]} />
+            <meshStandardMaterial color="#2c3830" metalness={0.4} roughness={0.6} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* KAX monument closing the vista — carved stone, planted base */}
+      <group position={[0, 0, depth - 4]}>
+        <mesh position={[0, 0.25, 0]} receiveShadow castShadow>
+          <cylinderGeometry args={[2.2, 2.4, 0.5, 24]} />
+          <meshStandardMaterial map={concrete} roughness={0.95} />
         </mesh>
-        <mesh position={[0, 9.4, 0]}>
-          <octahedronGeometry args={[1.1]} />
-          <meshStandardMaterial color="#E8A33D" emissive="#E8A33D" emissiveIntensity={2} toneMapped={false} />
+        <mesh position={[0, 3.6, 0]} castShadow>
+          <boxGeometry args={[1.5, 6.4, 1.5]} />
+          <meshStandardMaterial map={concrete} roughness={0.9} />
         </mesh>
-        <pointLight position={[0, 9, 0]} intensity={1.2} distance={34} color="#E8A33D" />
+        <mesh position={[0, 7.15, 0]} castShadow>
+          <boxGeometry args={[1.1, 0.9, 1.1]} />
+          <meshStandardMaterial map={concrete} roughness={0.9} />
+        </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 6, 0.76]} fontSize={0.8} color="#00e5ff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          <Text position={[0, 4.6, 0.78]} fontSize={0.72} color="#3f3a33" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
             KAX
           </Text>
+          <Text position={[0, 3.7, 0.78]} fontSize={0.16} color="#5a544b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
+            MARKET DISTRICT
+          </Text>
         </Suspense>
+        {[0, 1, 2, 3].map((q) => (
+          <StreetTree key={q} position={[Math.cos((q * Math.PI) / 2) * 3.4, 0, Math.sin((q * Math.PI) / 2) * 3.4]} seed={q + 11} />
+        ))}
       </group>
+
+      {/* Skyline backdrop (texture helpers are module-cached — direct calls) */}
+      {skyline.map((b, idx) => {
+        const wallKind: "brick" | "stucco" = idx % 2 ? "brick" : "stucco";
+        const sideTex = idx % 2 ? brickTexture(b.v) : stuccoTexture(b.v);
+        return (
+          <mesh key={`s${idx}`} position={b.pos}>
+            <boxGeometry args={[b.w, b.h, b.d]} />
+            <meshStandardMaterial attach="material-0" map={upperWindowsTexture({ wall: wallKind, variant: b.v, floors: b.f, cols: b.c, litSeed: idx })} roughness={0.9} />
+            <meshStandardMaterial attach="material-1" map={sideTex} roughness={0.9} />
+            <meshStandardMaterial attach="material-2" color="#6f6a62" roughness={0.95} />
+            <meshStandardMaterial attach="material-3" color="#6f6a62" roughness={0.95} />
+            <meshStandardMaterial attach="material-4" map={upperWindowsTexture({ wall: wallKind, variant: b.v, floors: b.f, cols: b.c, litSeed: idx + 5 })} roughness={0.9} />
+            <meshStandardMaterial attach="material-5" map={sideTex} roughness={0.9} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/** The ground plane set: asphalt roadway, raised paver sidewalks, granite
+ *  curbs, painted lane dashes and a crosswalk at the street mouth. */
+function StreetGround({ depth }: { depth: number }) {
+  const length = Math.abs(depth) + 40;
+  const zMid = (8 + depth - 20) / 2;
+  const asphalt = useMemo(() => repeated(asphaltTexture(), 2, length / 6), [length]);
+  const pavers = useMemo(() => repeated(sidewalkTexture(), 3, length / 4), [length]);
+  const paversWide = useMemo(() => repeated(sidewalkTexture(), 5, length / 4), [length]);
+  const dashes = useMemo(() => {
+    const arr: number[] = [];
+    for (let z = 6; z > depth - 8; z -= 3) arr.push(z);
+    return arr;
+  }, [depth]);
+
+  return (
+    <group>
+      {/* Roadway */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, zMid]} receiveShadow>
+        <planeGeometry args={[5.4, length]} />
+        <meshStandardMaterial map={asphalt} roughness={0.96} metalness={0.02} />
+      </mesh>
+      {/* Center dashes */}
+      {dashes.map((z) => (
+        <mesh key={z} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, z]}>
+          <planeGeometry args={[0.09, 1.2]} />
+          <meshStandardMaterial color="#cfc9b8" roughness={0.9} />
+        </mesh>
+      ))}
+      {/* Crosswalk at the entrance */}
+      {[-1.8, -1.2, -0.6, 0, 0.6, 1.2, 1.8].map((x) => (
+        <mesh key={x} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.013, 6.6]}>
+          <planeGeometry args={[0.42, 2.4]} />
+          <meshStandardMaterial color="#d6d0bf" roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Curbs */}
+      {[-2.7, 2.7].map((x) => (
+        <mesh key={x} position={[x + (x < 0 ? -0.075 : 0.075), 0.06, zMid]} receiveShadow castShadow>
+          <boxGeometry args={[0.15, 0.12, length]} />
+          <meshStandardMaterial color="#8d8a83" roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Sidewalks (raised) */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5.85, 0.12, zMid]} receiveShadow>
+        <planeGeometry args={[6.3, length]} />
+        <meshStandardMaterial map={pavers} roughness={0.95} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[5.85, 0.12, zMid]} receiveShadow>
+        <planeGeometry args={[6.3, length]} />
+        <meshStandardMaterial map={pavers} roughness={0.95} />
+      </mesh>
+      {/* Sidewalk riser faces */}
+      {[-2.775, 2.775].map((x) => (
+        <mesh key={x} position={[x, 0.06, zMid]}>
+          <boxGeometry args={[0.02, 0.12, length]} />
+          <meshStandardMaterial color="#96938c" roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Ground beyond the sidewalks under the skyline blocks */}
+      {[-14.5, 14.5].map((x) => (
+        <mesh key={x} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.115, zMid]} receiveShadow>
+          <planeGeometry args={[11, length]} />
+          <meshStandardMaterial map={paversWide} roughness={0.95} />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -370,9 +692,11 @@ function layoutFor(agents: SceneAgent[]) {
     const isLeft = i % 2 === 0;
     const row = Math.floor(i / 2);
     const z = -2 - row * 4.5 + (i % 3 === 0 ? 0.5 : 0);
-    const x = isLeft ? -4.5 : 4.5;
+    // Facades land at ±4.5, leaving a real ~1.8-unit sidewalk between the
+    // curb (±2.7) and the shopfronts — pedestrians walk it without clipping.
+    const x = isLeft ? -6.0 : 6.0;
     const rotation: [number, number, number] = isLeft ? [0, Math.PI / 2, 0] : [0, -Math.PI / 2, 0];
-    return { agent, position: [x, 0, z] as [number, number, number], rotation };
+    return { agent, position: [x, 0.12, z] as [number, number, number], rotation };
   });
 }
 
@@ -508,7 +832,7 @@ export default function Marketplace3D() {
         </ul>
       </nav>
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none bg-gradient-to-b from-[#0a1a24] to-transparent">
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none bg-gradient-to-b from-[#0a1a24]/80 to-transparent">
         <Link href="/" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80 transition-colors" data-testid="link-home">
           KAX
         </Link>
@@ -565,7 +889,7 @@ export default function Marketplace3D() {
                   </div>
                   <div className="text-lg text-foreground font-bold tracking-tight uppercase" data-testid="text-selected-name">{selected.name}</div>
                   <div className="text-[10px] text-muted-foreground font-mono mt-1">@{selected.slug}</div>
-                  
+
                   {selected.source === "constellation" ? (
                     <>
                       <div className="text-xs text-muted-foreground mt-3 flex justify-between">
@@ -683,6 +1007,7 @@ export default function Marketplace3D() {
         camera={{ position: [0, 6, 18], fov: 45 }}
         onPointerMissed={() => setSelected(null)}
         dpr={[1, 1.5]}
+        shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
         onCreated={({ gl }) => {
           gl.domElement.addEventListener("webglcontextlost", (e) => {
@@ -691,15 +1016,32 @@ export default function Marketplace3D() {
           });
         }}
       >
-        {/* Lit deep-teal night — a market after dark, not a black void */}
-        <color attach="background" args={["#0a1a24"]} />
-        <fog attach="fog" args={["#0d2230", 22, 85]} />
+        {/* Late-afternoon light: a real sky, one warm sun with shadows, and
+            soft blue fill from above — the whole Tron kit (neon grid, mirror
+            floor, sparkles) is gone. The sun rides high and slightly down the
+            street axis so the canyon floor and shopfronts stay daylit. */}
+        <Sky sunPosition={[18, 30, 35]} turbidity={5.5} rayleigh={2.2} mieCoefficient={0.005} mieDirectionalG={0.8} />
+        <fog attach="fog" args={["#cfd8de", 34, 130]} />
 
-        <hemisphereLight args={["#3d6b78", "#0a1620", 0.9]} />
-        <ambientLight intensity={0.35} color="#2A4A50" />
-        <directionalLight position={[6, 14, 8]} intensity={1.1} color="#9fd0d8" />
-        <pointLight position={[-14, 8, -6]} intensity={1.4} distance={70} color="#00e5ff" />
-        <pointLight position={[14, 8, -18]} intensity={1.4} distance={70} color="#E8A33D" />
+        <hemisphereLight args={["#cfe2f0", "#8a8272", 0.75]} />
+        <ambientLight intensity={0.28} color="#fff3e0" />
+        <directionalLight
+          position={[18, 42, 35]}
+          intensity={1.7}
+          color="#ffdcb0"
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-bias={-0.0004}
+          shadow-camera-left={-40}
+          shadow-camera-right={40}
+          shadow-camera-top={40}
+          shadow-camera-bottom={-90}
+          shadow-camera-near={1}
+          shadow-camera-far={160}
+        />
+        {/* Bounce-light stand-in so the shadow-side facades read, not vanish */}
+        <directionalLight position={[-30, 12, -40]} intensity={0.4} color="#dfe8ef" />
 
         <OrbitControls ref={orbitRef} target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
         <WasdMove
@@ -710,53 +1052,22 @@ export default function Marketplace3D() {
         />
         <PlayerAvatar />
         <PlayerTracker onUpdate={setPlayer} />
-        {Array.from({ length: 6 }).map((_, i) => (
+        {/* Pedestrians on both sidewalks */}
+        {Array.from({ length: 8 }).map((_, i) => (
           <WandererNpc
             key={i}
-            x={i % 2 === 0 ? -1.4 : 1.4}
+            x={(i % 2 === 0 ? -1 : 1) * (3.3 + (i % 3) * 0.35)}
+            y={0.12}
             zNear={4}
             zFar={streetDepth + 4}
-            speed={0.05 + (i % 3) * 0.015}
-            offset={i * 0.37}
-            color={SIGN_PALETTE[i % SIGN_PALETTE.length]}
+            speed={0.045 + (i % 4) * 0.012}
+            offset={i * 0.31}
+            color="#5a6b7d"
           />
         ))}
 
-        {/* Ground, atmosphere and buildings render unconditionally — the only
-            suspending resources (label fonts) are isolated inside each
-            Storefront, so the district can never render as a black void. */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-          <planeGeometry args={[100, 200]} />
-          <MeshReflectorMaterial
-            blur={[300, 80]}
-            resolution={512}
-            mixBlur={1}
-            mixStrength={45}
-            roughness={0.9}
-            depthScale={1}
-            minDepthThreshold={0.4}
-            maxDepthThreshold={1.4}
-            color="#0a1c24"
-            metalness={0.7}
-            mirror={0.55}
-          />
-        </mesh>
-
-        {/* Neon plaza grid — the market street, tron-lit */}
-        <gridHelper
-          args={[120, 60, "#1f6b74", "#123640"]}
-          position={[0, 0.02, -10]}
-        />
-        {/* Central boulevard runway between the two storefront rows */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, -18]}>
-          <planeGeometry args={[3.2, 90]} />
-          <meshStandardMaterial color="#0E3A40" emissive="#00e5ff" emissiveIntensity={0.35} transparent opacity={0.55} toneMapped={false} />
-        </mesh>
-
-        <Sparkles count={140} scale={[26, 12, 60]} size={1.4} speed={0.3} opacity={0.35} color="#00e5ff" position={[0, 6, -12]} />
-        <Sparkles count={90} scale={[26, 12, 60]} size={2} speed={0.5} opacity={0.4} color="#E8A33D" position={[0, 6, -12]} />
-
-        <StreetProps storeCount={sceneAgents.length} />
+        <StreetGround depth={streetDepth} />
+        <CityProps storeCount={sceneAgents.length} />
         <ProximityDetector points={layout.map((l) => ({ agent: l.agent, pos: l.position }))} onNearest={setNearby} />
 
         {layout.map((item) => (
