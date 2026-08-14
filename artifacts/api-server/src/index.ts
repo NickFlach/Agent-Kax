@@ -211,6 +211,11 @@ async function warmUpInBackground(): Promise<void> {
   // First, before anything queries: does the database still look like the
   // schema this code reads? A missing table used to surface only as a
   // generic 500 on one endpoint (#191); now it names itself in the log.
+  // Put back anything the deploy's schema diff removed, BEFORE checking.
+  await runStartupStep("ensureCriticalSchema", async () => {
+    const { ensureCriticalSchema } = await import("./lib/ensureCriticalSchema");
+    await ensureCriticalSchema();
+  });
   await runStartupStep("schemaSelfCheck", async () => {
     const { reportSchemaAtBoot } = await import("./lib/schemaSelfCheck");
     await reportSchemaAtBoot();
