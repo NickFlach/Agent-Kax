@@ -1,21 +1,19 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Text } from "@react-three/drei";
+import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useParams, useLocation, Link } from "wouter";
 import {
   useGetAgentStorefront,
-  useGetAgentStorefrontWorks,
   useGetAgentStorefrontListings,
   getGetAgentStorefrontQueryKey,
-  getGetAgentStorefrontWorksQueryKey,
   getGetAgentStorefrontListingsQueryKey,
 } from "@workspace/api-client-react";
 import type { Artifact } from "@workspace/api-client-react";
 
 type WallItem = { work: Artifact; curatedBy: string | null };
 import { Button } from "@/components/ui/button";
-import { WasdMove } from "@/components/wasd-move";
+import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
 import { woodFloorTexture, galleryWallTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
@@ -28,11 +26,56 @@ function isImageish(t: string) {
 }
 /** The walls hang IMAGES ONLY: a real image URL or a real thumbnail. Works
  *  with nothing visual to show (text/audio without covers) stay off the wall
- *  — no placeholder panels. */
+ *  — no placeholder panels. `inline:` thumbnails are sentinels, not URLs. */
 function pickImageUrl(a: Artifact): string | null {
-  const thumb = a.thumbnailUrl && !a.thumbnailUrl.includes("suno.ai") ? a.thumbnailUrl : null;
+  const raw = a.thumbnailUrl;
+  const thumb = raw && !raw.includes("suno.ai") && !raw.startsWith("inline:") ? raw : null;
   if (isImageish(a.artifactType)) return thumb ?? a.publicUrl ?? null;
   return thumb;
+}
+
+/**
+ * The works feed is newest-first and an active agent's recent output can be
+ * all text/audio (Kannaka: 31 text + 8 audio + 1 image in her latest 40 —
+ * which is why her gallery hung a single painting). Page through the catalog
+ * until the walls are FULL of image works, not just whatever happened last.
+ */
+function useImageWorks(slug: string, want: number) {
+  const [works, setWorks] = useState<Artifact[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const found: Artifact[] = [];
+      let tot = 0;
+      try {
+        for (let page = 0; page < 6 && found.length < want; page++) {
+          const r = await fetch(`/api/storefront/by-agent/${encodeURIComponent(slug)}/works?limit=100&offset=${page * 100}`);
+          if (!r.ok) break;
+          const j = (await r.json()) as { total?: number; artifacts?: Artifact[] };
+          tot = j.total ?? tot;
+          const batch = j.artifacts ?? [];
+          for (const a of batch) {
+            if (pickImageUrl(a) !== null) found.push(a);
+          }
+          if (batch.length < 100) break; // catalog exhausted
+        }
+      } catch {
+        /* leave what we found */
+      }
+      if (alive) {
+        setWorks(found.slice(0, want));
+        setTotal(tot);
+        setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [slug, want]);
+  return { works, total, loading };
 }
 
 /**
@@ -264,28 +307,22 @@ export default function StoreInterior() {
   const { slug } = useParams<{ slug: string }>();
   const [, navigate] = useLocation();
   const [hovered, setHovered] = useState<Artifact | null>(null);
-  const orbitRef = useRef<any>(null);
 
   const { data: landing } = useGetAgentStorefront(slug, {
     query: { queryKey: getGetAgentStorefrontQueryKey(slug), retry: false },
   });
-  const { data: worksResp, isLoading } = useGetAgentStorefrontWorks(
-    slug,
-    { limit: 40, offset: 0 },
-    { query: { queryKey: getGetAgentStorefrontWorksQueryKey(slug, { limit: 40, offset: 0 }) } },
-  );
+  const { works: imageWorks, total, loading: isLoading } = useImageWorks(slug, MAX_WALL_WORKS);
   const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
     query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug), retry: false },
   });
 
-  const total = worksResp?.total ?? 0;
   const name = landing?.settings.displayName || landing?.agent.displayName || slug;
   const accent = landing?.settings.accentColor || "#8a6b3f";
 
   // The walls: the owner's own image works first, then curated pieces —
   // IMAGES ONLY. Anything without a displayable image stays in the list view.
   const wallItems: WallItem[] = useMemo(() => {
-    const own: WallItem[] = (worksResp?.artifacts ?? []).map((w) => ({ work: w, curatedBy: null }));
+    const own: WallItem[] = imageWorks.map((w) => ({ work: w, curatedBy: null }));
     const curated: WallItem[] = (listingsResp?.listings ?? []).map((l) => ({
       work: l.artifact,
       curatedBy: l.artifact.creatorName ?? "another agent",
@@ -294,7 +331,7 @@ export default function StoreInterior() {
     return [...own, ...curated.filter((i) => !seen.has(i.work.id))]
       .filter((i) => pickImageUrl(i.work) !== null)
       .slice(0, MAX_WALL_WORKS);
-  }, [worksResp, listingsResp]);
+  }, [imageWorks, listingsResp]);
 
   const curatedCount = listingsResp?.listings?.length ?? 0;
   const slots = useMemo(() => wallSlots(wallItems.length), [wallItems.length]);
@@ -346,13 +383,13 @@ export default function StoreInterior() {
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        WASD to walk · Drag to look · Click a piece · R/F up-down
+        WASD to walk · Drag to look · Click a piece · EXIT door to leave
       </div>
 
       <Canvas
         className="!absolute inset-0"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-        camera={{ position: [0, 3.0, 7.5], fov: 55 }}
+        camera={{ position: [0, 2.2, 7.2], fov: 62 }}
         dpr={[1, 1.5]}
         gl={{ antialias: true }}
       >
@@ -368,11 +405,11 @@ export default function StoreInterior() {
         <AimedSpot position={[4.5, 7.4, -6]} target={[9.5, 3, -6]} angle={0.9} penumbra={0.7} intensity={70} color="#ffedcb" />
         <pointLight position={[0, 6.5, 4]} intensity={28} distance={26} color="#ffe9c8" />
 
-        <OrbitControls ref={orbitRef} target={[0, 2.9, -6]} minDistance={3} maxDistance={16} maxPolarAngle={Math.PI / 2 - 0.02} />
-        <WasdMove
-          controls={orbitRef}
-          speed={9}
-          bounds={{ minX: -8.8, maxX: 8.8, minZ: -13.8, maxZ: 8.6, minY: 1.4, maxY: 6.8 }}
+        {/* First-person: drag looks from where you stand, WASD walks. */}
+        <FirstPersonRig
+          eyeHeight={2.2}
+          speed={8}
+          bounds={{ minX: -8.8, maxX: 8.8, minZ: -13.8, maxZ: 8.6, minY: 1.7, maxY: 6.8 }}
         />
 
         {/* Floor — oak planks */}
@@ -413,11 +450,59 @@ export default function StoreInterior() {
           <planeGeometry args={[6, 2.8]} />
           <meshStandardMaterial map={wallTex} roughness={0.92} />
         </mesh>
-        {/* Daylight spilling through the entry */}
-        <mesh position={[0, 2.5, 9.55]} rotation={[0, Math.PI, 0]}>
-          <planeGeometry args={[5.9, 5]} />
-          <meshStandardMaterial color="#dfe8ee" emissive="#cfdde8" emissiveIntensity={0.55} />
-        </mesh>
+        {/* THE WAY OUT — glass doors in the entry opening with a lit EXIT
+            sign. Click anywhere on it to step back onto the street. */}
+        <group
+          onClick={(e) => {
+            // A look-drag ending on the door is not a click.
+            if (((e as unknown as { delta?: number }).delta ?? 0) > 5) return;
+            e.stopPropagation?.();
+            navigate("/city");
+          }}
+          onPointerOver={() => (document.body.style.cursor = "pointer")}
+          onPointerOut={() => (document.body.style.cursor = "auto")}
+        >
+          {/* Daylight through the glass */}
+          <mesh position={[0, 2.5, 9.45]} rotation={[0, Math.PI, 0]}>
+            <planeGeometry args={[5.9, 5]} />
+            <meshStandardMaterial color="#dfe8ee" emissive="#cfdde8" emissiveIntensity={0.55} />
+          </mesh>
+          {/* Door frame + double glass doors */}
+          {[-1.5, 1.5].map((x) => (
+            <group key={x} position={[x, 0, 9.35]}>
+              <mesh position={[0, 2.2, 0]} rotation={[0, Math.PI, 0]}>
+                <planeGeometry args={[2.6, 4.4]} />
+                <meshPhysicalMaterial color="#9fb4bd" transparent opacity={0.32} roughness={0.08} metalness={0.1} side={THREE.DoubleSide} />
+              </mesh>
+              <mesh position={[x < 0 ? 1.25 : -1.25, 2.2, 0]}>
+                <boxGeometry args={[0.1, 4.4, 0.08]} />
+                <meshStandardMaterial color="#33302b" metalness={0.5} roughness={0.5} />
+              </mesh>
+              {/* Push bar */}
+              <mesh position={[x < 0 ? 0.9 : -0.9, 2.05, -0.08]} rotation={[0, 0, Math.PI / 2]}>
+                <cylinderGeometry args={[0.035, 0.035, 1.0, 8]} />
+                <meshStandardMaterial color="#b8b3a8" metalness={0.8} roughness={0.3} />
+              </mesh>
+            </group>
+          ))}
+          <mesh position={[0, 4.5, 9.35]}>
+            <boxGeometry args={[6.1, 0.16, 0.14]} />
+            <meshStandardMaterial color="#2c2a26" metalness={0.5} roughness={0.5} />
+          </mesh>
+          {/* Lit EXIT sign over the doors */}
+          <mesh position={[0, 4.95, 9.3]}>
+            <boxGeometry args={[1.5, 0.55, 0.16]} />
+            <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
+          </mesh>
+          <Suspense fallback={null}>
+            <Text position={[0, 4.95, 9.2]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+              EXIT
+            </Text>
+            <Text position={[0, 1.15, 9.25]} rotation={[0, Math.PI, 0]} fontSize={0.16} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+              click to return to the street
+            </Text>
+          </Suspense>
+        </group>
 
         {/* Baseboards + crown */}
         {[
