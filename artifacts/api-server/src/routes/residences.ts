@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { residenceUnitsTable, agentsTable } from "@workspace/db/schema";
 import { asc, eq, isNull, and, sql } from "drizzle-orm";
 import { getOptionalAuth, canMutate } from "../middlewares/requireAuth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -24,20 +25,36 @@ const router: IRouter = Router();
 const LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
 router.get("/residences/units", async (_req, res) => {
-  const rows = await db
-    .select({
-      id: residenceUnitsTable.id,
-      floor: residenceUnitsTable.floor,
-      letter: residenceUnitsTable.letter,
-      tier: residenceUnitsTable.tier,
-      claimedAt: residenceUnitsTable.claimedAt,
-      agentId: residenceUnitsTable.agentId,
-      agentSlug: agentsTable.slug,
-      agentName: agentsTable.displayName,
-    })
-    .from(residenceUnitsTable)
-    .leftJoin(agentsTable, eq(residenceUnitsTable.agentId, agentsTable.id))
-    .orderBy(asc(residenceUnitsTable.floor), asc(residenceUnitsTable.letter));
+  let rows;
+  try {
+    rows = await db
+      .select({
+        id: residenceUnitsTable.id,
+        floor: residenceUnitsTable.floor,
+        letter: residenceUnitsTable.letter,
+        tier: residenceUnitsTable.tier,
+        claimedAt: residenceUnitsTable.claimedAt,
+        agentId: residenceUnitsTable.agentId,
+        agentSlug: agentsTable.slug,
+        agentName: agentsTable.displayName,
+      })
+      .from(residenceUnitsTable)
+      .leftJoin(agentsTable, eq(residenceUnitsTable.agentId, agentsTable.id))
+      .orderBy(asc(residenceUnitsTable.floor), asc(residenceUnitsTable.letter));
+  } catch (e) {
+    // This endpoint went dark in production once and reported nothing but
+    // "Internal server error", which cost a deploy cycle to diagnose. A failure
+    // here is almost always the schema, not the request: log what Postgres
+    // actually said, and hand back its error code so the next occurrence is
+    // readable from the outside. 42P01 = table missing, 42703 = column missing.
+    const err = e as { message?: string; code?: string; detail?: string };
+    logger.error(
+      { code: err.code, detail: err.detail, message: err.message },
+      "residences/units query failed — check residence_units exists and matches the schema",
+    );
+    res.status(500).json({ error: "residence floor plan unavailable", code: err.code ?? "unknown" });
+    return;
+  }
 
   // Occupancy is public (a nameplate on a door is public by nature); the
   // resident's numeric agent id is not needed by the city and stays out.
