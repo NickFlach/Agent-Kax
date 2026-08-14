@@ -26,7 +26,7 @@ const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF
  * face is ≈±12.25). The alleys run down the gap at ±10.
  */
 
-export const ALLEY_X = 10;
+export const ALLEY_X = 11;
 
 /** Service alley behind one shop row. `side` is -1 for west, +1 for east. */
 export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; lit: boolean }) {
@@ -41,7 +41,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
     const out: Array<{ z: number; kind: "dumpster" | "crates" | "pipes" | "escape" | "lamp" }> = [];
     const kinds = ["dumpster", "escape", "crates", "lamp", "pipes", "dumpster", "escape", "crates"] as const;
     let i = 0;
-    for (let z = 2; z > depth - 4; z -= 5.5 + (i % 3)) {
+    for (let z = 2; z > depth - 4; z -= 8 + (i % 3) * 1.5) {
       out.push({ z, kind: kinds[i % kinds.length]! });
       i++;
     }
@@ -52,16 +52,16 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
     <group>
       {/* Alley floor — wet asphalt, a little lower than the sidewalks */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ALLEY_X * side, 0.1, zMid]} receiveShadow>
-        <planeGeometry args={[4.2, length]} />
+        <planeGeometry args={[6.2, length]} />
         <meshStandardMaterial map={ground} roughness={0.72} metalness={0.06} />
       </mesh>
 
       {/* Backs of the shops (inner wall) and the block behind (outer wall) */}
-      <mesh position={[(ALLEY_X - 2.1) * side, 3.4, zMid]} rotation={[0, -side * Math.PI / 2, 0]} receiveShadow>
+      <mesh position={[(ALLEY_X - 3.1) * side, 3.4, zMid]} rotation={[0, -side * Math.PI / 2, 0]} receiveShadow>
         <planeGeometry args={[length, 6.8]} />
         <meshStandardMaterial map={wall} roughness={0.95} />
       </mesh>
-      <mesh position={[(ALLEY_X + 2.1) * side, 4.6, zMid]} rotation={[0, side * Math.PI / 2, 0]} receiveShadow>
+      <mesh position={[(ALLEY_X + 3.1) * side, 4.6, zMid]} rotation={[0, side * Math.PI / 2, 0]} receiveShadow>
         <planeGeometry args={[length, 9.2]} />
         <meshStandardMaterial map={backWall} roughness={0.95} />
       </mesh>
@@ -69,7 +69,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
       {props.map((p, i) => (
         <group key={i} position={[ALLEY_X * side, 0.1, p.z]}>
           {p.kind === "dumpster" && (
-            <group position={[-1.1 * side, 0, 0]} rotation={[0, side * 0.12, 0]}>
+            <group position={[-1.9 * side, 0, 0]} rotation={[0, side * 0.12, 0]}>
               <mesh position={[0, 0.62, 0]} castShadow receiveShadow>
                 <boxGeometry args={[1.5, 1.24, 1.0]} />
                 <meshStandardMaterial color={i % 2 ? "#2f4a3a" : "#3a3f4a"} roughness={0.85} metalness={0.25} />
@@ -81,7 +81,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
             </group>
           )}
           {p.kind === "crates" && (
-            <group position={[-1.35 * side, 0, 0]}>
+            <group position={[-2.2 * side, 0, 0]}>
               {[0, 1, 2].map((k) => (
                 <mesh key={k} position={[(k % 2) * 0.1, 0.28 + k * 0.52, (k % 2) * 0.2]} rotation={[0, k * 0.3, 0]} castShadow>
                   <boxGeometry args={[0.86, 0.5, 0.7]} />
@@ -91,7 +91,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
             </group>
           )}
           {p.kind === "pipes" && (
-            <group position={[-1.95 * side, 0, 0]}>
+            <group position={[-2.85 * side, 0, 0]}>
               {[0.5, 0.95].map((off) => (
                 <mesh key={off} position={[0, 3.2, 0]} rotation={[0, 0, 0]}>
                   <cylinderGeometry args={[0.09, 0.09, 6.4, 8]} />
@@ -105,7 +105,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
             </group>
           )}
           {p.kind === "escape" && (
-            <group position={[-1.95 * side, 0, 0]}>
+            <group position={[-2.85 * side, 0, 0]}>
               {[2.6, 4.6].map((y) => (
                 <group key={y} position={[0, y, 0]}>
                   <mesh position={[0.55 * side, 0, 0]} castShadow>
@@ -126,7 +126,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
           )}
           {/* A steel service door in the shop's back wall, with its bulb */}
           {(p.kind === "lamp" || p.kind === "escape") && (
-            <group position={[-2.03 * side, 0, 1.4]}>
+            <group position={[-2.95 * side, 0, 1.4]}>
               <mesh position={[0, 1.15, 0]} rotation={[0, -side * Math.PI / 2, 0]}>
                 <planeGeometry args={[1.05, 2.3]} />
                 <meshStandardMaterial color="#3c4048" metalness={0.4} roughness={0.7} />
@@ -160,11 +160,11 @@ export function SideStreet({ z, lit }: { z: number; lit: boolean }) {
     <group position={[0, 0, z]}>
       {/* Roadway running east-west, meeting the alleys at both ends */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
-        <planeGeometry args={[26, 4.6]} />
+        <planeGeometry args={[54, 7.2]} />
         <meshStandardMaterial map={road} roughness={0.96} />
       </mesh>
       {/* Dashes down its centre */}
-      {[-11, -8.5, -6, 6, 8.5, 11].map((x) => (
+      {[-24, -20, -16, -11, -8.5, 8.5, 11, 16, 20, 24].map((x) => (
         <mesh key={x} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.016, 0]}>
           <planeGeometry args={[1.1, 0.09]} />
           <meshStandardMaterial color="#cfc9b8" roughness={0.9} />
@@ -172,8 +172,8 @@ export function SideStreet({ z, lit }: { z: number; lit: boolean }) {
       ))}
       {/* Corner sidewalks either side of the crossing */}
       {[-1, 1].map((s) => (
-        <mesh key={s} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, s * 3.1]} receiveShadow>
-          <planeGeometry args={[26, 1.6]} />
+        <mesh key={s} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, s * 4.5]} receiveShadow>
+          <planeGeometry args={[54, 1.8]} />
           <meshStandardMaterial map={walk} roughness={0.95} />
         </mesh>
       ))}

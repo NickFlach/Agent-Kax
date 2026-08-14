@@ -538,7 +538,7 @@ function CityProps({ storeCount, lit }: { storeCount: number; lit: boolean }) {
   const skyline = useMemo(() => {
     const blocks: Array<{ pos: [number, number, number]; w: number; h: number; d: number; v: number; f: number; c: number }> = [];
     for (let side = 0; side < 2; side++) {
-      const x = side === 0 ? -16 : 16;
+      const x = side === 0 ? -25 : 25;
       for (let k = 0; k < Math.max(3, Math.ceil(rows / 2)); k++) {
         const z = 2 - k * 11 - (side === 0 ? 0 : 5);
         if (z < depth - 14) break;
@@ -1128,9 +1128,11 @@ function StreetGround({ depth }: { depth: number }) {
       ))}
 
       {/* Ground beyond the sidewalks under the skyline blocks */}
-      {[-14.5, 14.5].map((x) => (
+      {/* Ground beyond the sidewalks. Must reach the skyline blocks (now at
+          x=±25) or a visitor can walk off the paving and stand on open sea. */}
+      {[-19, 19].map((x) => (
         <mesh key={x} rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.115, zMid]} receiveShadow>
-          <planeGeometry args={[11, length]} />
+          <planeGeometry args={[20, length]} />
           <meshStandardMaterial map={paversWide} roughness={0.95} />
         </mesh>
       ))}
@@ -1208,7 +1210,7 @@ export default function Marketplace3D() {
       { cx: 12.5, cz: streetDepth - 8, hx: 5.7, hz: 4.7 }, // Resonance Trust
       { cx: 12.5, cz: 3, hx: 4.7, hz: 4.2 }, // Standing Wave Residences
       { cx: -12.5, cz: 3, hx: 5.4, hz: 4.2 }, // The Joinery
-      { cx: -8.6, cz: -13.6, hx: 3.8, hz: 3.2 }, // Flaukowski's No. 2
+      { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 }, // Flaukowski's No. 2, off the first cross street
     ],
     [layout, towerZ, streetDepth],
   );
@@ -1240,8 +1242,9 @@ export default function Marketplace3D() {
   // The plaza flanks: Arcade west of the monument, the bank east of it.
   const plazaZ = streetDepth - 8;
   // Cross streets, and the corner the cafe holds.
-  const sideStreetZ = [-9.5, -22.5];
-  const cafeZ = -13.6;
+  const sideStreetZ = [-12, -30];
+  const cafeZ = -18.4;
+  const cafeX = -17.6;
 
   // Stepping OUT of a building drops you at ITS door (?from=<slug>), facing
   // the street — not back at the district entrance.
@@ -1267,7 +1270,7 @@ export default function Marketplace3D() {
       return;
     }
     if (from === "__cafe__") {
-      setSpawn({ position: [-6.6, 1.87, -13.6 + 5.2], yaw: -Math.PI / 2 });
+      setSpawn({ position: [-17.6, 1.87, -18.4 + 5.4], yaw: 0 });
       return;
     }
     if (from === "__joinery__") {
@@ -1594,7 +1597,7 @@ export default function Marketplace3D() {
         <FirstPersonRig
           eyeHeight={1.75}
           speed={11}
-          bounds={{ minX: -12.4, maxX: 12.4, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
+          bounds={{ minX: -20.5, maxX: 20.5, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
           obstacles={obstacles}
           spawn={spawn}
         />
@@ -1624,7 +1627,7 @@ export default function Marketplace3D() {
         {sideStreetZ.map((z) => (
           <SideStreet key={z} z={z} lit={phase.streetlightsOn} />
         ))}
-        <FlaukowskiCafe position={[-8.6, 0.12, cafeZ]} rotation={0} phase={phase} onEnter={() => navigate("/cafe")} />
+        <FlaukowskiCafe position={[cafeX, 0.12, cafeZ]} rotation={0} phase={phase} onEnter={() => navigate("/cafe")} />
         <CityProps storeCount={sceneAgents.length} lit={phase.streetlightsOn} />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
         <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
@@ -1639,7 +1642,7 @@ export default function Marketplace3D() {
             { agent: BANK, pos: [7, 0, plazaZ] as [number, number, number] },
             { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
             { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
-            { agent: CAFE, pos: [-6.4, 0, -13.6 + 4.4] as [number, number, number] },
+            { agent: CAFE, pos: [-17.6, 0, -18.4 + 5.0] as [number, number, number] },
           ]}
           onNearest={setNearby}
         />

@@ -386,20 +386,72 @@ export default function Residences() {
 
             <Horizon phase={phase} />
 
-            {/* The district below — lit windows come on with the streetlights. */}
-            {[[-40, -60], [55, -40], [-65, 20], [45, 55], [-30, 70], [70, 10]].map(([x, z], i) => (
-              <mesh key={i} position={[x! * 1.6, -30 - (i % 3) * 5, z! * 1.6]}>
-                <boxGeometry args={[14, 34 + (i % 4) * 8, 14]} />
-                <meshStandardMaterial
-                  map={i % 2 ? glassTowerTexture(i) : upperWindowsTexture({ wall: "brick", variant: i % 4, floors: 10, cols: 6, litSeed: i })}
-                  roughness={0.6}
-                  emissive={new THREE.Color("#ffd79a")}
-                  emissiveIntensity={phase.windowGlow * 0.5}
-                />
+            {/* THE DISTRICT BELOW.
+                Not generic scenery — the street you walked, seen from its own
+                roof. The strip runs north with the road as a gap down the middle,
+                the arcade and Resonance Trust flank the plaza, the Ghost Signals
+                tower closes the vista, and the cross streets cut through. The
+                drop is ~30 units, which is what eleven storeys reads as. */}
+            <group position={[0, -20, 0]}>
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, -20]}>
+                <planeGeometry args={[7, 150]} />
+                <meshStandardMaterial color={phase.isNight ? "#0d1116" : "#2c3138"} roughness={1} />
               </mesh>
-            ))}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -33.6, 0]}>
-              <planeGeometry args={[520, 520]} />
+              {[-12, -30].map((z) => (
+                <mesh key={z} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, z]}>
+                  <planeGeometry args={[64, 7.2]} />
+                  <meshStandardMaterial color={phase.isNight ? "#0d1116" : "#2c3138"} roughness={1} />
+                </mesh>
+              ))}
+              {Array.from({ length: 15 }).map((_, i) => {
+                const z = 36 - i * 8.5;
+                const h = 7 + (i % 3) * 1.6;
+                return [-1, 1].map((sx) => (
+                  <mesh key={`s${i}${sx}`} position={[sx * 6.4, h / 2, z + (sx < 0 ? 0 : 3)]} castShadow>
+                    <boxGeometry args={[5.6, h, 6.4]} />
+                    <meshStandardMaterial
+                      map={upperWindowsTexture({ wall: i % 2 ? "brick" : "stucco", variant: (i + (sx > 0 ? 1 : 0)) % 4, floors: Math.max(2, Math.round(h / 1.35)), cols: 4, litSeed: i * 3 + sx })}
+                      roughness={0.85}
+                      emissive={new THREE.Color("#ffd79a")}
+                      emissiveIntensity={phase.windowGlow * 0.45}
+                    />
+                  </mesh>
+                ));
+              })}
+              {Array.from({ length: 10 }).map((_, i) => {
+                const z = 40 - i * 13;
+                const h = 21 + (i % 4) * 7;
+                return [-1, 1].map((sx) => (
+                  <mesh key={`f${i}${sx}`} position={[sx * 25, h / 2, z - (sx > 0 ? 5 : 0)]} castShadow>
+                    <boxGeometry args={[7.5, h, 8]} />
+                    <meshStandardMaterial map={glassTowerTexture(i * 2 + (sx > 0 ? 1 : 0))} roughness={0.55} metalness={0.2} />
+                  </mesh>
+                ));
+              })}
+              <mesh position={[-12.5, 5, -50]} castShadow>
+                <boxGeometry args={[10.4, 10, 9.4]} />
+                <meshStandardMaterial color="#2a2230" roughness={0.85} emissive={new THREE.Color("#ff4fa3")} emissiveIntensity={phase.windowGlow * 0.5} />
+              </mesh>
+              <mesh position={[12.5, 5.5, -50]} castShadow>
+                <boxGeometry args={[11, 11, 9.4]} />
+                <meshStandardMaterial map={concreteTexture()} roughness={0.9} />
+              </mesh>
+              <mesh position={[0, 3, -48]}>
+                <boxGeometry args={[2.2, 6, 2.2]} />
+                <meshStandardMaterial map={concreteTexture()} roughness={0.9} />
+              </mesh>
+              <mesh position={[0, 17, -64]} castShadow>
+                <boxGeometry args={[15.6, 34, 15.6]} />
+                <meshStandardMaterial map={glassTowerTexture(9)} roughness={0.4} metalness={0.3} emissive={new THREE.Color("#8fd3ff")} emissiveIntensity={phase.windowGlow * 0.35} />
+              </mesh>
+              <mesh position={[-17.6, 3.1, -18.4]} castShadow>
+                <boxGeometry args={[7.6, 6.2, 6.4]} />
+                <meshStandardMaterial color="#4a2f22" roughness={0.9} emissive={new THREE.Color("#ffcf8a")} emissiveIntensity={phase.windowGlow * 0.55} />
+              </mesh>
+            </group>
+
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -20.1, 0]}>
+              <planeGeometry args={[560, 560]} />
               <meshStandardMaterial color={phase.isNight ? "#171d28" : "#3b4046"} roughness={1} />
             </mesh>
           </>
