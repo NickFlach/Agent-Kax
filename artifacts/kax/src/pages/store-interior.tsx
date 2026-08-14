@@ -712,6 +712,19 @@ export default function StoreInterior() {
 
   const openWork = (w: Artifact) => navigate(`/s/${slug}/artifacts/${w.id}`);
 
+  // Step up to a cabinet: the game takes over the screen in an arcade-chrome
+  // overlay (the apps are self-contained HTML — they run right here). Esc or
+  // STEP AWAY returns you to the store; keyboard goes to the game while open.
+  const [playing, setPlaying] = useState<Artifact | null>(null);
+  useEffect(() => {
+    if (!playing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Escape") setPlaying(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playing]);
+
   const floorTex = useMemo(() => repeated(woodFloorTexture(), 5, 8), []);
   const wallTex = useMemo(() => repeated(galleryWallTexture(), 6, 2), []);
   const ceilTex = useMemo(() => repeated(ceilingTexture(), 5, 8), []);
@@ -921,7 +934,8 @@ export default function StoreInterior() {
         </group>
 
         {/* The arcade corner — the store's live apps as playable cabinets,
-            lined up along the front wall flanking the entrance. */}
+            lined up along the front wall flanking the entrance. Clicking one
+            starts the game right here (overlay), not the artifact page. */}
         {apps.map((a, i) => (
           <ArcadeCabinet
             key={a.id}
@@ -929,7 +943,7 @@ export default function StoreInterior() {
             position={[[-7.2, -5.4, 7.2, 5.4][i] ?? -7.2 + i * 1.9, 0, 8.1]}
             rotation={Math.PI}
             seed={i}
-            onOpen={openWork}
+            onOpen={(w) => setPlaying(w)}
             onHover={setHovered}
           />
         ))}
@@ -972,6 +986,67 @@ export default function StoreInterior() {
           </Suspense>
         )}
       </Canvas>
+
+      {/* ── THE MACHINE, PLAYING ─────────────────────────────────────────
+          Click a cabinet and its game takes the screen: arcade-chrome
+          overlay with a marquee header, the self-contained HTML app in a
+          sandboxed iframe, and STEP AWAY (or Esc) to put the controller
+          down. Keyboard goes to the game while it has focus, so WASD stops
+          walking the room — exactly what you want mid-game. */}
+      {playing && (
+        <div className="absolute inset-0 z-40 flex flex-col bg-black/95" data-testid="arcade-overlay">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-[#3a2f14]" style={{ background: "linear-gradient(180deg,#1a1408,#0c0a04)" }}>
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-[#ffd23e] text-lg" aria-hidden>◉</span>
+              <span className="text-[#ffd23e] font-bold uppercase tracking-[0.25em] truncate" style={{ textShadow: "0 0 12px rgba(255,210,62,0.6)" }}>
+                {playing.title}
+              </span>
+              <span className="hidden sm:inline text-[9px] uppercase tracking-[0.3em] text-[#8f8468]">insert coin · free play</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {playing.publicUrl && (
+                <a
+                  href={playing.publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] uppercase tracking-widest text-[#8f8468] hover:text-[#ffd23e] border border-[#3a2f14] px-3 py-1.5"
+                >
+                  Full screen ↗
+                </a>
+              )}
+              <button
+                onClick={() => openWork(playing)}
+                className="text-[10px] uppercase tracking-widest text-[#8f8468] hover:text-[#ffd23e] border border-[#3a2f14] px-3 py-1.5"
+              >
+                Artifact
+              </button>
+              <button
+                onClick={() => setPlaying(null)}
+                className="text-[10px] uppercase tracking-widest text-black font-bold bg-[#ffd23e] hover:bg-[#ffe27a] px-3 py-1.5"
+                data-testid="button-step-away"
+              >
+                ✕ Step away
+              </button>
+            </div>
+          </div>
+          {playing.publicUrl ? (
+            <iframe
+              src={playing.publicUrl}
+              title={playing.title}
+              className="flex-1 w-full border-0 bg-black"
+              sandbox="allow-scripts allow-same-origin allow-pointer-lock"
+              allow="autoplay; fullscreen; gamepad"
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-[#8f8468] uppercase tracking-widest text-xs">
+              This machine has no playable build — try the artifact page.
+            </div>
+          )}
+          <div className="px-4 py-1.5 text-center text-[9px] uppercase tracking-[0.4em] text-[#5c543f] border-t border-[#3a2f14]">
+            esc to step away · click inside the screen to give the game your keyboard
+          </div>
+        </div>
+      )}
     </div>
   );
 }
