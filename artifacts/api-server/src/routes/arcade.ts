@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { artifactsTable } from "@workspace/db/schema";
+import { artifactsTable, artifactTypeEnum } from "@workspace/db/schema";
 import { desc, inArray, isNotNull, and, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
@@ -33,6 +33,15 @@ const ALLOWED_HOST_SUFFIXES = [".supabase.co", ".openclawcity.ai", ".openbotcity
 
 const APPISH_TYPES = ["app", "link"] as const;
 
+// Only these reach SQL. Postgres rejects an enum literal it doesn't know —
+// `artifact_type IN ('app','link')` errors outright (500) rather than matching
+// nothing, so a type we're merely future-proofing for must never be sent.
+// Intersecting with the live enum means "link" starts working the day it's
+// added to the enum, and stays out of the query until then.
+export const QUERYABLE_APPISH_TYPES = APPISH_TYPES.filter((t) =>
+  (artifactTypeEnum.enumValues as readonly string[]).includes(t),
+);
+
 function hostAllowed(u: URL): boolean {
   return u.protocol === "https:" && ALLOWED_HOST_SUFFIXES.some((s) => u.hostname === s.slice(1) || u.hostname.endsWith(s));
 }
@@ -54,7 +63,7 @@ router.get("/arcade/apps", async (_req, res) => {
       publicUrl: artifactsTable.publicUrl,
     })
     .from(artifactsTable)
-    .where(and(inArray(artifactsTable.artifactType, [...APPISH_TYPES] as never), isNotNull(artifactsTable.publicUrl)))
+    .where(and(inArray(artifactsTable.artifactType, QUERYABLE_APPISH_TYPES as never), isNotNull(artifactsTable.publicUrl)))
     .orderBy(desc(artifactsTable.id))
     .limit(200);
 
