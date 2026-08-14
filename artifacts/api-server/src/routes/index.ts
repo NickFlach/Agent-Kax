@@ -27,6 +27,7 @@ import floorRouter from "./floor";
 import predictionsRouter from "./predictions";
 import arcadeRouter from "./arcade";
 import showcaseRouter from "./showcase";
+import residencesRouter from "./residences";
 
 const router: IRouter = Router();
 
@@ -43,6 +44,7 @@ router.use(adminRouter);
 router.use(artifactsRouter);
 router.use(arcadeRouter);
 router.use(showcaseRouter);
+router.use(residencesRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);
