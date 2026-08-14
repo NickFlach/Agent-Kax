@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useParams, useLocation, Link } from "wouter";
@@ -41,6 +41,18 @@ function isPlayableVideo(a: Artifact): boolean {
 }
 
 /**
+ * An APP work — the city's live-HTML arcade games and tools. Explicit app-ish
+ * types count; bare `link` works count only when the URL looks like a hosted
+ * app (so "now on YouTube" links don't become arcade cabinets).
+ */
+function isAppWork(a: Artifact): boolean {
+  const t = String(a.artifactType);
+  if (/^(app|apps|arcade|game|html)$/i.test(t)) return !!a.publicUrl;
+  if (t === "link" && a.publicUrl) return /\.html?($|[?#])|\/(apps?|arcade|games?)\//i.test(a.publicUrl);
+  return false;
+}
+
+/**
  * The works feed is newest-first and an active agent's recent output can be
  * all text/audio (Kannaka: 31 text + 8 audio + 1 image in her latest 40 —
  * which is why her gallery hung a single painting). Page through the catalog
@@ -48,8 +60,9 @@ function isPlayableVideo(a: Artifact): boolean {
  * playable VIDEO works (the city's newest medium) — not just whatever
  * happened to be posted last.
  */
-function useWallWorks(slug: string, want: number, maxVideos = 4) {
+function useWallWorks(slug: string, want: number, maxVideos = 4, maxApps = 4) {
   const [works, setWorks] = useState<Artifact[]>([]);
+  const [apps, setApps] = useState<Artifact[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -58,16 +71,22 @@ function useWallWorks(slug: string, want: number, maxVideos = 4) {
       setLoading(true);
       const images: Artifact[] = [];
       const videos: Artifact[] = [];
+      const appWorks: Artifact[] = [];
       let tot = 0;
       try {
-        for (let page = 0; page < 8 && images.length + Math.min(videos.length, maxVideos) < want; page++) {
+        for (
+          let page = 0;
+          page < 8 && (images.length + Math.min(videos.length, maxVideos) < want || appWorks.length < maxApps);
+          page++
+        ) {
           const r = await fetch(`/api/storefront/by-agent/${encodeURIComponent(slug)}/works?limit=100&offset=${page * 100}`);
           if (!r.ok) break;
           const j = (await r.json()) as { total?: number; artifacts?: Artifact[] };
           tot = j.total ?? tot;
           const batch = j.artifacts ?? [];
           for (const a of batch) {
-            if (isPlayableVideo(a)) videos.push(a);
+            if (isAppWork(a)) appWorks.push(a);
+            else if (isPlayableVideo(a)) videos.push(a);
             else if (pickImageUrl(a) !== null) images.push(a);
           }
           if (batch.length < 100) break; // catalog exhausted
@@ -77,7 +96,9 @@ function useWallWorks(slug: string, want: number, maxVideos = 4) {
       }
       if (alive) {
         // Videos lead (they're the newest medium), then images fill the walls.
+        // Apps don't take wall slots — they stand on the floor as arcade cabinets.
         setWorks([...videos.slice(0, maxVideos), ...images].slice(0, want));
+        setApps(appWorks.slice(0, maxApps));
         setTotal(tot);
         setLoading(false);
       }
@@ -85,8 +106,8 @@ function useWallWorks(slug: string, want: number, maxVideos = 4) {
     return () => {
       alive = false;
     };
-  }, [slug, want, maxVideos]);
-  return { works, total, loading };
+  }, [slug, want, maxVideos, maxApps]);
+  return { works, apps, total, loading };
 }
 
 /**
@@ -327,6 +348,223 @@ function VideoFrame({
   );
 }
 
+// Classic cabinet liveries — marquee glow + side-art color, seeded per app.
+const CABINET_LIVERIES = [
+  { glow: "#ffd23e", side: "#8c2f2a" }, // amber marquee, red sides
+  { glow: "#6de1ff", side: "#1d3a5f" }, // ice blue
+  { glow: "#ff6ec7", side: "#3d1f4e" }, // magenta
+  { glow: "#7dff8a", side: "#1e4a2a" }, // phosphor green
+];
+
+/**
+ * An APP work as an old-school upright arcade cabinet: backlit marquee with
+ * the title, tilted CRT running an attract mode (INSERT COIN blinking, or the
+ * app's thumbnail behind scanlines), joystick + buttons, coin door. Click the
+ * cabinet to open the app's page and play.
+ */
+function ArcadeCabinet({
+  work,
+  position,
+  rotation,
+  seed,
+  onOpen,
+  onHover,
+}: {
+  work: Artifact;
+  position: [number, number, number];
+  rotation: number;
+  seed: number;
+  onOpen: (w: Artifact) => void;
+  onHover: (w: Artifact | null) => void;
+}) {
+  const livery = CABINET_LIVERIES[seed % CABINET_LIVERIES.length];
+  const [thumb, setThumb] = useState<HTMLImageElement | null>(null);
+  const blink = useRef(0);
+
+  const [canvas, ctx, tex] = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = 256;
+    c.height = 200;
+    const cx = c.getContext("2d")!;
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return [c, cx, t] as const;
+  }, []);
+
+  // Try the app's thumbnail for the screen; fall back to pure attract mode.
+  useEffect(() => {
+    const url = pickImageUrl(work);
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => setThumb(img);
+    img.src = url;
+  }, [work]);
+
+  // CRT attract mode, redrawn at ~1.6 Hz for the INSERT COIN blink.
+  useFrame((s) => {
+    if (s.clock.elapsedTime - blink.current < 0.6) return;
+    blink.current = s.clock.elapsedTime;
+    const on = Math.floor(s.clock.elapsedTime / 0.6) % 2 === 0;
+    ctx.fillStyle = "#050507";
+    ctx.fillRect(0, 0, 256, 200);
+    if (thumb) {
+      // Cover-fit the thumbnail, then rake scanlines over it.
+      const ar = thumb.width / thumb.height;
+      const tw = ar > 256 / 150 ? 150 * ar : 256;
+      const th = ar > 256 / 150 ? 150 : 256 / ar;
+      ctx.drawImage(thumb, (256 - tw) / 2, 14 + (150 - th) / 2, tw, th);
+    } else {
+      // Pixel-invader rows, seeded so each cabinet has its own creatures.
+      let h = seed * 2654435761;
+      const rnd = () => {
+        h = (h * 1664525 + 1013904223) >>> 0;
+        return h / 4294967296;
+      };
+      ctx.fillStyle = livery.glow;
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 6; col++) {
+          const bx = 28 + col * 36;
+          const by = 34 + row * 30;
+          for (let px = 0; px < 5; px++) {
+            for (let py = 0; py < 4; py++) {
+              if (rnd() > 0.45) ctx.fillRect(bx + px * 4, by + py * 4, 3, 3);
+            }
+          }
+        }
+      }
+    }
+    // Title strip
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, 256, 14);
+    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = livery.glow;
+    ctx.fillText(work.title.slice(0, 34).toUpperCase(), 6, 11);
+    // Blinking INSERT COIN + score line
+    if (on) {
+      ctx.font = "bold 16px monospace";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText("INSERT COIN", 76, 180);
+    }
+    ctx.font = "10px monospace";
+    ctx.fillStyle = "#8fa0ad";
+    ctx.fillText("1UP  00", 10, 196);
+    ctx.fillText("HI  51137", 180, 196);
+    // Scanlines
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    for (let y = 0; y < 200; y += 3) ctx.fillRect(0, y, 256, 1);
+    tex.needsUpdate = true;
+  });
+
+  const body = "#141417";
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={(e) => {
+        if (((e as unknown as { delta?: number }).delta ?? 0) > 5) return;
+        e.stopPropagation?.();
+        onOpen(work);
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation?.();
+        onHover(work);
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerOut={() => {
+        onHover(null);
+        document.body.style.cursor = "auto";
+      }}
+    >
+      {/* Pedestal + coin door */}
+      <mesh position={[0, 0.28, 0]} castShadow>
+        <boxGeometry args={[0.8, 0.56, 0.85]} />
+        <meshStandardMaterial color={body} roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 0.3, 0.428]}>
+        <planeGeometry args={[0.3, 0.24]} />
+        <meshStandardMaterial color="#26262b" metalness={0.6} roughness={0.35} />
+      </mesh>
+      {[-0.06, 0.06].map((x) => (
+        <mesh key={x} position={[x, 0.34, 0.433]}>
+          <planeGeometry args={[0.05, 0.09]} />
+          <meshStandardMaterial color="#b8b3a8" metalness={0.8} roughness={0.3} />
+        </mesh>
+      ))}
+      {/* Body */}
+      <mesh position={[0, 1.02, -0.02]} castShadow>
+        <boxGeometry args={[0.76, 0.94, 0.8]} />
+        <meshStandardMaterial color={body} roughness={0.6} />
+      </mesh>
+      {/* Side art */}
+      {[-0.395, 0.395].map((x) => (
+        <mesh key={x} position={[x, 1.05, -0.02]}>
+          <boxGeometry args={[0.025, 1.62, 0.82]} />
+          <meshStandardMaterial color={livery.side} roughness={0.55} />
+        </mesh>
+      ))}
+      {/* Control deck: joystick + buttons */}
+      <group position={[0, 1.28, 0.3]} rotation={[-0.42, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.76, 0.07, 0.4]} />
+          <meshStandardMaterial color="#1d1d21" roughness={0.5} />
+        </mesh>
+        <mesh position={[-0.18, 0.09, 0.02]}>
+          <cylinderGeometry args={[0.016, 0.016, 0.12, 8]} />
+          <meshStandardMaterial color="#2b2b2e" metalness={0.6} roughness={0.4} />
+        </mesh>
+        <mesh position={[-0.18, 0.16, 0.02]}>
+          <sphereGeometry args={[0.038, 12, 10]} />
+          <meshStandardMaterial color="#c62828" roughness={0.35} />
+        </mesh>
+        {[0.06, 0.17, 0.28].map((x, i) => (
+          <mesh key={x} position={[x, 0.045, 0.04]}>
+            <cylinderGeometry args={[0.032, 0.032, 0.025, 12]} />
+            <meshStandardMaterial
+              color={["#c62828", "#f9a825", "#f5f0e6"][i]}
+              emissive={["#c62828", "#f9a825", "#f5f0e6"][i]}
+              emissiveIntensity={0.25}
+              roughness={0.4}
+            />
+          </mesh>
+        ))}
+      </group>
+      {/* CRT: bezel + attract screen, tilted back like the real thing */}
+      <group position={[0, 1.62, 0.18]} rotation={[-0.2, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.68, 0.58, 0.08]} />
+          <meshStandardMaterial color="#0c0c0e" roughness={0.45} />
+        </mesh>
+        <mesh position={[0, 0, 0.045]}>
+          <planeGeometry args={[0.57, 0.46]} />
+          <meshBasicMaterial map={tex} toneMapped={false} />
+        </mesh>
+      </group>
+      {/* Marquee — backlit title */}
+      <group position={[0, 2.06, 0.14]} rotation={[0.18, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.8, 0.3, 0.12]} />
+          <meshStandardMaterial color={body} roughness={0.55} />
+        </mesh>
+        <mesh position={[0, 0, 0.065]}>
+          <planeGeometry args={[0.74, 0.24]} />
+          <meshStandardMaterial color={livery.glow} emissive={livery.glow} emissiveIntensity={0.85} toneMapped={false} />
+        </mesh>
+        <Suspense fallback={null}>
+          <Text position={[0, 0, 0.075]} fontSize={0.075} color="#141417" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={0.7} textAlign="center">
+            {work.title.length > 20 ? work.title.slice(0, 19) + "…" : work.title.toUpperCase()}
+          </Text>
+        </Suspense>
+      </group>
+      {/* Cap */}
+      <mesh position={[0, 2.24, -0.05]}>
+        <boxGeometry args={[0.8, 0.06, 0.7]} />
+        <meshStandardMaterial color={body} roughness={0.6} />
+      </mesh>
+    </group>
+  );
+}
+
 function wallSlots(count: number) {
   const slots: Array<{ pos: [number, number, number]; rot: [number, number, number] }> = [];
   const spread = (n: number, a: number, b: number) =>
@@ -447,7 +685,7 @@ export default function StoreInterior() {
   const { data: landing } = useGetAgentStorefront(slug, {
     query: { queryKey: getGetAgentStorefrontQueryKey(slug), retry: false },
   });
-  const { works: imageWorks, total, loading: isLoading } = useWallWorks(slug, MAX_WALL_WORKS);
+  const { works: imageWorks, apps, total, loading: isLoading } = useWallWorks(slug, MAX_WALL_WORKS);
   const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
     query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug), retry: false },
   });
@@ -498,7 +736,7 @@ export default function StoreInterior() {
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
             {isLoading
               ? "hanging the walls…"
-              : `${total} work${total === 1 ? "" : "s"}${curatedCount ? ` · ${curatedCount} curated` : ""} · ${wallItems.length} on the walls`}
+              : `${total} work${total === 1 ? "" : "s"}${curatedCount ? ` · ${curatedCount} curated` : ""} · ${wallItems.length} on the walls${apps.length ? ` · ${apps.length} arcade` : ""}`}
           </p>
           <div className="mt-4 border-t border-border pt-3 min-h-[2.5rem]">
             {hovered ? (
@@ -525,7 +763,7 @@ export default function StoreInterior() {
       <Canvas
         className="!absolute inset-0"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-        camera={{ position: [0, 2.2, 7.2], fov: 62 }}
+        camera={{ position: [0, 2.2, 5.5], fov: 62 }}
         dpr={[1, 1.5]}
         gl={{ antialias: true }}
       >
@@ -681,6 +919,23 @@ export default function StoreInterior() {
         <group position={[3, 0, 6.5]} rotation={[0, -0.6, 0]}>
           <NpcFigure color={accent} seed={7} />
         </group>
+
+        {/* The arcade corner — the store's live apps as playable cabinets,
+            lined up along the front wall flanking the entrance. */}
+        {apps.map((a, i) => (
+          <ArcadeCabinet
+            key={a.id}
+            work={a}
+            position={[[-7.2, -5.4, 7.2, 5.4][i] ?? -7.2 + i * 1.9, 0, 8.1]}
+            rotation={Math.PI}
+            seed={i}
+            onOpen={openWork}
+            onHover={setHovered}
+          />
+        ))}
+        {apps.length > 0 && (
+          <pointLight position={[apps.length > 2 ? 0 : -6.3, 3.4, 7.2]} intensity={14} distance={10} color="#ffd9ac" />
+        )}
 
         {/* The works — images and playing videos, honestly proportioned */}
         {wallItems.map((it, i) =>
