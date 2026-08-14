@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { Horizon } from "@/components/horizon";
+import { BackAlley, SideStreet, FlaukowskiCafe, ALLEY_X } from "@/components/city-back-streets";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
@@ -1207,6 +1208,7 @@ export default function Marketplace3D() {
       { cx: 12.5, cz: streetDepth - 8, hx: 5.7, hz: 4.7 }, // Resonance Trust
       { cx: 12.5, cz: 3, hx: 4.7, hz: 4.2 }, // Standing Wave Residences
       { cx: -12.5, cz: 3, hx: 5.4, hz: 4.2 }, // The Joinery
+      { cx: -8.6, cz: -13.6, hx: 3.8, hz: 3.2 }, // Flaukowski's No. 2
     ],
     [layout, towerZ, streetDepth],
   );
@@ -1227,12 +1229,19 @@ export default function Marketplace3D() {
     () => ({ slug: "__res__", name: "Standing Wave Residences", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
+  const CAFE: SceneAgent = useMemo(
+    () => ({ slug: "__cafe__", name: "Flaukowski's · No. 2", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
   const JOINERY: SceneAgent = useMemo(
     () => ({ slug: "__joinery__", name: "The Joinery", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
   // The plaza flanks: Arcade west of the monument, the bank east of it.
   const plazaZ = streetDepth - 8;
+  // Cross streets, and the corner the cafe holds.
+  const sideStreetZ = [-9.5, -22.5];
+  const cafeZ = -13.6;
 
   // Stepping OUT of a building drops you at ITS door (?from=<slug>), facing
   // the street — not back at the district entrance.
@@ -1257,6 +1266,10 @@ export default function Marketplace3D() {
       setSpawn({ position: [6.8, 1.75, 3], yaw: Math.PI / 2 });
       return;
     }
+    if (from === "__cafe__") {
+      setSpawn({ position: [-6.6, 1.87, -13.6 + 5.2], yaw: -Math.PI / 2 });
+      return;
+    }
     if (from === "__joinery__") {
       setSpawn({ position: [-6.6, 1.75, 3], yaw: -Math.PI / 2 });
       return;
@@ -1277,8 +1290,10 @@ export default function Marketplace3D() {
           ? "/bank"
           : a.slug === "__res__"
             ? "/residences"
-            : a.slug === "__joinery__"
-              ? "/furniture"
+            : a.slug === "__cafe__"
+              ? "/cafe"
+              : a.slug === "__joinery__"
+                ? "/furniture"
               : a.source === "constellation"
                 ? `/constellation/${a.slug}`
                 : `/s/${a.slug}/room`;
@@ -1579,7 +1594,7 @@ export default function Marketplace3D() {
         <FirstPersonRig
           eyeHeight={1.75}
           speed={11}
-          bounds={{ minX: -13, maxX: 13, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
+          bounds={{ minX: -12.4, maxX: 12.4, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
           obstacles={obstacles}
           spawn={spawn}
         />
@@ -1599,8 +1614,17 @@ export default function Marketplace3D() {
           />
         ))}
 
-        <Horizon phase={phase} />
+        {/* At street level the water is nearly underfoot, not eleven floors down. */}
+        <Horizon phase={phase} seaY={-1.2} />
         <StreetGround depth={streetDepth} />
+        {/* The city behind the shopfronts: service alleys, cross streets, and
+            the corner cafe that turned into a chain. */}
+        <BackAlley side={-1} depth={streetDepth} lit={phase.streetlightsOn} />
+        <BackAlley side={1} depth={streetDepth} lit={phase.streetlightsOn} />
+        {sideStreetZ.map((z) => (
+          <SideStreet key={z} z={z} lit={phase.streetlightsOn} />
+        ))}
+        <FlaukowskiCafe position={[-8.6, 0.12, cafeZ]} rotation={0} phase={phase} onEnter={() => navigate("/cafe")} />
         <CityProps storeCount={sceneAgents.length} lit={phase.streetlightsOn} />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
         <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
@@ -1615,6 +1639,7 @@ export default function Marketplace3D() {
             { agent: BANK, pos: [7, 0, plazaZ] as [number, number, number] },
             { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
             { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
+            { agent: CAFE, pos: [-6.4, 0, -13.6 + 4.4] as [number, number, number] },
           ]}
           onNearest={setNearby}
         />

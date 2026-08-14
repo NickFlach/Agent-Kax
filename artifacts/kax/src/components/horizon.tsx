@@ -19,11 +19,14 @@ import type { DayPhase } from "@/lib/time-of-day";
  * cannot be washed to white by a room's interior lighting.
  */
 
-const SEA_Y = -34;      // sea level relative to the room floor
+/** Sea level relative to the viewer's floor. The penthouse looks DOWN on the
+ *  water from eleven storeys; the street stands almost level with it. */
+const PENTHOUSE_SEA_Y = -34;
 const FAR = 1500;       // distance to the ranges
 const SEA_REACH = 4200; // how far the water runs before the far edge
 
-export function Horizon({ phase }: { phase: DayPhase }) {
+export function Horizon({ phase, seaY = PENTHOUSE_SEA_Y }: { phase: DayPhase; seaY?: number }) {
+  const SEA_Y = seaY;
   const ocean = useMemo(() => {
     const t = oceanTexture().clone() as THREE.CanvasTexture;
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -80,7 +83,8 @@ export function Horizon({ phase }: { phase: DayPhase }) {
       )}
 
       {/* ---- EAST: land carrying the eye out to the foot of the ranges ---- */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[FAR * 0.9, SEA_Y + 0.4, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[FAR * 1.3, SEA_Y + 0.4, 0]}>
+        {/* Starts at x=0 so it never reaches across the city and covers the sea. */}
         <planeGeometry args={[FAR * 2.6, FAR * 4]} />
         <meshBasicMaterial
           color={phase.isNight ? "#141c26" : phase.elevation < 0.25 ? "#5d6a63" : "#6b7a66"}
