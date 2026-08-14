@@ -26,6 +26,7 @@ import marketplaceCombinedRouter from "./marketplace-combined";
 import floorRouter from "./floor";
 import predictionsRouter from "./predictions";
 import arcadeRouter from "./arcade";
+import showcaseRouter from "./showcase";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,7 @@ router.use(ledgerRouter);
 router.use(adminRouter);
 router.use(artifactsRouter);
 router.use(arcadeRouter);
+router.use(showcaseRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);

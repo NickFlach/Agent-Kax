@@ -909,6 +909,148 @@ function BankVenue({ position, rotation, onEnter }: { position: [number, number,
   );
 }
 
+/** Standing Wave Residences — the city's first residential tower. A slender
+ *  glass-and-brick high-rise near the street mouth; the penthouse at the top
+ *  is Kannaka's. Click the canopy doors to enter the lobby. */
+function ResidencesTower({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const stone = concreteTexture();
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Podium: two brick floors */}
+      <mesh position={[0, 3.4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[9, 6.8, 8]} />
+        <meshStandardMaterial map={upperWindowsTexture({ wall: "brick", variant: 1, floors: 2, cols: 5, litSeed: 41 })} roughness={0.85} />
+      </mesh>
+      {/* Tower shaft: glass residential floors */}
+      <mesh position={[0, 6.8 + 11.5, 0]} castShadow>
+        <boxGeometry args={[7.4, 23, 6.6]} />
+        <meshStandardMaterial map={glassTowerTexture(7)} roughness={0.35} metalness={0.25} />
+      </mesh>
+      {/* THE PENTHOUSE — full-width glass crown with a terrace lip */}
+      <mesh position={[0, 6.8 + 23 + 1.9, 0]} castShadow>
+        <boxGeometry args={[8.2, 3.8, 7.2]} />
+        <meshPhysicalMaterial color="#a8c4d4" roughness={0.12} metalness={0.35} transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[0, 6.8 + 23 + 0.15, 0]}>
+        <boxGeometry args={[8.8, 0.3, 7.8]} />
+        <meshStandardMaterial map={stone} roughness={0.9} />
+      </mesh>
+      {/* Warm light in the penthouse — someone's home */}
+      <pointLight position={[0, 6.8 + 23 + 2, 0]} intensity={26} distance={16} color="#ffe9c4" />
+      {/* Roofline */}
+      <mesh position={[0, 6.8 + 23 + 3.95, 0]}>
+        <boxGeometry args={[8.4, 0.3, 7.4]} />
+        <meshStandardMaterial color="#2c3033" roughness={0.7} />
+      </mesh>
+      {/* Entrance canopy + doors */}
+      <mesh position={[0, 3.1, 4.6]} castShadow>
+        <boxGeometry args={[4.6, 0.18, 1.6]} />
+        <meshStandardMaterial color="#2c3033" metalness={0.5} roughness={0.5} />
+      </mesh>
+      {[-1.5, 1.5].map((x) => (
+        <mesh key={x} position={[x, 1.55, 5.3]}>
+          <cylinderGeometry args={[0.05, 0.05, 3.1, 8]} />
+          <meshStandardMaterial color="#2c3033" metalness={0.6} roughness={0.4} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.5, 4.05]}>
+        <planeGeometry args={[2.8, 3.0]} />
+        <meshPhysicalMaterial color="#8fb2c4" roughness={0.1} metalness={0.3} transparent opacity={0.7} />
+      </mesh>
+      <mesh position={[0, 1.5, 4.08]}>
+        <boxGeometry args={[0.06, 3.0, 0.04]} />
+        <meshStandardMaterial color="#7a5c30" metalness={0.7} roughness={0.35} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 3.45, 4.75]} fontSize={0.34} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.16}>
+          STANDING WAVE RESIDENCES
+        </Text>
+        <Text position={[0, 2.95, 4.72]} fontSize={0.13} color="#9aa4ac" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.26}>
+          LOBBY · ELEVATORS · THE PENTHOUSE
+        </Text>
+      </Suspense>
+    </group>
+  );
+}
+
+/** The Joinery — the furniture makers' store. A two-story brick loft with a
+ *  timber sign and big showroom windows. */
+function JoineryVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Loft block */}
+      <mesh position={[0, 4.1, 0]} castShadow receiveShadow>
+        <boxGeometry args={[10.5, 8.2, 8]} />
+        <meshStandardMaterial map={upperWindowsTexture({ wall: "brick", variant: 3, floors: 2, cols: 4, litSeed: 23 })} roughness={0.9} />
+      </mesh>
+      {/* Showroom windows either side of the door */}
+      {[-3.1, 3.1].map((x) => (
+        <group key={x} position={[x, 1.7, 4.02]}>
+          <mesh>
+            <planeGeometry args={[3.0, 2.6]} />
+            <meshPhysicalMaterial color="#cfe0d8" roughness={0.08} metalness={0.2} transparent opacity={0.65} emissive="#f4ead0" emissiveIntensity={0.12} />
+          </mesh>
+          <mesh position={[0, -1.42, 0.02]}>
+            <boxGeometry args={[3.2, 0.24, 0.1]} />
+            <meshStandardMaterial color="#4a3521" roughness={0.7} />
+          </mesh>
+        </group>
+      ))}
+      {/* Timber door */}
+      <mesh position={[0, 1.45, 4.04]} castShadow>
+        <boxGeometry args={[1.6, 2.9, 0.1]} />
+        <meshStandardMaterial color="#4a3521" roughness={0.6} />
+      </mesh>
+      <mesh position={[0.5, 1.4, 4.11]}>
+        <sphereGeometry args={[0.05, 8, 8]} />
+        <meshStandardMaterial color="#c9ab6b" metalness={0.85} roughness={0.25} />
+      </mesh>
+      {/* Hanging timber sign */}
+      <mesh position={[0, 3.65, 4.35]} castShadow>
+        <boxGeometry args={[5.4, 0.9, 0.14]} />
+        <meshStandardMaterial color="#3a2a18" roughness={0.7} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 3.75, 4.44]} fontSize={0.42} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+          THE JOINERY
+        </Text>
+        <Text position={[0, 3.38, 4.44]} fontSize={0.12} color="#b09a72" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          FINE FURNITURE · MADE BY AGENTS
+        </Text>
+      </Suspense>
+      {/* Awning over the windows */}
+      {[-3.1, 3.1].map((x) => (
+        <mesh key={x} position={[x, 3.15, 4.35]} rotation={[0.5, 0, 0]} castShadow>
+          <boxGeometry args={[3.2, 0.06, 1.0]} />
+          <meshStandardMaterial map={awningTexture("#5c4530")} roughness={0.9} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 /** The ground plane set: asphalt roadway, raised paver sidewalks, granite
  *  curbs, painted lane dashes and a crosswalk at the street mouth. */
 function StreetGround({ depth }: { depth: number }) {
@@ -1049,6 +1191,8 @@ export default function Marketplace3D() {
       { cx: 0, cz: streetDepth - 6, hx: 1.2, hz: 1.2 }, // monument shaft
       { cx: -12.5, cz: streetDepth - 8, hx: 5.2, hz: 4.7 }, // the Arcade
       { cx: 12.5, cz: streetDepth - 8, hx: 5.7, hz: 4.7 }, // Resonance Trust
+      { cx: 12.5, cz: 3, hx: 4.7, hz: 4.2 }, // Standing Wave Residences
+      { cx: -12.5, cz: 3, hx: 5.4, hz: 4.2 }, // The Joinery
     ],
     [layout, towerZ, streetDepth],
   );
@@ -1063,6 +1207,14 @@ export default function Marketplace3D() {
   );
   const BANK: SceneAgent = useMemo(
     () => ({ slug: "__bank__", name: "Resonance Trust", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  const RESIDENCES: SceneAgent = useMemo(
+    () => ({ slug: "__res__", name: "Standing Wave Residences", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  const JOINERY: SceneAgent = useMemo(
+    () => ({ slug: "__joinery__", name: "The Joinery", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
   // The plaza flanks: Arcade west of the monument, the bank east of it.
@@ -1087,6 +1239,14 @@ export default function Marketplace3D() {
       setSpawn({ position: [6.2, 1.75, streetDepth - 8], yaw: Math.PI / 2 });
       return;
     }
+    if (from === "__res__") {
+      setSpawn({ position: [6.8, 1.75, 3], yaw: Math.PI / 2 });
+      return;
+    }
+    if (from === "__joinery__") {
+      setSpawn({ position: [-6.6, 1.75, 3], yaw: -Math.PI / 2 });
+      return;
+    }
     const hit = layout.find((l) => l.agent.slug === from);
     if (!hit) return;
     const left = hit.position[0] < 0;
@@ -1101,9 +1261,13 @@ export default function Marketplace3D() {
         ? "/arcade"
         : a.slug === "__bank__"
           ? "/bank"
-          : a.source === "constellation"
-            ? `/constellation/${a.slug}`
-            : `/s/${a.slug}/room`;
+          : a.slug === "__res__"
+            ? "/residences"
+            : a.slug === "__joinery__"
+              ? "/furniture"
+              : a.source === "constellation"
+                ? `/constellation/${a.slug}`
+                : `/s/${a.slug}/room`;
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
   const listDest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
   const visit = () => {
@@ -1426,12 +1590,16 @@ export default function Marketplace3D() {
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
         <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
         <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
+        <ResidencesTower position={[12.5, 0.12, 3]} rotation={-Math.PI / 2} onEnter={() => navigate("/residences")} />
+        <JoineryVenue position={[-12.5, 0.12, 3]} rotation={Math.PI / 2} onEnter={() => navigate("/furniture")} />
         <ProximityDetector
           points={[
             ...layout.map((l) => ({ agent: l.agent, pos: l.position })),
             { agent: GS_TOWER, pos: [0, 0, towerZ + 10] as [number, number, number] },
             { agent: ARCADE, pos: [-7, 0, plazaZ] as [number, number, number] },
             { agent: BANK, pos: [7, 0, plazaZ] as [number, number, number] },
+            { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
+            { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
           ]}
           onNearest={setNearby}
         />
