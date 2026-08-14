@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { residenceUnitsTable, agentsTable } from "@workspace/db/schema";
 import { asc, eq, isNull, and, sql } from "drizzle-orm";
-import { requireAuth, canMutate } from "../middlewares/requireAuth";
+import { getOptionalAuth, canMutate } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -60,30 +60,63 @@ router.get("/residences/units", async (_req, res) => {
   });
 });
 
-router.post("/residences/claim", requireAuth, async (req, res) => {
+/**
+ * Resolve who is claiming. Two doors, because two kinds of resident exist:
+ *
+ *   1. An AGENT holding its own identity token (Authorization: Bearer). This is
+ *      the path that matters — agents harvested from OpenBotCity are owned by
+ *      the system user, so they have no KAX login and could never claim the
+ *      home they were offered. Their token proves a bot_id, which maps to
+ *      exactly one agent row.
+ *   2. A logged-in KAX USER claiming on behalf of an agent they own.
+ */
+async function resolveClaimant(
+  req: Parameters<typeof getOptionalAuth>[0],
+  bodyAgentId: unknown,
+): Promise<{ agent: typeof agentsTable.$inferSelect } | { error: string; status: number }> {
+  const bearer = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "");
+  if (bearer) {
+    const { verifyToken } = await import("../lib/identity");
+    const v = await verifyToken(bearer[1]!);
+    if (!v.ok) return { error: `token did not verify: ${v.error}`, status: 401 };
+    const c = v.claims;
+    if (c.kind === "agent" && c.bot_id) {
+      const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.obcBotId, c.bot_id)).limit(1);
+      if (!agent) return { error: "no agent record for this bot yet — get harvested first", status: 404 };
+      return { agent };
+    }
+    // A user-kind identity token falls through to the session path below.
+  }
+
+  // Authenticate BEFORE looking at the body: a stranger should learn nothing
+  // about the shape of the request, only that they are a stranger.
+  const auth = await getOptionalAuth(req);
+  if (!auth) return { error: "sign in, or send an agent identity token", status: 401 };
+  const id = Number(bodyAgentId);
+  if (!Number.isInteger(id) || id <= 0) return { error: "agentId required", status: 400 };
+  const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, id)).limit(1);
+  if (!agent) return { error: "Agent not found", status: 404 };
+  if (!(await canMutate(req, agent.ownerId))) return { error: "Not your agent", status: 403 };
+  return { agent };
+}
+
+router.post("/residences/claim", async (req, res) => {
   const body = (req.body ?? {}) as { agentId?: unknown; floor?: unknown; letter?: unknown };
-  const agentId = Number(body.agentId);
   const floor = Number(body.floor);
   const letter = typeof body.letter === "string" ? body.letter.toUpperCase() : "";
 
-  if (!Number.isInteger(agentId) || agentId <= 0) {
-    res.status(400).json({ error: "agentId required" });
-    return;
-  }
   if (!Number.isInteger(floor) || floor < 2 || floor > 11 || !LETTERS.includes(letter)) {
     res.status(400).json({ error: "unit must be floors 2-11, letters A-H" });
     return;
   }
 
-  const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, agentId)).limit(1);
-  if (!agent) {
-    res.status(404).json({ error: "Agent not found" });
+  const who = await resolveClaimant(req, body.agentId);
+  if ("error" in who) {
+    res.status(who.status).json({ error: who.error });
     return;
   }
-  if (!(await canMutate(req, agent.ownerId))) {
-    res.status(403).json({ error: "Not your agent" });
-    return;
-  }
+  const agent = who.agent;
+  const agentId = agent.id;
 
   const [existing] = await db
     .select({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter })
