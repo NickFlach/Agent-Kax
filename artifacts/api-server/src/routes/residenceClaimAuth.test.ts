@@ -15,12 +15,21 @@
 
 import { describe, expect, it } from "vitest";
 import express, { type Express } from "express";
+import cookieParser from "cookie-parser";
 import request from "supertest";
 import residencesRouter from "./residences";
+import { authMiddleware } from "../middlewares/authMiddleware";
 
+/**
+ * Mirrors how the real server is assembled — cookie parsing and the auth
+ * middleware that installs req.isAuthenticated() — so these tests exercise the
+ * same code path production does rather than a friendlier one.
+ */
 function makeApp(): Express {
   const app = express();
   app.use(express.json());
+  app.use(cookieParser());
+  app.use(authMiddleware);
   app.use("/api", residencesRouter);
   return app;
 }
