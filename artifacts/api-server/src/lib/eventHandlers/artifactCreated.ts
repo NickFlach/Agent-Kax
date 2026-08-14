@@ -101,7 +101,7 @@ export const handleArtifactCreated: EventHandler = async (data, { log }) => {
       publicUrl: pa.public_url,
       thumbnailUrl: pa.thumbnail_url ?? pa.public_url,
       reactionCount: pa.reaction_count ?? 0,
-      artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture",
+      artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture" | "video" | "app",
       tags: [],
       ownerId,
       agentId,

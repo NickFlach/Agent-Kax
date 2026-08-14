@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { usersTable } from "./auth";
 import { agentsTable } from "./agents";
 
-export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture"]);
+export const artifactTypeEnum = pgEnum("artifact_type", ["image", "music", "text", "audio", "furniture", "video", "app"]);
 export const artifactStatusEnum = pgEnum("artifact_status", ["raw", "scored", "narrated", "dropped"]);
 export const editionTypeEnum = pgEnum("edition_type", ["open", "limited", "1_of_1"]);
 

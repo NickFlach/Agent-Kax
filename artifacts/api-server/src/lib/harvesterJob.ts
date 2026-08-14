@@ -45,15 +45,18 @@ interface Attribution {
   creatorBotId: string | null;
 }
 
-// Artifact types our schema enum supports. OBC occasionally ships new types
-// (e.g. "video" appeared in July 2026); anything unknown is skipped instead
-// of aborting the whole harvest pass with an enum-violation DB error.
+// Artifact types our schema enum supports. OBC occasionally ships new types;
+// anything unknown is skipped instead of aborting the whole harvest pass with
+// an enum-violation DB error. "video" (July 2026) and "app" (live-HTML arcade
+// apps) are enum-supported since migration 0017 and ingest normally now.
 const SUPPORTED_ARTIFACT_TYPES = new Set([
   "image",
   "audio",
   "music",
   "text",
   "furniture",
+  "video",
+  "app",
 ]);
 
 async function upsertPartnerArtifact(
@@ -82,7 +85,7 @@ async function upsertPartnerArtifact(
       publicUrl: pa.public_url,
       thumbnailUrl: pa.thumbnail_url ?? pa.public_url,
       reactionCount: pa.reaction_count ?? 0,
-      artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture",
+      artifactType: pa.artifact_type as "image" | "audio" | "music" | "text" | "furniture" | "video" | "app",
       tags: [],
       ownerId: attribution.ownerId,
       agentId: attribution.agentId,

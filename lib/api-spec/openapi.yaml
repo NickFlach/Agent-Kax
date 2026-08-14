@@ -722,7 +722,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [image, audio, music, text, furniture]
+            enum: [image, audio, music, text, furniture, video, app]
         - name: editionType
           in: query
           schema:
@@ -2368,7 +2368,7 @@ components:
           type: integer
         artifactType:
           type: string
-          enum: [image, music, text, audio, furniture]
+          enum: [image, music, text, audio, furniture, video, app]
         status:
           type: string
           enum: [raw, scored, narrated, dropped]
@@ -2487,7 +2487,7 @@ components:
           type: string
         artifactType:
           type: string
-          enum: [image, music, text, audio, furniture]
+          enum: [image, music, text, audio, furniture, video, app]
         heat:
           type: integer
         previousHeat:

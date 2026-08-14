@@ -12,7 +12,7 @@ export type EditionType = "open" | "limited" | "1_of_1";
 export interface PartnerArtifact {
   uuid: string;
   title: string;
-  artifact_type: "image" | "audio" | "music" | "text" | "furniture";
+  artifact_type: "image" | "audio" | "music" | "text" | "furniture" | "video" | "app";
   public_url: string;
   thumbnail_url?: string | null;
   created_at: string;
