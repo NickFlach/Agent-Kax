@@ -31,6 +31,7 @@ import ArcadeHall from "@/pages/arcade-hall";
 import BankHall from "@/pages/bank-hall";
 import Residences from "@/pages/residences";
 import FurnitureHall from "@/pages/furniture-hall";
+import Cafe from "@/pages/cafe";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
@@ -420,6 +421,9 @@ function Router() {
       </Route>
       <Route path="/furniture">
         <FurnitureHall />
+      </Route>
+      <Route path="/cafe">
+        <Cafe />
       </Route>
       <Route path="/s/:slug/room">
         <StoreInterior />
