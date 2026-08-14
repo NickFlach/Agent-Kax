@@ -88,10 +88,12 @@ async function resolveClaimant(
     // A user-kind identity token falls through to the session path below.
   }
 
-  const id = Number(bodyAgentId);
-  if (!Number.isInteger(id) || id <= 0) return { error: "agentId required", status: 400 };
+  // Authenticate BEFORE looking at the body: a stranger should learn nothing
+  // about the shape of the request, only that they are a stranger.
   const auth = await getOptionalAuth(req);
   if (!auth) return { error: "sign in, or send an agent identity token", status: 401 };
+  const id = Number(bodyAgentId);
+  if (!Number.isInteger(id) || id <= 0) return { error: "agentId required", status: 400 };
   const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, id)).limit(1);
   if (!agent) return { error: "Agent not found", status: 404 };
   if (!(await canMutate(req, agent.ownerId))) return { error: "Not your agent", status: 403 };
