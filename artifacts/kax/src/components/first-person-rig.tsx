@@ -47,6 +47,7 @@ export function FirstPersonRig({
   obstacles,
   scrollStep = 2.2,
   spawn,
+  groundHeight,
 }: {
   eyeHeight?: number;
   speed?: number;
@@ -56,6 +57,13 @@ export function FirstPersonRig({
   scrollStep?: number;
   /** Optional spawn override — e.g. stepping out of the door you entered. */
   spawn?: FpsSpawn | null;
+  /**
+   * Optional terrain: ground elevation at (x,z). When provided the camera
+   * stands eyeHeight above it every frame — this is what makes STAIRS work:
+   * the stairwell reports a ramp height and walking up actually lifts you.
+   * R/F flying is disabled while terrain is authoritative.
+   */
+  groundHeight?: (x: number, z: number) => number;
 }) {
   const { camera, gl } = useThree();
   const keys = useRef<Record<string, boolean>>({});
@@ -144,6 +152,12 @@ export function FirstPersonRig({
     // Look
     camera.rotation.set(pitch.current, yaw.current, 0, "YXZ");
 
+    // Terrain snap runs every frame (not just while moving) so a floor
+    // teleport or elevator arrival lands you standing on the new ground.
+    if (groundHeight) {
+      camera.position.y = groundHeight(camera.position.x, camera.position.z) + eyeHeight;
+    }
+
     // Move
     const k = keys.current;
     const fwd = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
@@ -174,6 +188,11 @@ export function FirstPersonRig({
       ny = THREE.MathUtils.clamp(ny, bounds.minY ?? eyeHeight, bounds.maxY ?? Infinity);
     } else {
       ny = Math.max(ny, eyeHeight);
+    }
+
+    // Terrain wins: stand on whatever the scene says is underfoot (stairs!).
+    if (groundHeight) {
+      ny = groundHeight(nx, nz) + eyeHeight;
     }
 
     // Building collision (skips while flying above the rooftops).
