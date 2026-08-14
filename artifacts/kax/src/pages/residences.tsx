@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
+import { Horizon } from "@/components/horizon";
+import { useDayPhase } from "@/lib/time-of-day";
 import {
   marbleTexture,
   woodFloorTexture,
@@ -195,6 +197,7 @@ export default function Residences() {
   const [spawn, setSpawn] = useState<FpsSpawn | null>(null);
   const [phArt, setPhArt] = useState<Array<{ url: string; title: string }>>([]);
   const [units, setUnits] = useState<ResidenceUnit[]>([]);
+  const phase = useDayPhase();
 
   // The floor plan: which doors are homes and which are still vacant.
   useEffect(() => {
@@ -286,6 +289,17 @@ export default function Residences() {
     // Step out of the elevator facing the floor.
     setSpawn({ position: [8.2, 1.75, 0], yaw: Math.PI / 2 });
   };
+  // Test hook: lets a headless harness jump floors without walking the tower.
+  useEffect(() => {
+    (window as unknown as { __kaxRes?: unknown }).__kaxRes = {
+      goto: (f: number, at?: [number, number, number], yaw?: number) => {
+        setFloor(Math.max(0, Math.min(PH, f)));
+        setSpawn({ position: at ?? [8.2, 1.75, 0], yaw: yaw ?? Math.PI / 2 });
+      },
+      phase: () => phase,
+    };
+  }, [phase]);
+
   const goDown = () => {
     if (floor > 0) {
       setFloor(floor - 1);
@@ -314,8 +328,13 @@ export default function Residences() {
             {floor === 0 ? "Lobby" : isPH ? "The Penthouse" : `Floor ${floorLabel(floor)}`}
           </h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
-            {isPH ? "residence of Kannaka" : floor === 0 ? "elevator east · stairs west" : "resident units — assignments open with the housing program"}
+            {isPH ? "residence of Kannaka" : floor === 0 ? "elevator east · stairs west" : "resident units — claim one with a storefront"}
           </p>
+          {isPH && (
+            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-2" data-testid="text-local-time">
+              {phase.label} · your local time
+            </p>
+          )}
         </div>
       </div>
 
@@ -355,22 +374,33 @@ export default function Residences() {
       >
         {isPH ? (
           <>
-            {/* Penthouse sky + the city far below through the glass */}
-            <Sky sunPosition={[30, 22, 40]} turbidity={4.5} rayleigh={2.0} />
-            <fog attach="fog" args={["#cfd8de", 110, 300]} />
-            <hemisphereLight args={["#dfe8f0", "#8a8272", 0.85]} />
-            <ambientLight intensity={0.4} color="#fff3e0" />
-            <directionalLight position={[30, 40, 30]} intensity={1.5} color="#ffe2b8" castShadow />
-            {/* The district below: towers around, street glimpsed far down */}
+            {/* Eleven floors up, the view is the room's fourth wall: ranges to
+                the east, open water to the west, and a sun that is wherever the
+                visitor's own clock says it is. */}
+            <Sky sunPosition={phase.sunPosition} turbidity={phase.turbidity} rayleigh={phase.rayleigh} mieCoefficient={0.005} mieDirectionalG={0.82} />
+            <fog attach="fog" args={[phase.fogColor, 180, 900]} />
+            <hemisphereLight args={[phase.isNight ? "#22304e" : "#dfe8f0", phase.skyGroundColor, phase.hemiIntensity + 0.15]} />
+            <ambientLight intensity={phase.ambientIntensity + 0.12} color={phase.ambientColor} />
+            <directionalLight position={phase.sunPosition} intensity={phase.sunIntensity} color={phase.sunColor} castShadow />
+            {phase.isNight && <pointLight position={[0, 3.6, 0]} intensity={26} distance={22} color="#ffe9c4" />}
+
+            <Horizon phase={phase} />
+
+            {/* The district below — lit windows come on with the streetlights. */}
             {[[-40, -60], [55, -40], [-65, 20], [45, 55], [-30, 70], [70, 10]].map(([x, z], i) => (
-              <mesh key={i} position={[x, -18 - (i % 3) * 6, z]}>
+              <mesh key={i} position={[x! * 1.6, -30 - (i % 3) * 5, z! * 1.6]}>
                 <boxGeometry args={[14, 34 + (i % 4) * 8, 14]} />
-                <meshStandardMaterial map={i % 2 ? glassTowerTexture(i) : upperWindowsTexture({ wall: "brick", variant: i % 4, floors: 10, cols: 6, litSeed: i })} roughness={0.6} />
+                <meshStandardMaterial
+                  map={i % 2 ? glassTowerTexture(i) : upperWindowsTexture({ wall: "brick", variant: i % 4, floors: 10, cols: 6, litSeed: i })}
+                  roughness={0.6}
+                  emissive={new THREE.Color("#ffd79a")}
+                  emissiveIntensity={phase.windowGlow * 0.5}
+                />
               </mesh>
             ))}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -38, 0]}>
-              <planeGeometry args={[400, 400]} />
-              <meshStandardMaterial color="#3b4046" roughness={1} />
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -33.6, 0]}>
+              <planeGeometry args={[520, 520]} />
+              <meshStandardMaterial color={phase.isNight ? "#171d28" : "#3b4046"} roughness={1} />
             </mesh>
           </>
         ) : (
@@ -422,13 +452,13 @@ export default function Residences() {
             {[-8.55, -2.85, 2.85, 8.55].map((x) => (
               <mesh key={`s${x}`} position={[x, 2.3, 6.2]}>
                 <planeGeometry args={[5.6, 4.6]} />
-                <meshPhysicalMaterial color="#bcd2dd" transparent opacity={0.16} roughness={0.05} side={THREE.DoubleSide} />
+                <meshPhysicalMaterial color="#dff0ff" transparent opacity={0.05} roughness={0} metalness={0} side={THREE.DoubleSide} depthWrite={false} />
               </mesh>
             ))}
             {[-6.3, -2.1, 2.1, 6.3].map((z) => (
               <mesh key={`w${z}`} position={[-11.4, 2.3, z]} rotation={[0, Math.PI / 2, 0]}>
                 <planeGeometry args={[4.2, 4.6]} />
-                <meshPhysicalMaterial color="#bcd2dd" transparent opacity={0.16} roughness={0.05} side={THREE.DoubleSide} />
+                <meshPhysicalMaterial color="#dff0ff" transparent opacity={0.05} roughness={0} metalness={0} side={THREE.DoubleSide} depthWrite={false} />
               </mesh>
             ))}
             {/* Mullions */}
