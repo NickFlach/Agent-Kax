@@ -53,12 +53,30 @@ describe("arcade app-type query", () => {
   it("proves the unfixed shape is what Postgres rejects", async () => {
     const known = artifactTypeEnum.enumValues as readonly string[];
     if (known.includes("link")) return; // enum gained it; nothing to prove
-    await expect(
-      db
+
+    let thrown: unknown;
+    try {
+      await db
         .select({ id: artifactsTable.id })
         .from(artifactsTable)
         .where(inArray(artifactsTable.artifactType, ["app", "link"] as never))
-        .limit(1),
-    ).rejects.toThrow(/invalid input value for enum/i);
+        .limit(1);
+    } catch (e) {
+      thrown = e;
+    }
+
+    // The pre-fix query must fail — if it ever stops failing, the premise of
+    // this whole fix is gone and the test should say so loudly.
+    expect(thrown, "pre-fix query unexpectedly succeeded").toBeDefined();
+
+    // Drizzle wraps driver errors ("Failed query: …"), so the Postgres detail
+    // lives down the cause chain rather than on the top-level message.
+    const chain: string[] = [];
+    for (let e: unknown = thrown, depth = 0; e && depth < 6; depth++) {
+      const err = e as { message?: string; cause?: unknown };
+      if (err.message) chain.push(err.message);
+      e = err.cause;
+    }
+    expect(chain.join(" | ")).toMatch(/invalid input value for enum/i);
   });
 });
