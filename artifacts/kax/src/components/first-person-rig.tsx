@@ -33,6 +33,12 @@ export interface FpsObstacle {
  * events still raycast; handlers should ignore clicks with `e.delta > 5`
  * (a drag that ended on the object).
  */
+export interface FpsSpawn {
+  position: [number, number, number];
+  /** Heading in radians — 0 faces -z, π faces +z, -π/2 faces +x. */
+  yaw: number;
+}
+
 export function FirstPersonRig({
   eyeHeight = 1.75,
   speed = 10,
@@ -40,6 +46,7 @@ export function FirstPersonRig({
   bounds,
   obstacles,
   scrollStep = 2.2,
+  spawn,
 }: {
   eyeHeight?: number;
   speed?: number;
@@ -47,6 +54,8 @@ export function FirstPersonRig({
   bounds?: FpsBounds;
   obstacles?: FpsObstacle[];
   scrollStep?: number;
+  /** Optional spawn override — e.g. stepping out of the door you entered. */
+  spawn?: FpsSpawn | null;
 }) {
   const { camera, gl } = useThree();
   const keys = useRef<Record<string, boolean>>({});
@@ -67,6 +76,15 @@ export function FirstPersonRig({
     camera.position.y = Math.max(camera.position.y, eyeHeight);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera]);
+
+  // Spawn override — used to step out of the door you actually exited.
+  useEffect(() => {
+    if (!spawn) return;
+    camera.position.set(spawn.position[0], Math.max(spawn.position[1], eyeHeight), spawn.position[2]);
+    yaw.current = spawn.yaw;
+    pitch.current = 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spawn, camera]);
 
   useEffect(() => {
     const el = gl.domElement;

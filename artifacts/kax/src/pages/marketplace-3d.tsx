@@ -7,8 +7,8 @@ import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
-import { FirstPersonRig } from "@/components/first-person-rig";
-import { NpcFigure, WandererNpc, PlayerAvatar, PlayerTracker } from "@/components/npc";
+import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
+import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
   asphaltTexture,
   sidewalkTexture,
@@ -860,6 +860,24 @@ export default function Marketplace3D() {
     [],
   );
 
+  // Stepping OUT of a building drops you at ITS door (?from=<slug>), facing
+  // the street — not back at the district entrance.
+  const [spawn, setSpawn] = useState<FpsSpawn | null>(null);
+  useEffect(() => {
+    if (spawn) return; // consume once
+    const from = new URLSearchParams(window.location.search).get("from");
+    if (!from) return;
+    if (from === "__gs__") {
+      setSpawn({ position: [0, 1.75, towerZ + 10.5], yaw: Math.PI });
+      return;
+    }
+    const hit = layout.find((l) => l.agent.slug === from);
+    if (!hit) return;
+    const left = hit.position[0] < 0;
+    // On the sidewalk just outside the shopfront, facing the road.
+    setSpawn({ position: [left ? -3.9 : 3.9, 1.87, hit.position[2] + 0.4], yaw: left ? -Math.PI / 2 : Math.PI / 2 });
+  }, [layout, towerZ, spawn]);
+
   const dest = (a: SceneAgent) =>
     a.slug === "__gs__" ? "/gs/floor" : a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`;
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
@@ -1161,8 +1179,9 @@ export default function Marketplace3D() {
           speed={11}
           bounds={{ minX: -13, maxX: 13, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
           obstacles={obstacles}
+          spawn={spawn}
         />
-        <PlayerAvatar />
+        {/* No self-avatar in first person — you ARE the camera. */}
         <PlayerTracker onUpdate={setPlayer} />
         {/* Pedestrians on both sidewalks */}
         {Array.from({ length: 8 }).map((_, i) => (
