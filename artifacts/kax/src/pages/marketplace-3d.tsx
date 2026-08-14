@@ -1,13 +1,13 @@
 import { useState, useMemo, useRef, Suspense, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Text, Sky } from "@react-three/drei";
+import { Text, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
-import { WasdMove } from "@/components/wasd-move";
+import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure, WandererNpc, PlayerAvatar, PlayerTracker } from "@/components/npc";
 import {
   asphaltTexture,
@@ -18,6 +18,7 @@ import {
   upperWindowsTexture,
   awningTexture,
   barkTexture,
+  glassTowerTexture,
   repeated,
 } from "@/lib/city-textures";
 import "./marketplace-3d.css";
@@ -125,11 +126,14 @@ function Storefront({
   const initials = (agent.name || agent.slug).substring(0, 2).toUpperCase();
   const top = bodyH;
 
-  const select = (e: { stopPropagation?: () => void }) => {
+  // `delta` guard: a look-drag that happens to end on a building is not a click.
+  const select = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
     e.stopPropagation?.();
     onClick(agent);
   };
-  const enter = (e: { stopPropagation?: () => void }) => {
+  const enter = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
     e.stopPropagation?.();
     onDoubleClick(agent);
   };
@@ -613,11 +617,108 @@ function CityProps({ storeCount }: { storeCount: number }) {
   );
 }
 
+/**
+ * The Ghost Signals Prediction Market tower — the skyscraper closing the
+ * skyline past the monument. Mirror-glass curtain wall with trading floors
+ * burning after hours, a lit crown, street-level lobby, and a live-market
+ * ticker band. Click (or walk up and press E) to enter the trading floor.
+ */
+function GhostSignalsTower({ position, onEnter }: { position: [number, number, number]; onEnter: () => void }) {
+  const glass = glassTowerTexture(3);
+  const glass2 = glassTowerTexture(7);
+  const concrete = concreteTexture();
+  const W = 15;
+  const D = 15;
+  const H = 46;
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Plaza plinth */}
+      <mesh position={[0, 0.25, 0]} receiveShadow>
+        <boxGeometry args={[W + 8, 0.5, D + 8]} />
+        <meshStandardMaterial map={concrete} roughness={0.95} />
+      </mesh>
+      {/* Main shaft */}
+      <mesh position={[0, H / 2 + 0.5, 0]} castShadow>
+        <boxGeometry args={[W, H, D]} />
+        <meshStandardMaterial attach="material-0" map={glass} roughness={0.25} metalness={0.55} />
+        <meshStandardMaterial attach="material-1" map={glass2} roughness={0.25} metalness={0.55} />
+        <meshStandardMaterial attach="material-2" color="#1a2530" roughness={0.7} />
+        <meshStandardMaterial attach="material-3" color="#1a2530" roughness={0.7} />
+        <meshStandardMaterial attach="material-4" map={glass} roughness={0.25} metalness={0.55} />
+        <meshStandardMaterial attach="material-5" map={glass2} roughness={0.25} metalness={0.55} />
+      </mesh>
+      {/* Setback + crown */}
+      <mesh position={[0, H + 2.2, 0]} castShadow>
+        <boxGeometry args={[W * 0.62, 4, D * 0.62]} />
+        <meshStandardMaterial map={glass2} roughness={0.3} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, H + 4.7, 0]}>
+        <boxGeometry args={[W * 0.64, 0.5, D * 0.64]} />
+        <meshStandardMaterial color="#e8b96a" emissive="#e8b96a" emissiveIntensity={1.4} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, H + 7.5, 0]}>
+        <cylinderGeometry args={[0.06, 0.06, 5.5, 6]} />
+        <meshStandardMaterial color="#2b2b2e" metalness={0.7} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, H + 10.3, 0]}>
+        <sphereGeometry args={[0.22, 10, 10]} />
+        <meshStandardMaterial color="#ff5a5a" emissive="#ff5a5a" emissiveIntensity={2} toneMapped={false} />
+      </mesh>
+
+      {/* Street-level lobby: dark granite base, glowing entry */}
+      <mesh position={[0, 2.5, D / 2 + 0.06]}>
+        <planeGeometry args={[W - 1, 5]} />
+        <meshStandardMaterial color="#10151b" roughness={0.5} metalness={0.3} />
+      </mesh>
+      <mesh position={[0, 2.1, D / 2 + 0.1]}>
+        <planeGeometry args={[5.4, 4.2]} />
+        <meshStandardMaterial color="#ffedc2" emissive="#e8c06a" emissiveIntensity={0.9} />
+      </mesh>
+      {[-2.9, 2.9].map((x) => (
+        <mesh key={x} position={[x, 2.4, D / 2 + 0.35]} castShadow>
+          <boxGeometry args={[0.5, 4.8, 0.5]} />
+          <meshStandardMaterial color="#23282e" metalness={0.6} roughness={0.4} />
+        </mesh>
+      ))}
+
+      {/* Live-market ticker band wrapping the facade above the lobby */}
+      <mesh position={[0, 6.1, D / 2 + 0.12]}>
+        <planeGeometry args={[W - 0.8, 0.85]} />
+        <meshStandardMaterial color="#0a0d10" emissive="#173021" emissiveIntensity={0.8} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 6.1, D / 2 + 0.16]} fontSize={0.4} color="#63e58b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={W - 1}>
+          {"YES 50.0 ▲ · GHOST SIGNALS · 35 OPEN MARKETS · BRIER-SCORED"}
+        </Text>
+        {/* Nameplate */}
+        <Text position={[0, 9.4, D / 2 + 0.15]} fontSize={1.15} color="#e9dfc8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.12}>
+          GHOST SIGNALS
+        </Text>
+        <Text position={[0, 8.2, D / 2 + 0.15]} fontSize={0.44} color="#b9ac90" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          PREDICTION MARKET
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 3, D / 2 + 3]} intensity={26} distance={16} color="#ffe2ae" />
+    </group>
+  );
+}
+
 /** The ground plane set: asphalt roadway, raised paver sidewalks, granite
  *  curbs, painted lane dashes and a crosswalk at the street mouth. */
 function StreetGround({ depth }: { depth: number }) {
-  const length = Math.abs(depth) + 40;
-  const zMid = (8 + depth - 20) / 2;
+  // Long enough to run past the monument and under the Ghost Signals plaza.
+  const length = Math.abs(depth) + 58;
+  const zMid = (8 + depth - 38) / 2;
   const asphalt = useMemo(() => repeated(asphaltTexture(), 2, length / 6), [length]);
   const pavers = useMemo(() => repeated(sidewalkTexture(), 3, length / 4), [length]);
   const paversWide = useMemo(() => repeated(sidewalkTexture(), 5, length / 4), [length]);
@@ -741,16 +842,26 @@ export default function Marketplace3D() {
   const sceneAgents = useMemo(() => allSceneAgents.slice(0, MAX_3D_STOREFRONTS), [allSceneAgents]);
   const overflowCount = Math.max(0, allSceneAgents.length - sceneAgents.length);
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
-  const orbitRef = useRef<any>(null);
   const [nearby, setNearby] = useState<SceneAgent | null>(null);
   const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
   const streetDepth = -2 - Math.max(1, Math.ceil(sceneAgents.length / 2)) * 4.5;
+  const towerZ = streetDepth - 20;
   const obstacles = useMemo(
-    () => layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
-    [layout],
+    () => [
+      ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
+      { cx: 0, cz: towerZ, hx: 7.8, hz: 7.8 }, // Ghost Signals tower
+      { cx: 0, cz: streetDepth - 6, hx: 1.2, hz: 1.2 }, // monument shaft
+    ],
+    [layout, towerZ, streetDepth],
   );
 
-  const dest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`);
+  const GS_TOWER: SceneAgent = useMemo(
+    () => ({ slug: "__gs__", name: "Ghost Signals Trading Floor", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+
+  const dest = (a: SceneAgent) =>
+    a.slug === "__gs__" ? "/gs/floor" : a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`;
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
   const listDest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
   const visit = () => {
@@ -988,7 +1099,7 @@ export default function Marketplace3D() {
 
       {/* Footer hint */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 text-center font-bold">
-        WASD to walk · Drag to look · E to enter · Scroll to zoom
+        WASD to walk · Drag to look · E to enter · Scroll to step
         {overflowCount > 0 && (
           <div className="mt-3 pointer-events-auto">
             <Link href="/marketplace" className="border-b border-muted-foreground hover:text-foreground hover:border-foreground transition-colors pb-1" data-testid="link-overflow-list">
@@ -1004,7 +1115,7 @@ export default function Marketplace3D() {
       <Canvas
         className="!absolute inset-0"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-        camera={{ position: [0, 6, 18], fov: 45 }}
+        camera={{ position: [0, 1.75, 13], fov: 62 }}
         onPointerMissed={() => setSelected(null)}
         dpr={[1, 1.5]}
         shadows
@@ -1043,11 +1154,12 @@ export default function Marketplace3D() {
         {/* Bounce-light stand-in so the shadow-side facades read, not vanish */}
         <directionalLight position={[-30, 12, -40]} intensity={0.4} color="#dfe8ef" />
 
-        <OrbitControls ref={orbitRef} target={[0, 2, -10]} maxPolarAngle={Math.PI / 2 - 0.05} minDistance={2} maxDistance={60} />
-        <WasdMove
-          controls={orbitRef}
-          speed={18}
-          bounds={{ minX: -13, maxX: 13, minZ: streetDepth - 6, maxZ: 15, minY: 1.4, maxY: 28 }}
+        {/* First-person camera: drag looks from the eye, WASD walks — the
+            viewpoint never swings away from where you stand. */}
+        <FirstPersonRig
+          eyeHeight={1.75}
+          speed={11}
+          bounds={{ minX: -13, maxX: 13, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 }}
           obstacles={obstacles}
         />
         <PlayerAvatar />
@@ -1068,7 +1180,14 @@ export default function Marketplace3D() {
 
         <StreetGround depth={streetDepth} />
         <CityProps storeCount={sceneAgents.length} />
-        <ProximityDetector points={layout.map((l) => ({ agent: l.agent, pos: l.position }))} onNearest={setNearby} />
+        <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
+        <ProximityDetector
+          points={[
+            ...layout.map((l) => ({ agent: l.agent, pos: l.position })),
+            { agent: GS_TOWER, pos: [0, 0, towerZ + 10] as [number, number, number] },
+          ]}
+          onNearest={setNearby}
+        />
 
         {layout.map((item) => (
           <Storefront

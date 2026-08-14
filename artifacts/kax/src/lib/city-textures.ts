@@ -362,6 +362,76 @@ export function awningTexture(hex: string): THREE.CanvasTexture {
   return finish(key, c);
 }
 
+/**
+ * A skyscraper glass curtain wall: dark blue-green mirror glass in a steel
+ * mullion grid, floors of trading screens glowing amber/green at random.
+ */
+export function glassTowerTexture(litSeed: number): THREE.CanvasTexture {
+  const key = `glasstower:${litSeed}`;
+  if (cache.has(key)) return cache.get(key)!;
+  const W = 512;
+  const H = 1024;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d")!;
+  const rnd = prng(1300 + litSeed * 7);
+  // Sky-reflecting glass backdrop
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#16222e");
+  g.addColorStop(0.45, "#23384a");
+  g.addColorStop(0.55, "#2c4557");
+  g.addColorStop(1, "#101a24");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // Diagonal sky glint
+  ctx.fillStyle = "rgba(190,215,230,0.10)";
+  ctx.beginPath();
+  ctx.moveTo(W * 0.15, H);
+  ctx.lineTo(W * 0.55, 0);
+  ctx.lineTo(W * 0.8, 0);
+  ctx.lineTo(W * 0.4, H);
+  ctx.closePath();
+  ctx.fill();
+  const floors = 26;
+  const cols = 8;
+  const fh = H / floors;
+  const cw = W / cols;
+  // Lit panes — trading screens burning after dark
+  for (let f = 0; f < floors; f++) {
+    for (let col = 0; col < cols; col++) {
+      const r = rnd();
+      if (r < 0.24) {
+        ctx.fillStyle = r < 0.07 ? "rgba(126,231,135,0.75)" : "rgba(255,199,110,0.7)";
+        ctx.fillRect(col * cw + 2, f * fh + 2, cw - 4, fh - 4);
+      } else if (r < 0.3) {
+        ctx.fillStyle = "rgba(140,170,190,0.25)";
+        ctx.fillRect(col * cw + 2, f * fh + 2, cw - 4, fh - 4);
+      }
+    }
+  }
+  // Mullion grid
+  ctx.strokeStyle = "rgba(10,14,18,0.9)";
+  ctx.lineWidth = 3;
+  for (let f = 0; f <= floors; f++) {
+    ctx.beginPath();
+    ctx.moveTo(0, f * fh);
+    ctx.lineTo(W, f * fh);
+    ctx.stroke();
+  }
+  for (let col = 0; col <= cols; col++) {
+    ctx.beginPath();
+    ctx.moveTo(col * cw, 0);
+    ctx.lineTo(col * cw, H);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  cache.set(key, tex);
+  return tex;
+}
+
 // ── Interior surfaces ───────────────────────────────────────────────
 
 export function woodFloorTexture(): THREE.CanvasTexture {
