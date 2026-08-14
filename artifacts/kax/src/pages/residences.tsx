@@ -94,6 +94,60 @@ function Stairs() {
   );
 }
 
+interface ResidenceUnit {
+  floor: number;
+  letter: string;
+  label: string;
+  tier: number;
+  occupied: boolean;
+  resident: { slug: string | null; name: string | null } | null;
+}
+
+/** One unit door: nameplate when someone lives there, VACANT when nobody does. */
+function UnitDoor({
+  position,
+  rotation,
+  label,
+  unit,
+}: {
+  position: [number, number, number];
+  rotation: number;
+  label: string;
+  unit?: ResidenceUnit;
+}) {
+  const occupied = !!unit?.occupied;
+  const who = unit?.resident?.name ?? unit?.resident?.slug ?? "";
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 1.3, 0]} castShadow>
+        <boxGeometry args={[1.3, 2.6, 0.12]} />
+        <meshStandardMaterial color={occupied ? "#5c4530" : "#4a3826"} roughness={0.65} />
+      </mesh>
+      {/* Brass plate only on a home someone actually has */}
+      {occupied && (
+        <mesh position={[0, 1.62, 0.075]}>
+          <boxGeometry args={[0.92, 0.24, 0.02]} />
+          <meshStandardMaterial color="#7a5c30" metalness={0.75} roughness={0.35} />
+        </mesh>
+      )}
+      <Suspense fallback={null}>
+        <Text position={[0, 2.15, 0.09]} fontSize={0.13} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          {label}
+        </Text>
+        {occupied ? (
+          <Text position={[0, 1.62, 0.095]} fontSize={0.085} color="#efe3c4" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={0.88}>
+            {who.slice(0, 18)}
+          </Text>
+        ) : (
+          <Text position={[0, 1.62, 0.09]} fontSize={0.07} color="#6a6252" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            VACANT
+          </Text>
+        )}
+      </Suspense>
+    </group>
+  );
+}
+
 /** A framed real artwork for the penthouse walls. */
 function PhArt({ url, title, position, rotation, w = 1.7 }: { url: string; title: string; position: [number, number, number]; rotation: [number, number, number]; w?: number }) {
   const [tex, setTex] = useState<THREE.Texture | null>(null);
@@ -140,6 +194,28 @@ export default function Residences() {
   const [inElevator, setInElevator] = useState(false);
   const [spawn, setSpawn] = useState<FpsSpawn | null>(null);
   const [phArt, setPhArt] = useState<Array<{ url: string; title: string }>>([]);
+  const [units, setUnits] = useState<ResidenceUnit[]>([]);
+
+  // The floor plan: which doors are homes and which are still vacant.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/residences/units")
+      .then((r) => (r.ok ? r.json() : { units: [] }))
+      .then((j: { units?: ResidenceUnit[] }) => {
+        if (alive) setUnits(j.units ?? []);
+      })
+      .catch(() => {
+        /* an unlisted floor still reads as vacant, which is the truth anyway */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const unitFor = useCallback(
+    (f: number, letter: string) => units.find((u) => u.floor === f + 1 && u.letter === letter),
+    [units],
+  );
 
   // Kannaka's real works for the penthouse walls.
   useEffect(() => {
@@ -651,32 +727,26 @@ export default function Residences() {
               </>
             ) : (
               <>
-                {/* RESIDENCE FLOOR: unit doors along both long walls */}
+                {/* RESIDENCE FLOOR: unit doors along both long walls. A door
+                    with a resident carries their nameplate; a vacant one says
+                    so plainly — the floor is empty on purpose, not unfinished. */}
                 {[-6.5, -2.2, 2.2, 6.5].map((x, i) => (
-                  <group key={`n${x}`} position={[x, 0, -8.3]}>
-                    <mesh position={[0, 1.3, 0]} castShadow>
-                      <boxGeometry args={[1.3, 2.6, 0.12]} />
-                      <meshStandardMaterial color="#4a3826" roughness={0.65} />
-                    </mesh>
-                    <Suspense fallback={null}>
-                      <Text position={[0, 2.15, 0.09]} fontSize={0.13} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
-                        {`${floorLabel(floor)}${"ABCD"[i]}`}
-                      </Text>
-                    </Suspense>
-                  </group>
+                  <UnitDoor
+                    key={`n${x}`}
+                    position={[x, 0, -8.3]}
+                    rotation={0}
+                    label={`${floorLabel(floor)}${"ABCD"[i]}`}
+                    unit={unitFor(floor, "ABCD"[i]!)}
+                  />
                 ))}
                 {[-6.5, -2.2, 2.2, 6.5].map((x, i) => (
-                  <group key={`s${x}`} position={[x, 0, 8.3]} rotation={[0, Math.PI, 0]}>
-                    <mesh position={[0, 1.3, 0]} castShadow>
-                      <boxGeometry args={[1.3, 2.6, 0.12]} />
-                      <meshStandardMaterial color="#4a3826" roughness={0.65} />
-                    </mesh>
-                    <Suspense fallback={null}>
-                      <Text position={[0, 2.15, 0.09]} fontSize={0.13} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
-                        {`${floorLabel(floor)}${"EFGH"[i]}`}
-                      </Text>
-                    </Suspense>
-                  </group>
+                  <UnitDoor
+                    key={`s${x}`}
+                    position={[x, 0, 8.3]}
+                    rotation={Math.PI}
+                    label={`${floorLabel(floor)}${"EFGH"[i]}`}
+                    unit={unitFor(floor, "EFGH"[i]!)}
+                  />
                 ))}
                 {/* Hall runner */}
                 <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.011, 0]}>
