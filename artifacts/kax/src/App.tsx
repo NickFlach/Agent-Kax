@@ -27,6 +27,8 @@ import StorefrontSettings from "@/pages/storefront-settings";
 import AgentStorefront from "@/pages/agent-storefront";
 import StoreInterior from "@/pages/store-interior";
 import GsTradingFloor from "@/pages/gs-trading-floor";
+import ArcadeHall from "@/pages/arcade-hall";
+import BankHall from "@/pages/bank-hall";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
@@ -404,6 +406,12 @@ function Router() {
       </Route>
       <Route path="/gs/floor">
         <GsTradingFloor />
+      </Route>
+      <Route path="/arcade">
+        <ArcadeHall />
+      </Route>
+      <Route path="/bank">
+        <BankHall />
       </Route>
       <Route path="/s/:slug/room">
         <StoreInterior />
