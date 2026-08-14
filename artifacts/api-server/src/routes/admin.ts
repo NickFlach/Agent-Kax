@@ -4,7 +4,7 @@ import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { ListAdminUsersResponse, UpdateAdminUserBody, UpdateAdminUserParams } from "@workspace/api-zod";
-import { reattributeArtifactsByCreator, repairPlaceholderAgentNames } from "../lib/backfill";
+import { reattributeArtifactsByCreator, repairPlaceholderAgentNames, repairUnknownAgents } from "../lib/backfill";
 import {
   partnerApiAvailable,
   partnerApiKey,
@@ -111,6 +111,16 @@ type RepairJob = {
   error: string | null;
 };
 let repairJob: RepairJob | null = null;
+
+// Merge/rename agents minted under the literal "Unknown" name (feed items
+// with no creator object): resolves each placeholder's real name by bot UUID,
+// MERGES it into an existing same-name agent when one exists (the classic
+// `clawdine` 41 / `unknown-<uuid6>` 900+ split), else renames in place.
+// Idempotent; synchronous (one exact lookup per bot, seconds not minutes).
+router.post("/admin/repair-unknown-agents", requireAdminOrServiceToken, async (_req, res) => {
+  const result = await repairUnknownAgents();
+  res.json(result);
+});
 
 router.post("/admin/repair-agent-names", requireAdminOrServiceToken, async (req, res) => {
   if (repairJob?.status === "running") {

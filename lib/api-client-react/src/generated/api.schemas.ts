@@ -312,6 +312,8 @@ export const ArtifactArtifactType = {
   text: "text",
   audio: "audio",
   furniture: "furniture",
+  video: "video",
+  app: "app",
 } as const;
 
 export type ArtifactStatus =
@@ -384,6 +386,8 @@ export const HotArtifactArtifactType = {
   text: "text",
   audio: "audio",
   furniture: "furniture",
+  video: "video",
+  app: "app",
 } as const;
 
 export interface HotArtifact {
@@ -507,6 +511,8 @@ export const HarvesterRunBodyType = {
   text: "text",
   music: "music",
   furniture: "furniture",
+  video: "video",
+  app: "app",
   all: "all",
 } as const;
 
@@ -847,6 +853,8 @@ export const HarvestAgentBodyType = {
   text: "text",
   music: "music",
   furniture: "furniture",
+  video: "video",
+  app: "app",
   all: "all",
 } as const;
 
@@ -1386,6 +1394,8 @@ export const ListArtifactsArtifactType = {
   music: "music",
   text: "text",
   furniture: "furniture",
+  video: "video",
+  app: "app",
 } as const;
 
 export type ListArtifactsEditionType =

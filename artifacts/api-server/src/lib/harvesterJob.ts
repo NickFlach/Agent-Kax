@@ -36,6 +36,8 @@ export interface HarvestRunResult {
   perOwnerNew: Record<string, number>;
   /** New-artifact counts from this run keyed by (stringified) agent id. */
   perAgentNew: Record<string, number>;
+  /** Artifacts skipped because their type is not in the schema enum yet. */
+  skippedUnsupported: number;
 }
 
 interface Attribution {
@@ -296,6 +298,7 @@ async function doRunPartnerHarvest(opts: {
     harvested,
     newArtifacts,
     duplicates,
+    skippedUnsupported,
     perOwnerNew: Object.fromEntries(perOwnerNew),
     perAgentNew: Object.fromEntries(
       [...perAgentNew].map(([agentId, n]) => [String(agentId), n]),

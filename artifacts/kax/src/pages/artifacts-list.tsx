@@ -83,7 +83,7 @@ export default function ArtifactsList() {
 
   const params = {
     ...(status !== "all" ? { status: status as "raw" | "scored" | "narrated" | "dropped" } : {}),
-    ...(typeFilter !== "all" ? { artifactType: typeFilter as "image" | "audio" | "music" | "text" | "furniture" } : {}),
+    ...(typeFilter !== "all" ? { artifactType: typeFilter as "image" | "audio" | "music" | "text" | "furniture" | "video" | "app" } : {}),
     ...(editionFilter !== "all" ? { editionType: editionFilter as "open" | "limited" | "1_of_1" } : {}),
     ...(search ? { search } : {}),
     ...(showAll ? { all: true } : {}),
@@ -152,6 +152,8 @@ export default function ArtifactsList() {
             <SelectItem value="music">Music</SelectItem>
             <SelectItem value="text">Text</SelectItem>
             <SelectItem value="furniture">Furniture</SelectItem>
+            <SelectItem value="video">Video</SelectItem>
+            <SelectItem value="app">Apps</SelectItem>
           </SelectContent>
         </Select>
         <Select value={editionFilter} onValueChange={setEditionFilter}>

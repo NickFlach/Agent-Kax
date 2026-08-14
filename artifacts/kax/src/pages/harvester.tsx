@@ -24,7 +24,7 @@ import { useAuth } from "@/hooks/use-auth";
 export default function Harvester() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture" | "all">("image");
+  const [type, setType] = useState<"image" | "audio" | "text" | "music" | "furniture" | "video" | "app" | "all">("image");
   const [limit, setLimit] = useState("20");
   const [minReactions, setMinReactions] = useState("0");
   const [creator, setCreator] = useState("");
@@ -133,7 +133,7 @@ export default function Harvester() {
 
             <div>
               <label className="text-xs text-muted-foreground uppercase tracking-wider block mb-2">Artifact Type</label>
-              <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture" | "all")}>
+              <Select value={type} onValueChange={(v) => setType(v as "image" | "audio" | "text" | "music" | "furniture" | "video" | "app" | "all")}>
                 <SelectTrigger data-testid="select-type">
                   <SelectValue />
                 </SelectTrigger>
@@ -144,6 +144,8 @@ export default function Harvester() {
                   <SelectItem value="music">Music</SelectItem>
                   <SelectItem value="text">Text</SelectItem>
                   <SelectItem value="furniture">Furniture</SelectItem>
+                  <SelectItem value="video">Video</SelectItem>
+                  <SelectItem value="app">Apps</SelectItem>
                 </SelectContent>
               </Select>
             </div>

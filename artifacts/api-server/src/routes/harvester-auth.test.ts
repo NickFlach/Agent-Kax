@@ -62,6 +62,7 @@ function makeResult(overrides: Partial<HarvestRunResult> = {}): HarvestRunResult
     harvested: 10,
     newArtifacts: 4,
     duplicates: 6,
+    skippedUnsupported: 0,
     perOwnerNew: {},
     perAgentNew: {},
     ...overrides,
