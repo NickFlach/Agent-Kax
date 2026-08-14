@@ -34,13 +34,21 @@ function pickImageUrl(a: Artifact): string | null {
   return thumb;
 }
 
+/** A playable video work: the new OBC artifact type, hung like a painting.
+ *  (Cast: the generated schema predates the city's video/app types.) */
+function isPlayableVideo(a: Artifact): boolean {
+  return (a.artifactType as string) === "video" && !!a.publicUrl && !a.publicUrl.startsWith("inline:");
+}
+
 /**
  * The works feed is newest-first and an active agent's recent output can be
  * all text/audio (Kannaka: 31 text + 8 audio + 1 image in her latest 40 —
  * which is why her gallery hung a single painting). Page through the catalog
- * until the walls are FULL of image works, not just whatever happened last.
+ * until the walls are FULL of hangable works — images, plus up to a few
+ * playable VIDEO works (the city's newest medium) — not just whatever
+ * happened to be posted last.
  */
-function useImageWorks(slug: string, want: number) {
+function useWallWorks(slug: string, want: number, maxVideos = 4) {
   const [works, setWorks] = useState<Artifact[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -48,17 +56,19 @@ function useImageWorks(slug: string, want: number) {
     let alive = true;
     (async () => {
       setLoading(true);
-      const found: Artifact[] = [];
+      const images: Artifact[] = [];
+      const videos: Artifact[] = [];
       let tot = 0;
       try {
-        for (let page = 0; page < 6 && found.length < want; page++) {
+        for (let page = 0; page < 8 && images.length + Math.min(videos.length, maxVideos) < want; page++) {
           const r = await fetch(`/api/storefront/by-agent/${encodeURIComponent(slug)}/works?limit=100&offset=${page * 100}`);
           if (!r.ok) break;
           const j = (await r.json()) as { total?: number; artifacts?: Artifact[] };
           tot = j.total ?? tot;
           const batch = j.artifacts ?? [];
           for (const a of batch) {
-            if (pickImageUrl(a) !== null) found.push(a);
+            if (isPlayableVideo(a)) videos.push(a);
+            else if (pickImageUrl(a) !== null) images.push(a);
           }
           if (batch.length < 100) break; // catalog exhausted
         }
@@ -66,7 +76,8 @@ function useImageWorks(slug: string, want: number) {
         /* leave what we found */
       }
       if (alive) {
-        setWorks(found.slice(0, want));
+        // Videos lead (they're the newest medium), then images fill the walls.
+        setWorks([...videos.slice(0, maxVideos), ...images].slice(0, want));
         setTotal(tot);
         setLoading(false);
       }
@@ -74,7 +85,7 @@ function useImageWorks(slug: string, want: number) {
     return () => {
       alive = false;
     };
-  }, [slug, want]);
+  }, [slug, want, maxVideos]);
   return { works, total, loading };
 }
 
@@ -184,6 +195,131 @@ function ArtworkFrame({
           </Text>
           <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={item.curatedBy ? accent : "#77705f"} font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
             {item.curatedBy ? `curated · by ${item.curatedBy}` : work.artifactType}
+          </Text>
+        </Suspense>
+      </group>
+    </group>
+  );
+}
+
+/**
+ * A wall-hung VIDEO work — plays in place like a living painting.
+ * Muted + looped so browsers allow autoplay; unmutes while you hover it.
+ * If the stream can't load, falls back to hanging its thumbnail still.
+ */
+function VideoFrame({
+  item,
+  position,
+  rotation,
+  accent,
+  onOpen,
+  onHover,
+}: {
+  item: WallItem;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  accent: string;
+  onOpen: (w: Artifact) => void;
+  onHover: (w: Artifact | null) => void;
+}) {
+  const work = item.work;
+  const [tex, setTex] = useState<THREE.VideoTexture | null>(null);
+  const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const url = work.publicUrl;
+    if (!url) {
+      setFailed(true);
+      return;
+    }
+    const v = document.createElement("video");
+    v.crossOrigin = "anonymous";
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.src = url;
+    let alive = true;
+    v.addEventListener("canplay", () => {
+      if (!alive) return;
+      const t = new THREE.VideoTexture(v);
+      t.colorSpace = THREE.SRGBColorSpace;
+      videoRef.current = v;
+      setTex(t);
+      v.play().catch(() => {});
+    });
+    v.addEventListener("error", () => alive && setFailed(true));
+    return () => {
+      alive = false;
+      try {
+        v.pause();
+        v.src = "";
+        v.load();
+      } catch {
+        /* noop */
+      }
+    };
+  }, [work]);
+
+  // Failed stream → hang the thumbnail still instead (or nothing).
+  if (failed) {
+    return pickImageUrl(work) ? (
+      <ArtworkFrame item={item} position={position} rotation={rotation} accent={accent} onOpen={onOpen} onHover={onHover} />
+    ) : null;
+  }
+  if (!tex) return null;
+
+  const w = 2.6; // cinema-widescreen hang
+  const h = 1.5;
+
+  return (
+    <group
+      position={position}
+      rotation={rotation}
+      onClick={(e) => {
+        if (((e as unknown as { delta?: number }).delta ?? 0) > 5) return;
+        e.stopPropagation?.();
+        onOpen(work);
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation?.();
+        onHover(work);
+        document.body.style.cursor = "pointer";
+        // Sound while you stand in front of it.
+        if (videoRef.current) {
+          videoRef.current.muted = false;
+          videoRef.current.play().catch(() => {});
+        }
+      }}
+      onPointerOut={() => {
+        onHover(null);
+        document.body.style.cursor = "auto";
+        if (videoRef.current) videoRef.current.muted = true;
+      }}
+    >
+      {/* Slim dark cinema frame */}
+      <mesh position={[0, 0, -0.045]} castShadow>
+        <boxGeometry args={[w + 0.18, h + 0.18, 0.07]} />
+        <meshStandardMaterial color="#17181a" roughness={0.5} metalness={0.3} />
+      </mesh>
+      {/* The moving picture */}
+      <mesh>
+        <planeGeometry args={[w, h]} />
+        <meshBasicMaterial map={tex} toneMapped={false} />
+      </mesh>
+      {/* Placard */}
+      <group position={[0, -(h / 2) - 0.32, 0]}>
+        <mesh>
+          <planeGeometry args={[1.15, 0.3]} />
+          <meshStandardMaterial color="#faf7f0" roughness={0.85} />
+        </mesh>
+        <Suspense fallback={null}>
+          <Text position={[0, 0.055, 0.01]} fontSize={0.085} color="#2c2822" font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+            {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
+          </Text>
+          <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={accent} font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+            ▶ video · hover for sound
           </Text>
         </Suspense>
       </group>
@@ -311,7 +447,7 @@ export default function StoreInterior() {
   const { data: landing } = useGetAgentStorefront(slug, {
     query: { queryKey: getGetAgentStorefrontQueryKey(slug), retry: false },
   });
-  const { works: imageWorks, total, loading: isLoading } = useImageWorks(slug, MAX_WALL_WORKS);
+  const { works: imageWorks, total, loading: isLoading } = useWallWorks(slug, MAX_WALL_WORKS);
   const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
     query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug), retry: false },
   });
@@ -329,7 +465,7 @@ export default function StoreInterior() {
     }));
     const seen = new Set(own.map((i) => i.work.id));
     return [...own, ...curated.filter((i) => !seen.has(i.work.id))]
-      .filter((i) => pickImageUrl(i.work) !== null)
+      .filter((i) => pickImageUrl(i.work) !== null || isPlayableVideo(i.work))
       .slice(0, MAX_WALL_WORKS);
   }, [imageWorks, listingsResp]);
 
@@ -457,7 +593,8 @@ export default function StoreInterior() {
             // A look-drag ending on the door is not a click.
             if (((e as unknown as { delta?: number }).delta ?? 0) > 5) return;
             e.stopPropagation?.();
-            navigate("/city");
+            // Land just outside THIS store's door, not at the district gate.
+            navigate(`/city?from=${encodeURIComponent(slug)}`);
           }}
           onPointerOver={() => (document.body.style.cursor = "pointer")}
           onPointerOut={() => (document.body.style.cursor = "auto")}
@@ -545,18 +682,30 @@ export default function StoreInterior() {
           <NpcFigure color={accent} seed={7} />
         </group>
 
-        {/* The works — images only, honestly proportioned */}
+        {/* The works — images and playing videos, honestly proportioned */}
         {wallItems.map((it, i) =>
           slots[i] ? (
-            <ArtworkFrame
-              key={`${it.work.id}-${it.curatedBy ? "c" : "o"}`}
-              item={it}
-              position={slots[i].pos}
-              rotation={slots[i].rot}
-              accent={accent}
-              onOpen={openWork}
-              onHover={setHovered}
-            />
+            isPlayableVideo(it.work) ? (
+              <VideoFrame
+                key={`${it.work.id}-v`}
+                item={it}
+                position={slots[i].pos}
+                rotation={slots[i].rot}
+                accent={accent}
+                onOpen={openWork}
+                onHover={setHovered}
+              />
+            ) : (
+              <ArtworkFrame
+                key={`${it.work.id}-${it.curatedBy ? "c" : "o"}`}
+                item={it}
+                position={slots[i].pos}
+                rotation={slots[i].rot}
+                accent={accent}
+                onOpen={openWork}
+                onHover={setHovered}
+              />
+            )
           ) : null,
         )}
 

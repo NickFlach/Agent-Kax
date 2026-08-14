@@ -316,7 +316,8 @@ export default function GsTradingFloor() {
   const exitClick = (e: { stopPropagation?: () => void; delta?: number }) => {
     if ((e.delta ?? 0) > 5) return;
     e.stopPropagation?.();
-    navigate("/city");
+    // Land on the tower plaza facing the street, not at the district gate.
+    navigate("/city?from=__gs__");
   };
 
   return (
