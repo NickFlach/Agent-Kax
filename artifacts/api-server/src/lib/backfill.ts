@@ -610,6 +610,12 @@ export async function findOrCreateAgentByBotUuid(
   }
 
   let name = opts?.name?.trim() || null;
+  // The partner feed's normalizeArtifact stamps the literal "Unknown" when a
+  // feed item carries no nested creator object. Treating that placeholder as
+  // an authoritative name skipped the real lookups below and minted agents
+  // like `unknown-<uuid6>` — which is how Clawdine's 900+ works ended up under
+  // an "Unknown" storefront while her named agent showed a few dozen.
+  if (name && /^unknown$/i.test(name)) name = null;
   let avatarUrl = opts?.avatarUrl ?? null;
   if (!name) {
     // Fast exact lookup first; fall back to the gallery walk only if that fails.
@@ -1070,4 +1076,105 @@ export async function repairCreatorAttribution(): Promise<void> {
     },
     "repairCreatorAttribution: complete",
   );
+}
+
+/** Result of one {@link repairUnknownAgents} pass. */
+export interface UnknownAgentRepairResult {
+  scanned: number;
+  merged: number;
+  renamed: number;
+  skipped: number;
+  details: Array<{ slug: string; action: "merged" | "renamed" | "skipped"; into?: string; name?: string; reason?: string }>;
+}
+
+/**
+ * Repair placeholder agents that were minted under the literal name "Unknown"
+ * (or the uuid-derived "Agent <hex>" label) because the partner feed item
+ * carried no creator object at harvest time.
+ *
+ * For each unclaimed placeholder with a bot UUID, the real name is resolved
+ * via the partner/gallery lookups. If a DIFFERENT agent already exists whose
+ * slug matches the real name (the classic split: `clawdine` with a few dozen
+ * early works next to `unknown-<uuid6>` holding the other 900), the
+ * placeholder is MERGED into it — artifacts reassigned, bot UUID carried
+ * over, placeholder deleted. Otherwise the placeholder is renamed in place.
+ * Artifacts stamped `creatorName = 'Unknown'` are re-stamped either way.
+ *
+ * Idempotent: a repaired agent no longer matches the placeholder filter.
+ */
+export async function repairUnknownAgents(): Promise<UnknownAgentRepairResult> {
+  const placeholders = await db
+    .select()
+    .from(agentsTable)
+    .where(
+      and(
+        eq(agentsTable.ownerId, KANNAKA_SYSTEM_USER_ID),
+        sql`${agentsTable.obcBotId} IS NOT NULL`,
+        or(
+          sql`lower(${agentsTable.displayName}) = 'unknown'`,
+          sql`${agentsTable.slug} LIKE 'unknown%'`,
+          sql`${agentsTable.displayName} LIKE 'Agent %'`,
+        ),
+      ),
+    );
+
+  const result: UnknownAgentRepairResult = {
+    scanned: placeholders.length,
+    merged: 0,
+    renamed: 0,
+    skipped: 0,
+    details: [],
+  };
+
+  for (const ph of placeholders) {
+    const botId = ph.obcBotId!;
+    const info = (await resolveCreatorNameDirect(botId)) ?? (await ensureCreatorName(botId));
+    const name = info?.displayName?.trim();
+    if (!name || /^unknown$/i.test(name)) {
+      result.skipped++;
+      result.details.push({ slug: ph.slug, action: "skipped", reason: "name unresolvable" });
+      continue;
+    }
+
+    const targetSlug = slugifyCreator(name) || `bot-${botId.slice(0, 8)}`;
+    const [target] = await db
+      .select()
+      .from(agentsTable)
+      .where(and(eq(agentsTable.slug, targetSlug), sql`${agentsTable.id} <> ${ph.id}`))
+      .limit(1);
+
+    if (target) {
+      if (target.obcBotId && target.obcBotId !== botId) {
+        // Same display name, different bot — a genuine namesake. Rename the
+        // placeholder to a disambiguated slug instead of merging identities.
+        const slug = `${targetSlug}-${botId.slice(0, 6)}`;
+        await db.update(agentsTable).set({ displayName: name, slug, avatarUrl: ph.avatarUrl ?? info?.avatarUrl ?? null }).where(eq(agentsTable.id, ph.id));
+        await db.update(artifactsTable).set({ creatorName: name }).where(and(eq(artifactsTable.agentId, ph.id), sql`lower(${artifactsTable.creatorName}) = 'unknown'`));
+        result.renamed++;
+        result.details.push({ slug: ph.slug, action: "renamed", name });
+        continue;
+      }
+      // Merge the placeholder into the named agent: move its artifacts, carry
+      // the bot UUID over, and delete the placeholder row.
+      await db.update(artifactsTable).set({ agentId: target.id, creatorName: name }).where(eq(artifactsTable.agentId, ph.id));
+      // Placeholder must release the unique obc_bot_id before the target can take it.
+      await db.update(agentsTable).set({ obcBotId: null }).where(eq(agentsTable.id, ph.id));
+      if (!target.obcBotId) {
+        await db.update(agentsTable).set({ obcBotId: botId }).where(eq(agentsTable.id, target.id));
+      }
+      await db.delete(agentsTable).where(eq(agentsTable.id, ph.id));
+      result.merged++;
+      result.details.push({ slug: ph.slug, action: "merged", into: target.slug, name });
+      continue;
+    }
+
+    // No existing agent under the real name — rename the placeholder in place.
+    await db.update(agentsTable).set({ displayName: name, slug: targetSlug, avatarUrl: ph.avatarUrl ?? info?.avatarUrl ?? null }).where(eq(agentsTable.id, ph.id));
+    await db.update(artifactsTable).set({ creatorName: name }).where(and(eq(artifactsTable.agentId, ph.id), sql`lower(${artifactsTable.creatorName}) = 'unknown'`));
+    result.renamed++;
+    result.details.push({ slug: ph.slug, action: "renamed", name });
+  }
+
+  logger.info(result, "repairUnknownAgents: complete");
+  return result;
 }

@@ -34,6 +34,7 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
   let newArtifacts = 0;
   let duplicates = 0;
   let yourNewArtifacts = 0;
+  let skippedUnsupported = 0;
 
   // Note: we no longer wrap this in a try/catch that swallows errors and
   // returns 200. Async route rejections propagate to the global error
@@ -74,6 +75,7 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
     harvested = result.harvested;
     newArtifacts = result.newArtifacts;
     duplicates = result.duplicates;
+    skippedUnsupported = result.skippedUnsupported;
     yourNewArtifacts = result.perOwnerNew[ownerId] ?? 0;
   } else if (!isAdmin) {
     // The registry fallback stamps every fetched row with ownerId=requester
@@ -155,7 +157,7 @@ router.post("/harvester/run", requireAuth, async (req, res) => {
     });
   }
 
-  res.json({ harvested, newArtifacts, duplicates, paired, yourNewArtifacts });
+  res.json({ harvested, newArtifacts, duplicates, paired, yourNewArtifacts, skippedUnsupported });
 });
 
 function extractKeywords(title: string): string[] {

@@ -2664,7 +2664,7 @@ components:
       properties:
         type:
           type: string
-          enum: [image, audio, text, music, furniture, all]
+          enum: [image, audio, text, music, furniture, video, app, all]
           default: image
         limit:
           type: integer
@@ -3059,7 +3059,7 @@ components:
       properties:
         type:
           type: string
-          enum: [image, audio, text, music, furniture, all]
+          enum: [image, audio, text, music, furniture, video, app, all]
         limit:
           type: integer
           default: 25
