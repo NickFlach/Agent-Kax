@@ -208,6 +208,13 @@ async function runStartupStep(
 }
 
 async function warmUpInBackground(): Promise<void> {
+  // First, before anything queries: does the database still look like the
+  // schema this code reads? A missing table used to surface only as a
+  // generic 500 on one endpoint (#191); now it names itself in the log.
+  await runStartupStep("schemaSelfCheck", async () => {
+    const { reportSchemaAtBoot } = await import("./lib/schemaSelfCheck");
+    await reportSchemaAtBoot();
+  });
   await runStartupStep("ensureKannakaOwnerAndBackfill", ensureKannakaOwnerAndBackfill);
   await runStartupStep("claimLegacyOwnership", claimLegacyOwnership);
   // One-time creator-attribution repair (env-gated: KAX_REPAIR_ATTRIBUTION=1).
