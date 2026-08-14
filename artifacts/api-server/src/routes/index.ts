@@ -25,6 +25,7 @@ import connectorsRouter from "./connectors";
 import marketplaceCombinedRouter from "./marketplace-combined";
 import floorRouter from "./floor";
 import predictionsRouter from "./predictions";
+import arcadeRouter from "./arcade";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,7 @@ router.use(identityRouter);
 router.use(ledgerRouter);
 router.use(adminRouter);
 router.use(artifactsRouter);
+router.use(arcadeRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);

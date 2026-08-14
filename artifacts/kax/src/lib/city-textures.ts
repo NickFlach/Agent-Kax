@@ -498,6 +498,104 @@ export function ceilingTexture(): THREE.CanvasTexture {
   return finish(key, c);
 }
 
+/** Classic 90s arcade carpet: deep space blue with neon confetti shapes. */
+export function arcadeCarpetTexture(): THREE.CanvasTexture {
+  const key = "arcadecarpet";
+  if (cache.has(key)) return cache.get(key)!;
+  const S = 512;
+  const [c, ctx] = makeCanvas(S);
+  const rnd = prng(1414);
+  ctx.fillStyle = "#0d1030";
+  ctx.fillRect(0, 0, S, S);
+  // Nebula blotches
+  for (let i = 0; i < 10; i++) {
+    const g = ctx.createRadialGradient(rnd() * S, rnd() * S, 6, rnd() * S, rnd() * S, 60 + rnd() * 90);
+    g.addColorStop(0, ["rgba(90,40,160,0.25)", "rgba(20,80,160,0.25)", "rgba(150,30,120,0.2)"][i % 3]);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+  }
+  const NEON = ["#ff2fb0", "#28e0ff", "#ffe94a", "#7dff5a", "#ff7a28"];
+  // Confetti: squiggles, triangles, lightning zags, dots
+  for (let i = 0; i < 90; i++) {
+    ctx.strokeStyle = NEON[Math.floor(rnd() * NEON.length)];
+    ctx.fillStyle = NEON[Math.floor(rnd() * NEON.length)];
+    ctx.lineWidth = 2.2;
+    const x = rnd() * S;
+    const y = rnd() * S;
+    const kind = Math.floor(rnd() * 4);
+    ctx.beginPath();
+    if (kind === 0) {
+      // squiggle
+      ctx.moveTo(x, y);
+      ctx.bezierCurveTo(x + 12, y - 12, x + 20, y + 12, x + 32, y);
+      ctx.stroke();
+    } else if (kind === 1) {
+      // triangle outline
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 14, y + 3);
+      ctx.lineTo(x + 5, y + 14);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (kind === 2) {
+      // lightning zag
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 8, y + 8);
+      ctx.lineTo(x + 3, y + 10);
+      ctx.lineTo(x + 12, y + 20);
+      ctx.stroke();
+    } else {
+      ctx.arc(x, y, 2.5 + rnd() * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Carpet fiber noise
+  speckle(ctx, rnd, S, 3200, 0.1, "#3a3f66", "#05071a", 0.9);
+  return finish(key, c);
+}
+
+/** Polished marble: warm white field with grey/gold veining. */
+export function marbleTexture(): THREE.CanvasTexture {
+  const key = "marble";
+  if (cache.has(key)) return cache.get(key)!;
+  const S = 512;
+  const [c, ctx] = makeCanvas(S);
+  const rnd = prng(1515);
+  ctx.fillStyle = "#e9e5dc";
+  ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 14; i++) {
+    const g = ctx.createRadialGradient(rnd() * S, rnd() * S, 8, rnd() * S, rnd() * S, 50 + rnd() * 110);
+    g.addColorStop(0, "rgba(200,193,180,0.16)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+  }
+  // Veins — long meandering strokes with fine branches
+  for (let v = 0; v < 9; v++) {
+    const gold = rnd() < 0.3;
+    ctx.strokeStyle = gold ? "rgba(168,138,74,0.4)" : "rgba(120,118,116,0.42)";
+    ctx.lineWidth = 1 + rnd() * 1.6;
+    let x = rnd() * S;
+    let y = 0;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    while (y < S) {
+      x += (rnd() - 0.5) * 46;
+      y += 18 + rnd() * 30;
+      ctx.lineTo(x, y);
+      if (rnd() < 0.35) {
+        // branch
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (rnd() - 0.5) * 60, y + 10 + rnd() * 24);
+        ctx.moveTo(x, y);
+      }
+    }
+    ctx.stroke();
+  }
+  speckle(ctx, rnd, S, 1200, 0.06, "#ffffff", "#b8b2a6", 0.8);
+  return finish(key, c);
+}
+
 // ── Vegetation ──────────────────────────────────────────────────────
 
 export function barkTexture(): THREE.CanvasTexture {

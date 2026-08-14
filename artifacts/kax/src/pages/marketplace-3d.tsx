@@ -713,6 +713,202 @@ function GhostSignalsTower({ position, onEnter }: { position: [number, number, n
   );
 }
 
+/**
+ * THE ARCADE — a classic two-story video arcade on the monument plaza:
+ * black facade, giant chase-light marquee, glowing poster cases, light
+ * spilling through the doors. Click / walk up + E to step inside (/arcade).
+ */
+function ArcadeVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  const chase = ["#ff2fb0", "#28e0ff", "#ffe94a"];
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Shell */}
+      <mesh position={[0, 3.75, 0]} castShadow receiveShadow>
+        <boxGeometry args={[10, 7.5, 9]} />
+        <meshStandardMaterial color="#181a1e" roughness={0.75} />
+      </mesh>
+      {/* Marquee band */}
+      <mesh position={[0, 5.4, 4.56]} castShadow>
+        <boxGeometry args={[9.6, 1.7, 0.25]} />
+        <meshStandardMaterial color="#0b0b0d" roughness={0.5} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 5.4, 4.72]} fontSize={1.05} color="#ff2fb0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          ARCADE
+        </Text>
+      </Suspense>
+      {/* Chase lights framing the marquee */}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <mesh key={`t${i}`} position={[-5 + i * 0.91, 6.35, 4.7]}>
+          <sphereGeometry args={[0.07, 8, 8]} />
+          <meshStandardMaterial color={chase[i % 3]} emissive={chase[i % 3]} emissiveIntensity={1.6} toneMapped={false} />
+        </mesh>
+      ))}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <mesh key={`b${i}`} position={[-5 + i * 0.91, 4.45, 4.7]}>
+          <sphereGeometry args={[0.07, 8, 8]} />
+          <meshStandardMaterial color={chase[(i + 1) % 3]} emissive={chase[(i + 1) % 3]} emissiveIntensity={1.6} toneMapped={false} />
+        </mesh>
+      ))}
+      {/* Entrance: glass doors with light spilling out */}
+      <mesh position={[0, 1.7, 4.52]}>
+        <planeGeometry args={[3.4, 3.4]} />
+        <meshStandardMaterial color="#2a1636" emissive="#b12fff" emissiveIntensity={0.5} />
+      </mesh>
+      <mesh position={[0, 1.6, 4.56]}>
+        <planeGeometry args={[3.0, 3.1]} />
+        <meshPhysicalMaterial color="#c9b6ff" transparent opacity={0.3} roughness={0.1} />
+      </mesh>
+      <mesh position={[0, 1.6, 4.58]}>
+        <boxGeometry args={[0.06, 3.1, 0.03]} />
+        <meshStandardMaterial color="#0b0b0d" />
+      </mesh>
+      {/* Poster cases */}
+      {[-3.4, 3.4].map((x, i) => (
+        <group key={x} position={[x, 2.1, 4.54]}>
+          <mesh castShadow>
+            <boxGeometry args={[1.7, 2.4, 0.1]} />
+            <meshStandardMaterial color="#0b0b0d" roughness={0.5} />
+          </mesh>
+          <mesh position={[0, 0, 0.06]}>
+            <planeGeometry args={[1.45, 2.15]} />
+            <meshStandardMaterial color={i ? "#1d3a5f" : "#3d1f4e"} emissive={i ? "#28e0ff" : "#ff2fb0"} emissiveIntensity={0.35} />
+          </mesh>
+          <Suspense fallback={null}>
+            <Text position={[0, 0, 0.13]} fontSize={0.22} color="#f5f0e6" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
+              {i ? "NEW\nMACHINES" : "FREE\nPLAY"}
+            </Text>
+          </Suspense>
+        </group>
+      ))}
+      {/* Corner blade sign */}
+      <group position={[5.05, 5.2, 3.4]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.12, 3.4, 0.9]} />
+          <meshStandardMaterial color="#0b0b0d" roughness={0.5} />
+        </mesh>
+        <Suspense fallback={null}>
+          <Text position={[0.09, 0, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.5} color="#28e0ff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.1}>
+            {"A\nR\nC\nA\nD\nE"}
+          </Text>
+        </Suspense>
+      </group>
+      <pointLight position={[0, 2.4, 6.4]} intensity={30} distance={14} color="#e28bff" />
+    </group>
+  );
+}
+
+/**
+ * RESONANCE TRUST — the district's bank, in classical stone: steps, four
+ * columns, pediment, brass doors. Custodian of the play-credit ledger the
+ * prediction markets settle in. Click / walk up + E to enter (/bank).
+ */
+function BankVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const stone = concreteTexture();
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Steps */}
+      {[0, 1, 2].map((i) => (
+        <mesh key={i} position={[0, 0.14 + i * 0.28, 5.4 - i * 0.45]} castShadow receiveShadow>
+          <boxGeometry args={[9.6 - i * 0.4, 0.28, 1.0]} />
+          <meshStandardMaterial map={stone} roughness={0.95} />
+        </mesh>
+      ))}
+      {/* Main block */}
+      <mesh position={[0, 4.4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[11, 8, 9]} />
+        <meshStandardMaterial map={stone} roughness={0.9} />
+      </mesh>
+      {/* Portico columns */}
+      {[-3.6, -1.2, 1.2, 3.6].map((x) => (
+        <group key={x} position={[x, 0, 4.35]}>
+          <mesh position={[0, 0.95, 0]} castShadow>
+            <boxGeometry args={[1.0, 0.3, 1.0]} />
+            <meshStandardMaterial map={stone} roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 3.7, 0]} castShadow>
+            <cylinderGeometry args={[0.38, 0.44, 5.3, 14]} />
+            <meshStandardMaterial map={stone} roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 6.5, 0]} castShadow>
+            <boxGeometry args={[1.05, 0.35, 1.05]} />
+            <meshStandardMaterial map={stone} roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+      {/* Entablature + pediment */}
+      <mesh position={[0, 7.15, 3.9]} castShadow>
+        <boxGeometry args={[10.4, 1.0, 2.2]} />
+        <meshStandardMaterial map={stone} roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 8.35, 3.7]} rotation={[0, Math.PI / 4, 0]} castShadow>
+        <coneGeometry args={[4.5, 1.5, 4]} />
+        <meshStandardMaterial map={stone} roughness={0.9} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 7.18, 5.05]} fontSize={0.52} color="#3f3a33" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+          RESONANCE TRUST
+        </Text>
+        <Text position={[0, 6.55, 5.02]} fontSize={0.17} color="#5a544b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.28}>
+          CUSTODIAN OF THE PLAY-CREDIT LEDGER
+        </Text>
+      </Suspense>
+      {/* Brass double doors, recessed */}
+      <mesh position={[0, 2.5, 4.42]}>
+        <planeGeometry args={[3.2, 4.4]} />
+        <meshStandardMaterial color="#171310" roughness={0.7} />
+      </mesh>
+      {[-0.78, 0.78].map((x) => (
+        <mesh key={x} position={[x, 2.35, 4.47]} castShadow>
+          <boxGeometry args={[1.4, 3.9, 0.08]} />
+          <meshStandardMaterial color="#7a5c30" metalness={0.75} roughness={0.35} />
+        </mesh>
+      ))}
+      {[-0.25, 0.25].map((x) => (
+        <mesh key={x} position={[x, 2.2, 4.54]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.03, 0.03, 0.5, 8]} />
+          <meshStandardMaterial color="#c9ab6b" metalness={0.85} roughness={0.25} />
+        </mesh>
+      ))}
+      {/* Flanking lanterns */}
+      {[-4.9, 4.9].map((x) => (
+        <group key={x} position={[x, 0, 5.2]}>
+          <mesh position={[0, 1.4, 0]} castShadow>
+            <cylinderGeometry args={[0.06, 0.09, 2.8, 8]} />
+            <meshStandardMaterial color="#2c3033" metalness={0.65} roughness={0.45} />
+          </mesh>
+          <mesh position={[0, 2.95, 0]}>
+            <boxGeometry args={[0.34, 0.44, 0.34]} />
+            <meshPhysicalMaterial color="#f4ead0" transparent opacity={0.75} emissive="#e8d9a8" emissiveIntensity={0.25} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /** The ground plane set: asphalt roadway, raised paver sidewalks, granite
  *  curbs, painted lane dashes and a crosswalk at the street mouth. */
 function StreetGround({ depth }: { depth: number }) {
@@ -851,6 +1047,8 @@ export default function Marketplace3D() {
       ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
       { cx: 0, cz: towerZ, hx: 7.8, hz: 7.8 }, // Ghost Signals tower
       { cx: 0, cz: streetDepth - 6, hx: 1.2, hz: 1.2 }, // monument shaft
+      { cx: -12.5, cz: streetDepth - 8, hx: 5.2, hz: 4.7 }, // the Arcade
+      { cx: 12.5, cz: streetDepth - 8, hx: 5.7, hz: 4.7 }, // Resonance Trust
     ],
     [layout, towerZ, streetDepth],
   );
@@ -859,6 +1057,16 @@ export default function Marketplace3D() {
     () => ({ slug: "__gs__", name: "Ghost Signals Trading Floor", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
+  const ARCADE: SceneAgent = useMemo(
+    () => ({ slug: "__arcade__", name: "The Arcade", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  const BANK: SceneAgent = useMemo(
+    () => ({ slug: "__bank__", name: "Resonance Trust", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  // The plaza flanks: Arcade west of the monument, the bank east of it.
+  const plazaZ = streetDepth - 8;
 
   // Stepping OUT of a building drops you at ITS door (?from=<slug>), facing
   // the street — not back at the district entrance.
@@ -871,6 +1079,14 @@ export default function Marketplace3D() {
       setSpawn({ position: [0, 1.75, towerZ + 10.5], yaw: Math.PI });
       return;
     }
+    if (from === "__arcade__") {
+      setSpawn({ position: [-6.2, 1.75, streetDepth - 8], yaw: -Math.PI / 2 });
+      return;
+    }
+    if (from === "__bank__") {
+      setSpawn({ position: [6.2, 1.75, streetDepth - 8], yaw: Math.PI / 2 });
+      return;
+    }
     const hit = layout.find((l) => l.agent.slug === from);
     if (!hit) return;
     const left = hit.position[0] < 0;
@@ -879,7 +1095,15 @@ export default function Marketplace3D() {
   }, [layout, towerZ, spawn]);
 
   const dest = (a: SceneAgent) =>
-    a.slug === "__gs__" ? "/gs/floor" : a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}/room`;
+    a.slug === "__gs__"
+      ? "/gs/floor"
+      : a.slug === "__arcade__"
+        ? "/arcade"
+        : a.slug === "__bank__"
+          ? "/bank"
+          : a.source === "constellation"
+            ? `/constellation/${a.slug}`
+            : `/s/${a.slug}/room`;
   // Keyboard/AT users get the 2D storefront (the 3D room isn't keyboard-navigable).
   const listDest = (a: SceneAgent) => (a.source === "constellation" ? `/constellation/${a.slug}` : `/s/${a.slug}`);
   const visit = () => {
@@ -1200,10 +1424,14 @@ export default function Marketplace3D() {
         <StreetGround depth={streetDepth} />
         <CityProps storeCount={sceneAgents.length} />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
+        <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
+        <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
         <ProximityDetector
           points={[
             ...layout.map((l) => ({ agent: l.agent, pos: l.position })),
             { agent: GS_TOWER, pos: [0, 0, towerZ + 10] as [number, number, number] },
+            { agent: ARCADE, pos: [-7, 0, plazaZ] as [number, number, number] },
+            { agent: BANK, pos: [7, 0, plazaZ] as [number, number, number] },
           ]}
           onNearest={setNearby}
         />
