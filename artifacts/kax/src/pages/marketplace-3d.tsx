@@ -8,6 +8,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
+import { Horizon } from "@/components/horizon";
+import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
   asphaltTexture,
@@ -378,9 +380,10 @@ function ProximityDetector({
   return null;
 }
 
-/** A classic park-style lamppost — dark cast metal, glass head. Unlit props
- *  in the afternoon sun; their job is street furniture, not illumination. */
-function StreetLamp({ position }: { position: [number, number, number] }) {
+/** A classic park-style lamppost. Dead metal in daylight; after dusk the head
+ *  lights and casts a real pool on the pavement. `lit` comes from the clock,
+ *  not from a switch — see lib/time-of-day. */
+function StreetLamp({ position, lit }: { position: [number, number, number]; lit: boolean }) {
   return (
     <group position={position}>
       <mesh position={[0, 0.09, 0]} castShadow>
@@ -397,8 +400,18 @@ function StreetLamp({ position }: { position: [number, number, number] }) {
       </mesh>
       <mesh position={[0, 3.58, 0]}>
         <cylinderGeometry args={[0.11, 0.15, 0.24, 8]} />
-        <meshPhysicalMaterial color="#f4ead0" transparent opacity={0.75} roughness={0.4} emissive="#e8d9a8" emissiveIntensity={0.12} />
+        <meshPhysicalMaterial
+          color="#f4ead0"
+          transparent
+          opacity={lit ? 0.95 : 0.75}
+          roughness={0.4}
+          emissive="#ffdf9e"
+          emissiveIntensity={lit ? 2.4 : 0.12}
+        />
       </mesh>
+      {lit && (
+        <pointLight position={[0, 3.5, 0]} intensity={26} distance={12} decay={2} color="#ffd79a" />
+      )}
       <mesh position={[0, 3.74, 0]}>
         <coneGeometry args={[0.17, 0.14, 8]} />
         <meshStandardMaterial color="#26292c" metalness={0.6} roughness={0.5} />
@@ -497,7 +510,7 @@ function Bench({ position, rotation = 0 }: { position: [number, number, number];
 }
 
 /** Street furniture + the KAX monument closing the vista + skyline backdrop. */
-function CityProps({ storeCount }: { storeCount: number }) {
+function CityProps({ storeCount, lit }: { storeCount: number; lit: boolean }) {
   const rows = Math.max(1, Math.ceil(storeCount / 2));
   const depth = -2 - rows * 4.5;
   const concrete = concreteTexture();
@@ -547,7 +560,7 @@ function CityProps({ storeCount }: { storeCount: number }) {
   return (
     <group>
       {lamps.map((p, idx) => (
-        <StreetLamp key={`l${idx}`} position={p} />
+        <StreetLamp key={`l${idx}`} position={p} lit={lit} />
       ))}
       {trees.map((p, idx) => (
         <StreetTree key={`t${idx}`} position={p} seed={idx + 3} />
@@ -1144,6 +1157,7 @@ export default function Marketplace3D() {
   const { user } = useAuth();
   const [selected, setSelected] = useState<SceneAgent | null>(null);
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
+  const phase = useDayPhase();
 
   useEffect(() => {
     setWebglSupported(detectWebGL());
@@ -1537,15 +1551,15 @@ export default function Marketplace3D() {
             soft blue fill from above — the whole Tron kit (neon grid, mirror
             floor, sparkles) is gone. The sun rides high and slightly down the
             street axis so the canyon floor and shopfronts stay daylit. */}
-        <Sky sunPosition={[18, 30, 35]} turbidity={5.5} rayleigh={2.2} mieCoefficient={0.005} mieDirectionalG={0.8} />
-        <fog attach="fog" args={["#cfd8de", 34, 130]} />
+        <Sky sunPosition={phase.sunPosition} turbidity={phase.turbidity} rayleigh={phase.rayleigh} mieCoefficient={0.005} mieDirectionalG={0.8} />
+        <fog attach="fog" args={[phase.fogColor, phase.fogNear, phase.fogFar]} />
 
-        <hemisphereLight args={["#cfe2f0", "#8a8272", 0.75]} />
-        <ambientLight intensity={0.28} color="#fff3e0" />
+        <hemisphereLight args={[phase.isNight ? "#1d2740" : "#cfe2f0", phase.skyGroundColor, phase.hemiIntensity]} />
+        <ambientLight intensity={phase.ambientIntensity} color={phase.ambientColor} />
         <directionalLight
-          position={[18, 42, 35]}
-          intensity={1.7}
-          color="#ffdcb0"
+          position={phase.sunPosition}
+          intensity={phase.sunIntensity}
+          color={phase.sunColor}
           castShadow
           shadow-mapSize-width={2048}
           shadow-mapSize-height={2048}
@@ -1558,7 +1572,7 @@ export default function Marketplace3D() {
           shadow-camera-far={160}
         />
         {/* Bounce-light stand-in so the shadow-side facades read, not vanish */}
-        <directionalLight position={[-30, 12, -40]} intensity={0.4} color="#dfe8ef" />
+        <directionalLight position={[-30, 12, -40]} intensity={phase.isNight ? 0.12 : 0.4} color={phase.isNight ? "#7f95c8" : "#dfe8ef"} />
 
         {/* First-person camera: drag looks from the eye, WASD walks — the
             viewpoint never swings away from where you stand. */}
@@ -1585,8 +1599,9 @@ export default function Marketplace3D() {
           />
         ))}
 
+        <Horizon phase={phase} />
         <StreetGround depth={streetDepth} />
-        <CityProps storeCount={sceneAgents.length} />
+        <CityProps storeCount={sceneAgents.length} lit={phase.streetlightsOn} />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
         <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
         <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />

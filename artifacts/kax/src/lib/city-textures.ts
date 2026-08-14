@@ -618,3 +618,140 @@ export function barkTexture(): THREE.CanvasTexture {
   speckle(ctx, rnd, S, 500, 0.3, "#7a6a58", "#241a12", 0.9);
   return finish(key, c);
 }
+
+/**
+ * A ridge of snow-capped mountains, drawn as a transparent strip for a distant
+ * billboard. Layers are stacked in the scene with the pale, hazy ones behind —
+ * atmospheric perspective does most of the work of selling the distance.
+ *
+ * `haze` (0..1) washes the whole ridge toward the sky colour, `snowLine` is the
+ * height above which rock turns to snow.
+ */
+export function mountainRidgeTexture(opts: {
+  seed: number;
+  haze: number;
+  snowLine?: number;
+  rock?: string;
+}): THREE.CanvasTexture {
+  const haze = Math.max(0, Math.min(1, opts.haze));
+  const snowLine = opts.snowLine ?? 0.45;
+  const rock = opts.rock ?? "#4a5568";
+  const key = `ridge:${opts.seed}:${haze.toFixed(2)}:${snowLine}:${rock}`;
+  if (cache.has(key)) return cache.get(key)!;
+
+  const W = 2048, H = 512;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const ctx = c.getContext("2d")!;
+  const rnd = prng(9001 + opts.seed * 137);
+
+  // Build a jagged skyline by midpoint displacement, then close it into a shape.
+  let pts: number[] = [0.42, 0.72, 0.35, 0.8, 0.4];
+  for (let pass = 0; pass < 6; pass++) {
+    const next: number[] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i]!, b = pts[i + 1]!;
+      next.push(a);
+      const rough = 0.34 / (pass + 1);
+      next.push(Math.max(0.08, Math.min(0.98, (a + b) / 2 + (rnd() - 0.5) * rough)));
+    }
+    next.push(pts[pts.length - 1]!);
+    pts = next;
+  }
+
+  const yFor = (h: number) => H - h * H * 0.92;
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let i = 0; i < pts.length; i++) {
+    ctx.lineTo((i / (pts.length - 1)) * W, yFor(pts[i]!));
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#e9f0fb");                 // snow catches the light up top
+  g.addColorStop(Math.max(0.02, 1 - snowLine - 0.06), "#dbe6f5");
+  g.addColorStop(Math.min(0.98, 1 - snowLine + 0.02), rock);
+  g.addColorStop(1, "#2b3547");                 // valleys stay dark
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  // Snow fingers reaching down the gullies, and a few shadowed faces.
+  ctx.save();
+  ctx.clip();
+  for (let i = 0; i < 120; i++) {
+    const x = rnd() * W;
+    const idx = Math.min(pts.length - 1, Math.floor((x / W) * (pts.length - 1)));
+    const peak = yFor(pts[idx]!);
+    if (pts[idx]! < snowLine + 0.1) continue;
+    ctx.globalAlpha = 0.5 * rnd() + 0.2;
+    ctx.fillStyle = "#f3f7ff";
+    const w = 6 + rnd() * 22, h = 20 + rnd() * 90;
+    ctx.beginPath();
+    ctx.moveTo(x, peak);
+    ctx.lineTo(x - w / 2, peak + h);
+    ctx.lineTo(x + w / 2, peak + h * 0.7);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = "#111a2b";
+  for (let i = 0; i < 60; i++) {
+    const x = rnd() * W;
+    ctx.fillRect(x, 0, 3 + rnd() * 26, H);      // vertical shadow bands = relief
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
+  // Atmospheric haze: the farther the ridge, the more it washes out.
+  if (haze > 0) {
+    ctx.globalCompositeOperation = "source-atop";
+    const hg = ctx.createLinearGradient(0, 0, 0, H);
+    hg.addColorStop(0, `rgba(200,216,238,${haze * 0.55})`);
+    hg.addColorStop(1, `rgba(188,206,232,${haze * 0.9})`);
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = 4;
+  cache.set(key, tex);
+  return tex;
+}
+
+/** Open water: banded swell with a little chop. Tinted by the light, not baked. */
+export function oceanTexture(): THREE.CanvasTexture {
+  const key = "ocean";
+  if (cache.has(key)) return cache.get(key)!;
+  const S = 1024;
+  const [c, ctx] = makeCanvas(S);
+  const rnd = prng(4242);
+
+  const g = ctx.createLinearGradient(0, 0, 0, S);
+  g.addColorStop(0, "#2a4f74");
+  g.addColorStop(0.5, "#20405f");
+  g.addColorStop(1, "#16324c");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, S, S);
+
+  // Long swell lines, then shorter chop on top.
+  for (let i = 0; i < 260; i++) {
+    const y = rnd() * S;
+    const len = 60 + rnd() * 420;
+    const x = rnd() * S;
+    ctx.strokeStyle = `rgba(150,190,225,${0.05 + rnd() * 0.13})`;
+    ctx.lineWidth = 1 + rnd() * 2.2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.bezierCurveTo(x + len * 0.3, y - 5, x + len * 0.7, y + 5, x + len, y);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(198,225,245,${0.04 + rnd() * 0.14})`;
+    ctx.fillRect(rnd() * S, rnd() * S, 1 + rnd() * 3, 1);
+  }
+  return finish(key, c);
+}
