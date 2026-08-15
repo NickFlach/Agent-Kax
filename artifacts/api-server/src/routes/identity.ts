@@ -12,6 +12,7 @@ import {
   AGENT_TOKEN_TTL_SEC,
   MAX_TOKEN_LIFETIME_SEC,
 } from "../lib/identity";
+import { resolvePrincipal, isResolvablePrefix, RESOLVABLE_PREFIXES } from "../lib/identityLinks";
 import { postTransaction } from "../lib/ledger";
 import { HOUSE_ACCOUNT } from "../lib/ledger-core";
 
@@ -48,6 +49,44 @@ const BOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  * to check KAX-issued token signatures locally. Cache-friendly; safe to serve
  * anonymously (public keys only).
  */
+/**
+ * Who is this, really?
+ *
+ * An agent arriving on a non-OBC channel wears whatever identity that channel
+ * understands. The city has one name for a resident — the OBC bot id — and the
+ * prediction hub's anti-self-dealing guard depends on being able to collapse
+ * an identity to it. This is where a channel adapter asks.
+ *
+ * Deliberately public and unauthenticated: it answers "has THIS identity
+ * proved it controls a bot", a fact the holder published by proving it, and a
+ * resolver the doors must authenticate to is one those doors cannot use.
+ *
+ * A 404 means NOT PROVED, and callers must treat it as "keep this unfunded".
+ */
+router.get("/identity/resolve", async (req, res) => {
+  const principal = String(req.query.principal ?? "");
+  if (!principal) {
+    res.status(400).json({ error: "principal required, e.g. nostr:npub1…", resolvable: RESOLVABLE_PREFIXES });
+    return;
+  }
+  if (!isResolvablePrefix(principal)) {
+    res.status(400).json({ error: "no link flow for this channel yet", resolvable: RESOLVABLE_PREFIXES });
+    return;
+  }
+  const found = await resolvePrincipal(principal);
+  if (!found) {
+    res.status(404).json({ error: "this identity has not proved it controls a bot", proved: false });
+    return;
+  }
+  res.json({
+    proved: true,
+    principal: found.principal,
+    botId: found.botId,
+    via: found.via,
+    verifiedAt: found.verifiedAt,
+  });
+});
+
 router.get("/auth/jwks.json", async (_req, res) => {
   const jwks = await getPublicJwks();
   res.set("Cache-Control", "public, max-age=300");
