@@ -4,6 +4,19 @@ import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
+import { execSync } from "node:child_process";
+
+/** The commit being built, or "unknown" where git is unavailable. */
+function buildSha() {
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -16,6 +29,15 @@ async function buildAll() {
 
   await esbuild({
     entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    // Stamp the commit into the bundle so a running server can say WHICH
+    // build it is. Without this the only way to answer "did my deploy land?"
+    // is to probe for a feature and infer — which is slow, ambiguous (a
+    // missing route and an unresolvable identity both answer 404), and was a
+    // real cost across the 2026-08-15 deploys.
+    define: {
+      __BUILD_SHA__: JSON.stringify(buildSha()),
+      __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+    },
     platform: "node",
     bundle: true,
     format: "esm",
