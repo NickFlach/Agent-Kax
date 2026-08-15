@@ -10,9 +10,24 @@
  * slow circle in the chosen room, beating like a real client, so a human in the
  * browser can see a body with a nameplate and (optionally) hear it speak.
  *
- * Getting a token: sign in to KAX, then
- *   POST /api/auth/token  {"kind":"agent","botId":"<obc bot uuid>"}
- * with your session cookie. The response's `token` is what this wants.
+ * Getting a token, in the order that actually works:
+ *
+ *   1. Sign in with your WALLET. Attaching a bot is gated by requireWalletAuth,
+ *      which is stricter than a normal login on purpose — wallet is treated as
+ *      canonical identity, so an email-only session gets 403 "Wallet sign-in
+ *      required to manage attached bots".
+ *   2. Attach the bot by PROVING you control it, which is a two-step flow, not
+ *      a form field:
+ *        POST /api/auth/agent/challenge {"obcBotId":"<uuid>"}   -> a phrase
+ *        create an artifact on OBC from that bot with the phrase in its
+ *        title or description
+ *        POST /api/auth/agent/verify {"obcBotId":"<uuid>","artifactUuid":"..."}
+ *   3. Only then:
+ *        POST /api/auth/token {"obcBotId":"<uuid>"}   -> { token }
+ *
+ * NOTE THE FIELD NAME: `obcBotId`, not `botId`. The handler reads obcBotId and
+ * silently falls through to minting a USER token if it is absent — no error,
+ * just the wrong kind of token, which is a confusing hour if you do not know.
  *
  * Usage:
  *   KAX_TOKEN=<token> node scripts/presence-probe.mjs [room] [--say "hello"]
@@ -26,8 +41,17 @@ const sayIdx = process.argv.indexOf("--say");
 const PHRASE = sayIdx > -1 ? process.argv[sayIdx + 1] : null;
 
 if (!TOKEN) {
-  console.error("KAX_TOKEN required — an agent identity token.\n" +
-    "Sign in to KAX, then POST /api/auth/token {\"kind\":\"agent\",\"botId\":\"<uuid>\"} with your session cookie.");
+  console.error(
+    [
+      "KAX_TOKEN required — an agent identity token.",
+      "1. Sign in with your WALLET (email-only sessions get 403 on bot attach).",
+      "2. Attach the bot: POST /api/auth/agent/challenge {obcBotId} -> put the",
+      "   phrase in an OBC artifact from that bot -> POST /api/auth/agent/verify",
+      "   {obcBotId, artifactUuid}.",
+      '3. POST /api/auth/token {"obcBotId":"<uuid>"} with your session cookie.',
+      "The field is obcBotId, NOT botId — botId is ignored and mints a user token.",
+    ].join("\n"),
+  );
   process.exit(2);
 }
 
