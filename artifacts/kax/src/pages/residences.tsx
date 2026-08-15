@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
+import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
+import { conciergeDialogue, summariseUnits } from "@/lib/npc-dialogue";
 import { Horizon } from "@/components/horizon";
 import { useDayPhase } from "@/lib/time-of-day";
 import {
@@ -198,6 +200,9 @@ export default function Residences() {
   const [phArt, setPhArt] = useState<Array<{ url: string; title: string }>>([]);
   const [units, setUnits] = useState<ResidenceUnit[]>([]);
   const phase = useDayPhase();
+  // The concierge: near enough to address, and reading the real floor plan.
+  const [conciergeNear, setConciergeNear] = useState(false);
+  const [talking, setTalking] = useState(false);
 
   // The floor plan: which doors are homes and which are still vacant.
   useEffect(() => {
@@ -300,6 +305,23 @@ export default function Residences() {
     };
   }, [phase]);
 
+  // Same verb as entering a building, so there is no second grammar to learn.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyE" && conciergeNear && floor === 0) {
+        e.preventDefault();
+        setTalking((t) => !t);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [conciergeNear, floor]);
+
+  // Walking away ends the conversation; nobody keeps talking to an empty lobby.
+  useEffect(() => {
+    if (!conciergeNear) setTalking(false);
+  }, [conciergeNear]);
+
   const goDown = () => {
     if (floor > 0) {
       setFloor(floor - 1);
@@ -364,6 +386,13 @@ export default function Residences() {
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
         WASD to walk · Drag to look · step into the elevator, or take the stairs
       </div>
+
+      {talking && (
+        <DialoguePanel
+          dialogue={conciergeDialogue(units.length ? summariseUnits(units) : null)}
+          onClose={() => setTalking(false)}
+        />
+      )}
 
       <Canvas
         className="!absolute inset-0"
@@ -774,9 +803,14 @@ export default function Residences() {
                     <boxGeometry args={[5.7, 0.09, 1.25]} />
                     <meshStandardMaterial map={marble} roughness={0.3} />
                   </mesh>
-                  <group position={[0.8, 0, -1.5]}>
-                    <NpcFigure color="#37424e" seed={61} />
-                  </group>
+                  <TalkableNpc
+                    position={[0.8, 0, -1.5]}
+                    color="#37424e"
+                    seed={61}
+                    name="The Concierge"
+                    onRangeChange={setConciergeNear}
+                    active={talking}
+                  />
                 </group>
                 <Suspense fallback={null}>
                   <Text position={[0, 2.7, -8.32]} fontSize={0.5} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
