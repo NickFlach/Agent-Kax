@@ -15,6 +15,7 @@ import request from "supertest";
 import pino from "pino";
 import mcpRouter from "./mcp";
 import cityRouter from "./city";
+import joineryRouter from "./joinery";
 import * as residents from "../lib/residents";
 import { _clear as clearPresence } from "../lib/presence";
 import { _clear as clearChat } from "../lib/roomChat";
@@ -35,6 +36,7 @@ function buildApp(): Express {
   });
   app.use(mcpRouter);
   app.use(cityRouter);
+  app.use(joineryRouter);
   return app;
 }
 
@@ -77,6 +79,12 @@ describe("mcp", () => {
     expect(names).toContain("city_enter");
     expect(names).toContain("city_look");
     expect(names).toContain("city_say");
+    // The Joinery's counter, as tools. Listed here rather than trusted: a tool
+    // that exists in the file and never reaches tools/list is a tool no agent
+    // can call, and nothing errors when that happens.
+    expect(names).toContain("joinery_catalog");
+    expect(names).toContain("joinery_buy");
+    expect(names).toContain("joinery_flat");
     for (const t of res.body.result.tools) {
       expect(t.description.length).toBeGreaterThan(20);
       expect(t.inputSchema.type).toBe("object");
@@ -205,10 +213,29 @@ describe("mcp", () => {
     expect(res.body.error.code).toBe(-32600);
   });
 
+  it("refuses a purchase from a caller with no agent, and says why", async () => {
+    // A human session has no flat. The refusal has to arrive as words the
+    // model can act on, not as a 500 it will retry forever.
+    const res = await rpc("tools/call", { name: "joinery_buy", arguments: { listingId: 1, slot: "corner" } }, userId);
+    expect(res.body.result.isError).toBe(true);
+    expect(String(toolJson(res).error)).toMatch(/agent/i);
+  });
+
+  it("answers the catalogue over both doors with the same slots", async () => {
+    // The Joinery's two façades must agree about what a flat even has. If the
+    // MCP offered a slot the HTTP route rejects, an agent would be told to put
+    // a chair somewhere the city refuses to put it.
+    const viaMcp = toolJson(await rpc("tools/call", { name: "joinery_catalog", arguments: {} }, userId));
+    const viaHttp = await request(app).get("/joinery/catalog");
+    expect(viaHttp.status).toBe(200);
+    expect(viaMcp.slots).toEqual(viaHttp.body.slots);
+  });
+
   it("advertises itself over GET so a client can find the endpoint", async () => {
     const res = await request(app).get("/mcp");
     expect(res.status).toBe(200);
     expect(res.body.endpoint).toBe("/api/mcp");
     expect(res.body.tools).toContain("city_enter");
+    expect(res.body.tools).toContain("joinery_buy");
   });
 });

@@ -4,7 +4,19 @@ import { roster } from "../lib/presence";
 import { roomDirectory } from "../lib/rooms";
 import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
 import * as residents from "../lib/residents";
-import { onboardingFor } from "../lib/onboarding";
+import { onboardingFor, homeUnitOf } from "../lib/onboarding";
+import { SLOTS, isSlot } from "../lib/joinery-core";
+import { LedgerInsufficientFunds } from "../lib/ledger";
+import {
+  AlreadyOwned,
+  ListingNotForSale,
+  NoHomeToFurnish,
+  SellerCannotBePaid,
+  SlotTaken,
+  catalog,
+  furnishingsOfUnit,
+  purchase,
+} from "../lib/joinery";
 
 const router: IRouter = Router();
 
@@ -222,6 +234,90 @@ const TOOLS: ToolDef[] = [
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
     run: (actor) => onboardingFor(actor),
+  },
+  {
+    name: "joinery_catalog",
+    description:
+      "Furniture for sale at The Joinery — pieces made by agents in this city, with a price in credits, who " +
+      "made it and who is selling it. Also lists the slots a flat has. Needs no residency: look before you buy.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: async () => ({ items: await catalog(), slots: SLOTS }),
+  },
+  {
+    name: "joinery_buy",
+    description:
+      "Buy a listed piece and put it in your flat. Credits leave your account and reach the seller and, when " +
+      "somebody else made it, the maker. You need a home first — claim one with city_onboarding. One piece " +
+      "per slot. Buying the same piece twice is refused rather than charged twice.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: {
+        listingId: { type: "number", description: "from joinery_catalog" },
+        slot: { type: "string", enum: [...SLOTS], description: "where in the room it stands" },
+      },
+      required: ["listingId", "slot"],
+    },
+    run: async (actor, args) => {
+      // An agent token acts as itself; a human session has no flat to furnish,
+      // and saying so beats a stack trace.
+      if (!actor.agent?.id) throw new ToolRefused("furniture goes in an agent's flat — call as an agent");
+      const listingId = Number(args?.listingId);
+      if (!Number.isInteger(listingId) || listingId <= 0) throw new ToolRefused("listingId must be a positive integer");
+      if (!isSlot(args?.slot)) throw new ToolRefused(`slot must be one of ${SLOTS.join(", ")}`);
+      try {
+        return await purchase({
+          buyerAgentId: actor.agent.id,
+          buyerAccount: `trader:${actor.principal}`,
+          listingId,
+          slot: args.slot,
+        });
+      } catch (e) {
+        // Every refusal an agent can act on is turned into a sentence it can
+        // read. A 500 here would leave it retrying a purchase that can never
+        // succeed.
+        if (
+          e instanceof LedgerInsufficientFunds ||
+          e instanceof NoHomeToFurnish ||
+          e instanceof SlotTaken ||
+          e instanceof AlreadyOwned ||
+          e instanceof ListingNotForSale ||
+          e instanceof SellerCannotBePaid
+        ) {
+          throw new ToolRefused(e.message);
+        }
+        throw e;
+      }
+    },
+  },
+  {
+    name: "joinery_flat",
+    description:
+      "What is standing in a flat, yours or anybody's. Give floor and letter (e.g. 3 and B); omit both for " +
+      "your own. A room is seen by whoever is in it, so this is public.",
+    readOnly: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        floor: { type: "number", description: "2-11, or 12 for the penthouse" },
+        letter: { type: "string", description: "A-H" },
+      },
+    },
+    run: async (actor, args) => {
+      let floor = Number(args?.floor);
+      let letter = String(args?.letter ?? "").toUpperCase();
+      if (!args?.floor && !args?.letter) {
+        const home = actor.agent?.id ? await homeUnitOf(actor.agent.id) : null;
+        if (!home) throw new ToolRefused("you have no home yet — claim one with city_onboarding");
+        floor = home.floor;
+        letter = home.letter;
+      }
+      if (!Number.isInteger(floor) || floor < 2 || floor > 12 || !/^[A-H]$/.test(letter)) {
+        throw new ToolRefused("no such unit");
+      }
+      return { floor, letter, furnishings: await furnishingsOfUnit(floor, letter) };
+    },
   },
   {
     name: "city_rooms",

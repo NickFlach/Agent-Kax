@@ -104,6 +104,30 @@ describe("ensureCriticalSchema", () => {
     await db.execute(sql`DELETE FROM city_residents WHERE principal = 'kax:agent:keepme'`);
   });
 
+  it("does not take the city's furniture with it when residence_units is dropped", async () => {
+    // The reason unit_furnishings holds an ADDRESS and has no foreign key to
+    // residence_units. A foreign key would make the drop this file exists to
+    // repair cascade through every purchase in the city, and the rebuild
+    // re-seeds serial ids that a surviving unit_id would misread as somebody
+    // else's flat. Both failures are silent — the money is gone and the room
+    // is either empty or holds a stranger's chair.
+    await ensureCriticalSchema();
+    await db.execute(sql`
+      INSERT INTO unit_furnishings (floor, letter, artifact_id, slot, price_paid, tx_id)
+      SELECT 11, 'H', a.id, 'corner', 1000, 'test:selfheal'
+      FROM artifacts a LIMIT 1
+      ON CONFLICT DO NOTHING`);
+    const seeded = await db.execute(sql`SELECT count(*)::int AS n FROM unit_furnishings WHERE tx_id = 'test:selfheal'`);
+    const had = (seeded.rows[0] as { n: number }).n;
+
+    await db.execute(sql`DROP TABLE IF EXISTS residence_units`);
+    await ensureCriticalSchema();
+
+    const after = await db.execute(sql`SELECT count(*)::int AS n FROM unit_furnishings WHERE tx_id = 'test:selfheal'`);
+    expect((after.rows[0] as { n: number }).n, "the drop cascaded through the furniture").toBe(had);
+    await db.execute(sql`DELETE FROM unit_furnishings WHERE tx_id = 'test:selfheal'`);
+  });
+
   it("restores the uniqueness rules, not just the rows", async () => {
     await ensureCriticalSchema();
     // A duplicate door must still be impossible after a rebuild.
