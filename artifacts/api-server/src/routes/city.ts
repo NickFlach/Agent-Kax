@@ -5,6 +5,7 @@ import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf, doorstepOf } from "../lib/onboarding";
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
+import { resolvePrincipal, isResolvablePrefix, RESOLVABLE_PREFIXES } from "../lib/identityLinks";
 
 const router: IRouter = Router();
 
