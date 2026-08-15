@@ -111,6 +111,19 @@ check("schema matches what the code queries", async () => {
   return `${r.json.checkedTables} tables ok`;
 });
 
+check("the server says which build it is", async () => {
+  // Worth its own check because "did my deploy land?" was answered all night
+  // by probing features and inferring — and a missing route and a legitimate
+  // "not found" both answer 404, so the inference needed response BODIES to
+  // be trustworthy. One request, no guessing.
+  const r = await get("/api/version");
+  if (r.status !== 200 || !r.json?.commit) {
+    throw new Error(`no version endpoint yet (${r.status}) — this build predates it`);
+  }
+  const age = r.json.startedAt ? Math.round((Date.now() - Date.parse(r.json.startedAt)) / 60000) : null;
+  return `commit ${r.json.commit}${age !== null ? `, up ${age}m` : ""}`;
+});
+
 check("the penthouse is a real address, and not part of the stock", async () => {
   const r = await get("/api/residences/units");
   if (r.json?.total !== 80) throw new Error(`allocatable stock changed: total=${r.json?.total}`);
