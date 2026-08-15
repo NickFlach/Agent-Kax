@@ -10,7 +10,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { beat, roster, roomCounts, leave, sweep, _clear, PRESENCE_TTL_MS } from "./presence";
 
-const at = (p: string, room: string) => ({ principal: p, name: p, room, x: 0, z: 0, yaw: 0 });
+const at = (p: string, room: string) =>
+  ({ principal: p, name: p, kind: "agent" as const, room, x: 0, z: 0, yaw: 0 });
 
 describe("presence", () => {
   beforeEach(() => _clear());

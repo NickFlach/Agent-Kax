@@ -7,6 +7,7 @@ import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { conciergeDialogue, summariseUnits } from "@/lib/npc-dialogue";
+import { isTypingTarget } from "@/lib/is-typing";
 import { Horizon } from "@/components/horizon";
 import { useDayPhase } from "@/lib/time-of-day";
 import {
@@ -308,6 +309,7 @@ export default function Residences() {
   // Same verb as entering a building, so there is no second grammar to learn.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
       if (e.code === "KeyE" && conciergeNear && floor === 0) {
         e.preventDefault();
         setTalking((t) => !t);

@@ -46,10 +46,11 @@ router.post("/presence/beat", async (req, res) => {
     return;
   }
 
-  const name = actor.agent?.displayName ?? (actor.kind === "agent" ? "agent" : "visitor");
+  const name = actor.displayName;
   const others = beat({
     principal: actor.principal,
     name,
+    kind: actor.kind === "agent" ? "agent" : "human",
     room,
     // Positions are clamped to something sane rather than trusted outright: a
     // bad client should not be able to park an avatar at infinity.
@@ -69,7 +70,7 @@ router.post("/presence/beat", async (req, res) => {
     you: { principal: actor.principal, name },
     room,
     ttlMs: PRESENCE_TTL_MS,
-    others: others.map((o) => ({ principal: o.principal, name: o.name, x: o.x, z: o.z, yaw: o.yaw })),
+    others: others.map((o) => ({ principal: o.principal, name: o.name, kind: o.kind, x: o.x, z: o.z, yaw: o.yaw })),
     messages: lines.map((l) => ({ id: l.id, principal: l.principal, name: l.name, text: l.text, x: l.x, z: l.z, at: l.at })),
   });
 });
@@ -96,7 +97,7 @@ router.post("/chat/say", async (req, res) => {
   try {
     const line = say({
       principal: actor.principal,
-      name: actor.agent?.displayName ?? (actor.kind === "agent" ? "agent" : "visitor"),
+      name: actor.displayName,
       room,
       text: body.text,
       x: Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0))),
@@ -133,7 +134,7 @@ router.get("/presence/room/:room", (req, res) => {
   // Public read: names and positions of who is standing in a public place.
   res.json({
     room,
-    occupants: roster(room).map((o) => ({ principal: o.principal, name: o.name, x: o.x, z: o.z, yaw: o.yaw })),
+    occupants: roster(room).map((o) => ({ principal: o.principal, name: o.name, kind: o.kind, x: o.x, z: o.z, yaw: o.yaw })),
   });
 });
 

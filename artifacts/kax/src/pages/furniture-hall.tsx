@@ -7,6 +7,7 @@ import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { joineryDialogue } from "@/lib/npc-dialogue";
+import { isTypingTarget } from "@/lib/is-typing";
 import { brickTexture, woodFloorTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
 
@@ -103,6 +104,7 @@ export default function FurnitureHall() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
       if (e.code === "KeyE" && deskNear) { e.preventDefault(); setTalking((v) => !v); }
     };
     window.addEventListener("keydown", onKey);

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { isTypingTarget } from "@/lib/is-typing";
 
 export interface FpsBounds {
   minX: number;
@@ -96,12 +97,8 @@ export function FirstPersonRig({
 
   useEffect(() => {
     const el = gl.domElement;
-    const isTyping = () => {
-      const a = document.activeElement;
-      return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || (a as HTMLElement).isContentEditable);
-    };
     const down = (e: KeyboardEvent) => {
-      if (isTyping()) return;
+      if (isTypingTarget()) return;
       keys.current[e.code] = true;
     };
     const up = (e: KeyboardEvent) => (keys.current[e.code] = false);

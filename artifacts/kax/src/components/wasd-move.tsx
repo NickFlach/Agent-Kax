@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { isTypingTarget } from "@/lib/is-typing";
 
 type MinimalControls = { target: THREE.Vector3; update: () => void } | null;
 
@@ -44,12 +45,8 @@ export function WasdMove({
   const { camera } = useThree();
 
   useEffect(() => {
-    const isTyping = () => {
-      const el = document.activeElement;
-      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable);
-    };
     const down = (e: KeyboardEvent) => {
-      if (isTyping()) return;
+      if (isTypingTarget()) return;
       keys.current[e.code] = true;
     };
     const up = (e: KeyboardEvent) => {

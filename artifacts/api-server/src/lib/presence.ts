@@ -19,9 +19,18 @@
  * rest of the constellation already uses, and let every instance subscribe.
  */
 
+export type InhabitantKind = "human" | "agent";
+
 export interface PresenceEntry {
   principal: string;
   name: string;
+  /**
+   * Humans and agents share a street but are not the same thing, and a city
+   * that cannot tell you which is which is one you cannot reason about. NPCs
+   * are a third kind entirely — scenery that answers — and never appear here,
+   * because they are not going anywhere.
+   */
+  kind: InhabitantKind;
   /** Which scene: "city", "cafe", "arcade", "residences:11", … */
   room: string;
   x: number;
