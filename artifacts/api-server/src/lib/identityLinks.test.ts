@@ -89,10 +89,15 @@ describe("identity links", () => {
   });
 
   it("says which prefixes can be resolved at all", () => {
+    // Channels WITH a proof flow. This list grows as flows are built — it
+    // said bsky was unresolvable until the Bluesky flow existed, and the PR
+    // that built it duly failed this line, which is the test working.
     expect(isResolvablePrefix(`nostr:${NPUB}`)).toBe(true);
-    expect(isResolvablePrefix("bsky:someone.bsky.social")).toBe(false);
-    // A door can then refuse with "no link flow for this channel yet" rather
-    // than the less useful "not found".
+    expect(isResolvablePrefix("bsky:someone.bsky.social")).toBe(true);
+    // Channels WITHOUT one. A door can then refuse with "no link flow for
+    // this channel yet" rather than the less useful "not found".
+    expect(isResolvablePrefix(`mcp:${BOT}`)).toBe(false);
+    expect(isResolvablePrefix(`nats:${BOT}`)).toBe(false);
   });
 
   it("is not confused by case in the prefix", async () => {

@@ -30,7 +30,7 @@ import { userBotsTable } from "@workspace/db/schema";
  * guard downstream is silently disarmed and nothing will say so.
  */
 
-export type LinkKind = "npub";
+export type LinkKind = "npub" | "bsky";
 
 export interface ResolvedIdentity {
   /** The canonical principal: always `obc:<bot id>`. */
@@ -43,6 +43,7 @@ export interface ResolvedIdentity {
 
 /** `nostr:npub1…` — the shape the observatory's channel door pins nostr to. */
 const NOSTR_PRINCIPAL = /^nostr:(npub1[0-9a-z]{20,90})$/i;
+const BSKY_PRINCIPAL = /^bsky:([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+)$/i;
 
 /**
  * Resolve an external channel principal to the bot it has PROVED it controls.
@@ -51,8 +52,11 @@ const NOSTR_PRINCIPAL = /^nostr:(npub1[0-9a-z]{20,90})$/i;
  * "keep this proposal unfunded and unaugmented", never as "probably fine".
  */
 export async function resolvePrincipal(principal: string): Promise<ResolvedIdentity | null> {
-  const nostr = NOSTR_PRINCIPAL.exec(String(principal ?? "").trim());
+  const raw = String(principal ?? "").trim();
+  const nostr = NOSTR_PRINCIPAL.exec(raw);
   if (nostr) return resolveNpub(nostr[1]!);
+  const bsky = BSKY_PRINCIPAL.exec(raw);
+  if (bsky) return resolveBskyHandle(bsky[1]!.toLowerCase());
   return null;
 }
 
@@ -85,13 +89,39 @@ export async function resolveNpub(npub: string): Promise<ResolvedIdentity | null
 }
 
 /**
+ * The Bluesky handle→bot attestation.
+ *
+ * `bskyVerifiedAt` is load-bearing for the same reason `npubVerifiedAt` is: a
+ * row can carry a handle somebody typed into a challenge that was never
+ * completed, and that is a claim, not a proof.
+ */
+export async function resolveBskyHandle(handle: string): Promise<ResolvedIdentity | null> {
+  const [row] = await db
+    .select({
+      obcBotId: userBotsTable.obcBotId,
+      verifiedAt: userBotsTable.bskyVerifiedAt,
+    })
+    .from(userBotsTable)
+    .where(and(eq(userBotsTable.bskyHandle, handle), isNotNull(userBotsTable.bskyVerifiedAt)))
+    .limit(1);
+
+  if (!row || !row.verifiedAt) return null;
+  return {
+    principal: `obc:${row.obcBotId}`,
+    botId: row.obcBotId,
+    via: "bsky",
+    verifiedAt: row.verifiedAt,
+  };
+}
+
+/**
  * Which channel prefixes can be resolved at all.
  *
  * Published so the channel door can decide whether resolution is even worth
  * attempting, and so a refusal can say "this channel has no link flow yet"
  * rather than the less useful "not found".
  */
-export const RESOLVABLE_PREFIXES = ["nostr:"] as const;
+export const RESOLVABLE_PREFIXES = ["nostr:", "bsky:"] as const;
 
 export function isResolvablePrefix(principal: string): boolean {
   return RESOLVABLE_PREFIXES.some((p) => String(principal ?? "").toLowerCase().startsWith(p));
