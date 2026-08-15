@@ -92,6 +92,17 @@ export async function resolveActor(req: Request): Promise<Actor | null> {
     const principal = principalForClaims(c);
 
     if (c.kind === "agent" && c.bot_id) {
+      // A withdrawn verification stops the agent HERE, at the one gate every
+      // agent action passes through. Checking it at each route instead would
+      // mean the newest route is always the one that forgot.
+      const { isRevoked } = await import("./revocation");
+      const revoked = await isRevoked(c.bot_id);
+      if (revoked) {
+        throw new ActorError(
+          `this bot's verification was withdrawn${revoked.reason ? `: ${revoked.reason}` : ""}`,
+          403,
+        );
+      }
       const [agent] = await db
         .select()
         .from(agentsTable)

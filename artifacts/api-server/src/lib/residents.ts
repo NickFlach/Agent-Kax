@@ -55,6 +55,20 @@ export interface StoredResidency {
 
 let store: ResidencyStore | null = null;
 
+/**
+ * Principals the city will no longer host.
+ *
+ * Injected rather than queried, for the same reason the store is: the tick
+ * loop is the city's clock and must never wait on a database. The set is
+ * refreshed outside and read here, so an eviction costs a lookup, not a query.
+ */
+let revokedPrincipals: ReadonlySet<string> = new Set();
+
+/** Replace the revoked set. Called by the sweep that reads the database. */
+export function setRevokedPrincipals(principals: Iterable<string>): void {
+  revokedPrincipals = new Set(principals);
+}
+
 /** Wire persistence in. Called once at boot; left null in unit tests. */
 export function setStore(s: ResidencyStore | null): void {
   store = s;
@@ -233,6 +247,15 @@ export function count(): number {
  */
 export function tickAll(now: number = Date.now(), dt: number = TICK_MS / 1000): void {
   for (const r of [...residents.values()]) {
+    // A withdrawn verification evicts immediately, ahead of the idle check:
+    // continuing to draw a body for an agent the city no longer vouches for
+    // is the city vouching for it.
+    if (revokedPrincipals.has(r.principal)) {
+      residents.delete(r.principal);
+      presenceLeave(r.principal);
+      try { store?.remove(r.principal); } catch { /* the sweep must not stop */ }
+      continue;
+    }
     if (now - r.lastSteer > IDLE_MS) {
       // Nobody has been home for half an hour. Stop implying otherwise.
       residents.delete(r.principal);
@@ -349,5 +372,6 @@ function stopTicking(): void {
 /** Test seam. */
 export function _clear(): void {
   residents.clear();
+  revokedPrincipals = new Set();
   stopTicking();
 }

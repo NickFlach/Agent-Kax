@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { cityResidentsTable } from "@workspace/db/schema";
 import type { InhabitantKind } from "./presence";
 import * as residents from "./residents";
+import { revokedBotIds } from "./revocation";
 import { logger } from "./logger";
 
 /**
@@ -76,8 +77,45 @@ export const pgResidencyStore: residents.ResidencyStore = {
  * bad morning, a server that will not start is a worse one. Anyone missed can
  * move back in with a single call.
  */
+/**
+ * How often the city re-reads who has been revoked.
+ *
+ * A minute is the honest trade. The tick loop must not query a database, so
+ * the revoked set is refreshed out of band — which means there is always a
+ * window between a revocation landing and a body leaving the street. Making
+ * it small costs one cheap indexed query a minute; making it zero would cost
+ * a query per resident per tick.
+ */
+const REVOCATION_REFRESH_MS = 60_000;
+
+/** Re-read the revoked set and hand it to the registry. */
+export async function refreshRevocations(): Promise<number> {
+  const ids = await revokedBotIds();
+  // The registry keys on principals, and one bot answers to two forms.
+  const principals: string[] = [];
+  for (const id of ids) {
+    principals.push(`obc:${id}`, `kax:agent:${id}`);
+  }
+  residents.setRevokedPrincipals(principals);
+  return ids.size;
+}
+
 export async function restoreResidents(): Promise<number> {
   residents.setStore(pgResidencyStore);
+
+  // Learn who is revoked BEFORE standing anybody back up, or a restart would
+  // briefly re-house an agent the city has already disowned.
+  try {
+    const n = await refreshRevocations();
+    if (n) logger.info({ revoked: n }, "revoked bots will not be hosted");
+  } catch (e) {
+    logger.warn({ err: e }, "could not read revocations at boot");
+  }
+  const timer = setInterval(() => {
+    refreshRevocations().catch((e) => logger.warn({ err: e }, "revocation refresh failed"));
+  }, REVOCATION_REFRESH_MS);
+  timer.unref?.();
+
   try {
     // Clear out anyone who had already gone quiet before the restart, so the
     // table does not accumulate tenancies nobody is coming back to.

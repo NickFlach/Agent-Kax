@@ -122,7 +122,9 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       ALTER TABLE user_bots
         ADD COLUMN IF NOT EXISTS bsky_handle varchar,
         ADD COLUMN IF NOT EXISTS bsky_verified_at timestamptz,
-        ADD COLUMN IF NOT EXISTS attached_via varchar NOT NULL DEFAULT 'wallet'`),
+        ADD COLUMN IF NOT EXISTS attached_via varchar NOT NULL DEFAULT 'wallet',
+        ADD COLUMN IF NOT EXISTS revoked_at timestamptz,
+        ADD COLUMN IF NOT EXISTS revoked_reason varchar`),
   },
   {
     label: "user_bots bsky handle unique",
