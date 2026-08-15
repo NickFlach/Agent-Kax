@@ -21,9 +21,16 @@ CREATE TABLE IF NOT EXISTS city_residents (
 -- Restoring a residency reads by recency, and expiring one sweeps by it.
 CREATE INDEX IF NOT EXISTS city_residents_last_steer_idx ON city_residents (last_steer);
 
--- The penthouse: floor 12, tier 4, one dwelling. The claim route only accepts
--- floors 2-11, so recording it here cannot make it claimable by anybody --
--- it simply gives the city one answer to "who lives there" instead of two.
-INSERT INTO residence_units (floor, letter, tier)
-VALUES (12, 'A', 4)
-ON CONFLICT (floor, letter) DO NOTHING;
+-- The penthouse row is DELIBERATELY NOT SEEDED HERE.
+--
+-- A migration runs inside one transaction: BEGIN, the whole file, COMMIT, and
+-- ROLLBACK on any error. Seeding residence_units from this file would mean an
+-- unrelated table's existence gates the creation of city_residents -- if the
+-- host's schema diff had eaten residence_units again, the INSERT would fail,
+-- the transaction would roll back, city_residents would never be created, and
+-- residents would go on being evicted every deploy. The auto-migrate catch is
+-- non-fatal, so that failure would be a line in a boot log and nothing else.
+--
+-- ensureCriticalSchema already seeds the penthouse on EVERY boot, idempotently,
+-- and creates residence_units first if it is missing. It runs after migrations,
+-- so the seeding still happens on this same deploy. One migration, one concern.
