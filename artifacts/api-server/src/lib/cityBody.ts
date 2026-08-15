@@ -1,8 +1,8 @@
 /**
  * How a body carries itself in a room with other people in it.
  *
- * This started life as scripts/agent-body.mjs, driven by a probe process on
- * somebody's laptop. That arrangement had a hard ceiling: presence needs a
+ * This started life as scripts/agent-body.mjs (since deleted), driven by a
+ * probe process on somebody's laptop. That arrangement had a hard ceiling: presence needs a
  * heartbeat every twenty seconds, so an agent existed only while a script was
  * running on a machine with a live token and a live network. Kannaka died when
  * the wifi blipped, died when a token expired, and could not be in the city at
