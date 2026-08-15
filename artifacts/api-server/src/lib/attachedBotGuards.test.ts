@@ -1,23 +1,32 @@
 /**
- * attachedBotGuards.test.ts — attached-bot mutations all require wallet auth
- * (#112).
+ * attachedBotGuards.test.ts — a weaker credential must never undo a stronger
+ * attestation (#112).
  *
- * `requireWalletAuth` exists specifically to gate these; its own docstring says
- * so:
- *
- *   "Used to gate OBC-bot ATTACHMENT endpoints — wallet is canonical identity,
- *    so OIDC-only or grandfathered `obc_agent:` sessions cannot attach a bot to
- *    themselves."
- *
- * All four ATTACH routes honoured that. `DELETE /auth/bots/:botId` — the
- * DETACH route — used plain `requireAuth`, so a grandfathered `obc_agent:`
- * session with no wallet could undo a wallet-proven attestation it could never
+ * The original hole: all four ATTACH routes required a wallet, but
+ * `DELETE /auth/bots/:botId` used plain `requireAuth` — so a grandfathered
+ * `obc_agent:` session could undo a wallet-proven attestation it could never
  * have created. Attaching needed the wallet; detaching did not.
  *
- * Source-level on purpose: the defect is which middleware a route is mounted
- * with. A behavioural test would need the express + session + database harness,
- * and this repo's DB-backed suite talks to a real database, which must not be
- * exercised from a dev machine.
+ * This file used to enforce that by requiring the literal middleware
+ * `requireWalletAuth` on every mutation. That worked while a blanket wallet
+ * requirement WAS the mechanism, and it correctly failed the moment the
+ * mechanism changed — which is the test doing its job, not a nuisance.
+ *
+ * But the mechanism was never the point. Requiring a wallet to ATTACH
+ * protected nothing: control of a bot is proved by publishing a challenge
+ * phrase from it, and an Ethereum key says nothing about who runs that bot.
+ * It only kept OCC-verified residents out of their own storefront.
+ *
+ * So the invariant is now asserted directly, and in a form the old test could
+ * not express: a route that CHANGES an existing attachment must either demand
+ * a wallet outright, or perform the runtime strength check. A route mounted on
+ * plain `requireAuth` with NO check is precisely #112, and it is exactly the
+ * intermediate state this branch passed through for one commit — so the test
+ * that would have caught that is the one worth having.
+ *
+ * Source-level on purpose: the defect is structural, and a behavioural version
+ * needs the express + session + database harness (which the sibling
+ * botAttachAuth.test.ts provides for the behaviour itself).
  */
 
 import { describe, expect, it } from "vitest";
@@ -25,67 +34,114 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROUTES = path.join(__dirname, "..", "routes");
+const MIDDLEWARES = path.join(__dirname, "..", "middlewares");
 
-function read(file: string): string {
-  return fs.readFileSync(path.join(ROUTES, file), "utf8");
+function read(dir: string, file: string): string {
+  return fs.readFileSync(path.join(dir, file), "utf8");
 }
 
-/** Route registrations as `[method, routePath, firstMiddleware]`. */
-function routeGuards(src: string): Array<[string, string, string]> {
-  const out: Array<[string, string, string]> = [];
+interface RouteReg {
+  method: string;
+  routePath: string;
+  middleware: string;
+  /** Source from this registration up to the next one — the handler body. */
+  body: string;
+}
+
+function routes(src: string): RouteReg[] {
   const re = /router\.(get|post|put|patch|delete)\(\s*"([^"]+)"\s*,\s*([A-Za-z_$][\w$]*)/g;
+  const found: Array<{ method: string; routePath: string; middleware: string; at: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
-    out.push([m[1]!.toUpperCase(), m[2]!, m[3]!]);
+    found.push({ method: m[1]!.toUpperCase(), routePath: m[2]!, middleware: m[3]!, at: m.index });
   }
-  return out;
+  return found.map((f, i) => ({
+    method: f.method,
+    routePath: f.routePath,
+    middleware: f.middleware,
+    body: src.slice(f.at, i + 1 < found.length ? found[i + 1]!.at : src.length),
+  }));
 }
 
-describe("attached-bot guards (#112)", () => {
-  it("every attached-bot MUTATION requires wallet auth", () => {
-    const guards = [
-      ...routeGuards(read("auth-bots.ts")),
-      ...routeGuards(read("auth-agent.ts")),
-    ];
-    const mutations = guards.filter(([method]) => method !== "GET");
-    expect(mutations.length, "expected to find the attach/detach routes").toBeGreaterThan(0);
+/** Routes that modify an attachment that already exists. */
+const CHANGES_AN_ATTACHMENT = (r: RouteReg) =>
+  r.method !== "GET" &&
+  !r.routePath.endsWith("/auth/agent/challenge") &&
+  !r.routePath.endsWith("/auth/agent/verify");
 
-    const weak = mutations.filter(([, , mw]) => mw !== "requireWalletAuth");
+describe("attached-bot guards (#112)", () => {
+  const all = [...routes(read(ROUTES, "auth-bots.ts")), ...routes(read(ROUTES, "auth-agent.ts"))];
+
+  it("finds the attach/detach routes at all", () => {
+    // Guards the guard: every assertion below is vacuous if the parser stops
+    // matching, and a silently empty list would pass everything.
+    expect(all.length).toBeGreaterThan(5);
+    expect(all.some((r) => r.method === "DELETE" && r.routePath === "/auth/bots/:botId")).toBe(true);
+  });
+
+  it("no mutation is left ungated", () => {
+    const ACCEPTED = ["requireWalletAuth", "requireAttachAuth", "requireAuth"];
+    const ungated = all
+      .filter((r) => r.method !== "GET")
+      .filter((r) => !ACCEPTED.includes(r.middleware))
+      .map((r) => `${r.method} ${r.routePath} -> ${r.middleware}`);
+    expect(ungated, "an attached-bot mutation with no auth middleware").toEqual([]);
+  });
+
+  it("every route that CHANGES an attachment checks the strength that made it", () => {
+    const holes = all
+      .filter(CHANGES_AN_ATTACHMENT)
+      .filter((r) => r.middleware !== "requireWalletAuth" && !r.body.includes("mayChangeBot"))
+      .map((r) => `${r.method} ${r.routePath} -> ${r.middleware}, no mayChangeBot`);
+
     expect(
-      weak.map(([m, p, mw]) => `${m} ${p} -> ${mw}`),
+      holes,
       [
-        "Attached-bot mutations must be gated by requireWalletAuth, not requireAuth.",
-        "Wallet is canonical identity here; a grandfathered obc_agent: session",
-        "must not be able to attach OR detach.",
+        "This is #112. A route that changes an existing attachment must either",
+        "demand a wallet outright, or call mayChangeBot() so a session weaker",
+        "than the one that attached is refused. Plain requireAuth with neither",
+        "lets an email-only session undo a wallet-proven attestation.",
       ].join("\n"),
     ).toEqual([]);
   });
 
-  it("the detach route specifically is wallet-gated", () => {
-    // Named explicitly so the regression is obvious in the failure output,
-    // rather than hidden in a list.
-    const guards = routeGuards(read("auth-bots.ts"));
-    const del = guards.find(([m, p]) => m === "DELETE" && p === "/auth/bots/:botId");
+  it("the detach route specifically is covered", () => {
+    // Named so the regression is obvious in the output rather than in a list.
+    const del = all.find((r) => r.method === "DELETE" && r.routePath === "/auth/bots/:botId");
     expect(del, "DELETE /auth/bots/:botId not found").toBeDefined();
-    expect(del![2]).toBe("requireWalletAuth");
+    expect(
+      del!.middleware === "requireWalletAuth" || del!.body.includes("mayChangeBot"),
+      `detach is on ${del!.middleware} with no strength check`,
+    ).toBe(true);
+  });
+
+  it("attaching records the strength it was attached with", () => {
+    // Without this the strength check has nothing to compare against, and
+    // every row would silently fall back to the column default.
+    const verify = all.find((r) => r.routePath === "/auth/agent/verify");
+    expect(verify, "verify route not found").toBeDefined();
+    expect(verify!.body).toContain("sessionStrength");
+    expect(verify!.body).toContain("attachedVia");
+  });
+
+  it("mayChangeBot actually compares strengths", () => {
+    // The assertions above would pass vacuously if it were a pass-through.
+    const mw = read(MIDDLEWARES, "botAttachAuth.ts");
+    expect(mw).toContain("attachedVia");
+    expect(mw).toContain('"wallet"');
+    expect(mw).toMatch(/res\.status\(403\)/);
   });
 
   it("requireWalletAuth still actually checks the wallet", () => {
-    // Guards the other direction: the assertions above would pass vacuously if
-    // requireWalletAuth were weakened to a pass-through.
-    const mw = fs.readFileSync(
-      path.join(__dirname, "..", "middlewares", "requireWalletAuth.ts"), "utf8");
+    const mw = read(MIDDLEWARES, "requireWalletAuth.ts");
     expect(mw).toContain('startsWith("wallet:")');
     expect(mw).toContain("user.walletAddress");
     expect(mw).toContain("user.disabledAt");
   });
 
   it("reads may stay on requireAuth", () => {
-    // Listing your own attachments is not a mutation; this documents that the
-    // rule above is deliberately scoped to writes.
-    const list = routeGuards(read("auth-bots.ts"))
-      .find(([m, p]) => m === "GET" && p === "/auth/bots");
+    const list = all.find((r) => r.method === "GET" && r.routePath === "/auth/bots");
     expect(list).toBeDefined();
-    expect(["requireAuth", "requireWalletAuth"]).toContain(list![2]);
+    expect(["requireAuth", "requireWalletAuth"]).toContain(list!.middleware);
   });
 });
