@@ -30,6 +30,7 @@ import showcaseRouter from "./showcase";
 import residencesRouter from "./residences";
 import presenceRouter from "./presence";
 import cityRouter from "./city";
+import mcpRouter from "./mcp";
 
 const router: IRouter = Router();
 
@@ -49,6 +50,7 @@ router.use(showcaseRouter);
 router.use(residencesRouter);
 router.use(presenceRouter);
 router.use(cityRouter);
+router.use(mcpRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);
