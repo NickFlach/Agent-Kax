@@ -53,7 +53,7 @@ function ProfileName() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/auth/me", {
+      const res = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
