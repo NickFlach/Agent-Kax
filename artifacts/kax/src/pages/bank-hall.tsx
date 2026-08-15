@@ -9,8 +9,8 @@ import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { marbleTexture, concreteTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * RESONANCE TRUST — the district's bank.
@@ -188,7 +188,7 @@ export default function BankHall() {
                 </mesh>
               ))}
               <Suspense fallback={null}>
-                <Text position={[0, 4.75, 0.1]} fontSize={0.17} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+                <Text position={[0, 4.75, 0.1]} fontSize={0.17} color="#c9ab6b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
                   {["DEPOSITS", "THE LEDGER", "EXCHANGE"][i]}
                 </Text>
               </Suspense>
@@ -207,10 +207,10 @@ export default function BankHall() {
               <meshStandardMaterial color="#f4efe4" roughness={0.9} />
             </mesh>
             <Suspense fallback={null}>
-              <Text position={[0, 0.09, 0.01]} fontSize={0.14} color="#8c2f2a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+              <Text position={[0, 0.09, 0.01]} fontSize={0.14} color="#8c2f2a" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
                 OPENING SOON
               </Text>
-              <Text position={[0, -0.13, 0.01]} fontSize={0.08} color="#4a4640" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.6} textAlign="center">
+              <Text position={[0, -0.13, 0.01]} fontSize={0.08} color="#4a4640" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={1.6} textAlign="center">
                 money & crypto → credits
               </Text>
             </Suspense>
@@ -235,10 +235,10 @@ export default function BankHall() {
           ))}
         </group>
         <Suspense fallback={null}>
-          <Text position={[0, 7.6, -10.9]} fontSize={0.72} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.22}>
+          <Text position={[0, 7.6, -10.9]} fontSize={0.72} color="#4a443a" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.22}>
             RESONANCE TRUST
           </Text>
-          <Text position={[0, 6.7, -10.9]} fontSize={0.22} color="#7a7060" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          <Text position={[0, 6.7, -10.9]} fontSize={0.22} color="#7a7060" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
             ONE LEDGER · ONE CREDIT · EVERY MARKET
           </Text>
         </Suspense>
@@ -285,7 +285,7 @@ export default function BankHall() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 5.3, 9.62]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[0, 5.3, 9.62]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
           </Suspense>

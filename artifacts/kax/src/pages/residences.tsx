@@ -21,8 +21,8 @@ import {
   repeated,
 } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * STANDING WAVE RESIDENCES — the city's first residential tower.
@@ -137,15 +137,15 @@ function UnitDoor({
         </mesh>
       )}
       <Suspense fallback={null}>
-        <Text position={[0, 2.15, 0.09]} fontSize={0.13} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+        <Text position={[0, 2.15, 0.09]} fontSize={0.13} color="#c9ab6b" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
           {label}
         </Text>
         {occupied ? (
-          <Text position={[0, 1.62, 0.095]} fontSize={0.085} color="#efe3c4" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={0.88}>
+          <Text position={[0, 1.62, 0.095]} fontSize={0.085} color="#efe3c4" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={0.88}>
             {who.slice(0, 18)}
           </Text>
         ) : (
-          <Text position={[0, 1.62, 0.09]} fontSize={0.07} color="#6a6252" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+          <Text position={[0, 1.62, 0.09]} fontSize={0.07} color="#6a6252" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
             VACANT
           </Text>
         )}
@@ -186,7 +186,7 @@ function PhArt({ url, title, position, rotation, w = 1.7 }: { url: string; title
         <meshBasicMaterial map={tex} toneMapped={false} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, -(h / 2) - 0.14, 0.02]} fontSize={0.07} color="#7a7060" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={w}>
+        <Text position={[0, -(h / 2) - 0.14, 0.02]} fontSize={0.07} color="#7a7060" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={w}>
           {title.slice(0, 30)}
         </Text>
       </Suspense>
@@ -716,7 +716,7 @@ export default function Residences() {
 
             {/* Nameplate at the elevator */}
             <Suspense fallback={null}>
-              <Text position={[10.2, 2.6, -1.6]} rotation={[0, -Math.PI / 2, 0]} fontSize={0.16} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.25}>
+              <Text position={[10.2, 2.6, -1.6]} rotation={[0, -Math.PI / 2, 0]} fontSize={0.16} color="#c9ab6b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.25}>
                 KANNAKA · PH
               </Text>
             </Suspense>
@@ -762,7 +762,7 @@ export default function Residences() {
               </mesh>
               <pointLight position={[0, 2.9, 0]} intensity={8} distance={5} color="#ffe9c4" />
               <Suspense fallback={null}>
-                <Text position={[0, 3.0, -1.62]} fontSize={0.14} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+                <Text position={[0, 3.0, -1.62]} fontSize={0.14} color="#c9ab6b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
                   ELEVATOR
                 </Text>
               </Suspense>
@@ -771,7 +771,7 @@ export default function Residences() {
             {/* Stairwell (west) */}
             <Stairs />
             <Suspense fallback={null}>
-              <Text position={[-10, 2.7, 2.9]} rotation={[0, Math.PI, 0]} fontSize={0.14} color="#7a7060" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+              <Text position={[-10, 2.7, 2.9]} rotation={[0, Math.PI, 0]} fontSize={0.14} color="#7a7060" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
                 {floor < PH - 1 ? `STAIRS · UP TO ${floorLabel(floor + 1)}` : "STAIRS · UP TO PH"}
               </Text>
             </Suspense>
@@ -792,7 +792,7 @@ export default function Residences() {
                   <meshStandardMaterial color="#4a3826" roughness={0.7} />
                 </mesh>
                 <Suspense fallback={null}>
-                  <Text position={[0.12, 2.9, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.12} color="#7a7060" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+                  <Text position={[0.12, 2.9, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.12} color="#7a7060" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
                     {`DOWN TO ${floorLabel(floor - 1)}`}
                   </Text>
                 </Suspense>
@@ -821,10 +821,10 @@ export default function Residences() {
                   />
                 </group>
                 <Suspense fallback={null}>
-                  <Text position={[0, 2.7, -8.32]} fontSize={0.5} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+                  <Text position={[0, 2.7, -8.32]} fontSize={0.5} color="#4a443a" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
                     STANDING WAVE RESIDENCES
                   </Text>
-                  <Text position={[0, 2.1, -8.32]} fontSize={0.15} color="#7a7060" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+                  <Text position={[0, 2.1, -8.32]} fontSize={0.15} color="#7a7060" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
                     HOME IS A WAVE THAT KEEPS ITS SHAPE
                   </Text>
                 </Suspense>
@@ -843,7 +843,7 @@ export default function Residences() {
                     <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
                   </mesh>
                   <Suspense fallback={null}>
-                    <Text position={[0, 3.05, 8.14]} rotation={[0, Math.PI, 0]} fontSize={0.3} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+                    <Text position={[0, 3.05, 8.14]} rotation={[0, Math.PI, 0]} fontSize={0.3} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
                       EXIT
                     </Text>
                   </Suspense>

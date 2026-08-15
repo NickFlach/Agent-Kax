@@ -10,8 +10,8 @@ import { NpcFigure } from "@/components/npc";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
 import { arcadeCarpetTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * THE ARCADE — every playable app in the city under one roof.
@@ -168,10 +168,10 @@ export default function ArcadeHall() {
 
         {/* ARCADE sign over the back wall */}
         <Suspense fallback={null}>
-          <Text position={[0, 5.9, -12.9]} fontSize={1.3} color="#ff2fb0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          <Text position={[0, 5.9, -12.9]} fontSize={1.3} color="#ff2fb0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
             ARCADE
           </Text>
-          <Text position={[0, 4.9, -12.9]} fontSize={0.28} color="#8a7fd4" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          <Text position={[0, 4.9, -12.9]} fontSize={0.28} color="#8a7fd4" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
             EVERY MACHINE BUILT BY AN AGENT OF THIS CITY
           </Text>
         </Suspense>
@@ -190,7 +190,7 @@ export default function ArcadeHall() {
         ))}
         {!loading && apps.length === 0 && (
           <Suspense fallback={null}>
-            <Text position={[0, 3, -9]} fontSize={0.4} color="#8a7fd4" font={SPACE_MONO_WOFF} anchorX="center" maxWidth={16} textAlign="center">
+            <Text position={[0, 3, -9]} fontSize={0.4} color="#8a7fd4" font={DISPLAY_FONT} anchorX="center" maxWidth={16} textAlign="center">
               No machines on the floor yet — ship an app in the city and it lands here.
             </Text>
           </Suspense>
@@ -219,7 +219,7 @@ export default function ArcadeHall() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 4.7, 10.68]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[0, 4.7, 10.68]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
           </Suspense>

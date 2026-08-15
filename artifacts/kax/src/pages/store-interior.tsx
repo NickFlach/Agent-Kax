@@ -18,8 +18,8 @@ import { NpcFigure } from "@/components/npc";
 import { woodFloorTexture, galleryWallTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 const MAX_WALL_WORKS = 16;
 
 function isImageish(t: string) {
@@ -212,10 +212,10 @@ function ArtworkFrame({
           <meshStandardMaterial color="#faf7f0" roughness={0.85} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 0.055, 0.01]} fontSize={0.085} color="#2c2822" font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+          <Text position={[0, 0.055, 0.01]} fontSize={0.085} color="#2c2822" font={DISPLAY_FONT} maxWidth={1.05} anchorX="center" anchorY="middle">
             {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
           </Text>
-          <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={item.curatedBy ? accent : "#77705f"} font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+          <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={item.curatedBy ? accent : "#77705f"} font={DISPLAY_FONT} maxWidth={1.05} anchorX="center" anchorY="middle">
             {item.curatedBy ? `curated · by ${item.curatedBy}` : work.artifactType}
           </Text>
         </Suspense>
@@ -337,10 +337,10 @@ function VideoFrame({
           <meshStandardMaterial color="#faf7f0" roughness={0.85} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 0.055, 0.01]} fontSize={0.085} color="#2c2822" font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+          <Text position={[0, 0.055, 0.01]} fontSize={0.085} color="#2c2822" font={DISPLAY_FONT} maxWidth={1.05} anchorX="center" anchorY="middle">
             {work.title.length > 26 ? work.title.slice(0, 25) + "…" : work.title}
           </Text>
-          <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={accent} font={SPACE_MONO_WOFF} maxWidth={1.05} anchorX="center" anchorY="middle">
+          <Text position={[0, -0.075, 0.01]} fontSize={0.06} color={accent} font={DISPLAY_FONT} maxWidth={1.05} anchorX="center" anchorY="middle">
             ▶ video · hover for sound
           </Text>
         </Suspense>
@@ -667,10 +667,10 @@ export default function StoreInterior() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 4.95, 9.2]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[0, 4.95, 9.2]} rotation={[0, Math.PI, 0]} fontSize={0.34} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
-            <Text position={[0, 1.15, 9.25]} rotation={[0, Math.PI, 0]} fontSize={0.16} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+            <Text position={[0, 1.15, 9.25]} rotation={[0, Math.PI, 0]} fontSize={0.16} color="#4a443a" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
               click to return to the street
             </Text>
           </Suspense>
@@ -700,7 +700,7 @@ export default function StoreInterior() {
 
         {/* Store name in quiet metal letters on the back wall */}
         <Suspense fallback={null}>
-          <Text position={[0, 6.3, -14.42]} fontSize={0.62} color="#4a443a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={17}>
+          <Text position={[0, 6.3, -14.42]} fontSize={0.62} color="#4a443a" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={17}>
             {name.toUpperCase()}
           </Text>
         </Suspense>
@@ -763,7 +763,7 @@ export default function StoreInterior() {
 
         {isLoading || wallItems.length > 0 ? null : (
           <Suspense fallback={null}>
-            <Text position={[0, 3.3, -13]} fontSize={0.4} color="#6b6459" font={SPACE_MONO_WOFF} anchorX="center" maxWidth={14} textAlign="center">
+            <Text position={[0, 3.3, -13]} fontSize={0.4} color="#6b6459" font={DISPLAY_FONT} anchorX="center" maxWidth={14} textAlign="center">
               No image works to hang yet — audio & text live in the list view.
             </Text>
           </Suspense>
