@@ -59,6 +59,38 @@ describe("ensureCriticalSchema", () => {
     await db.execute(sql`DELETE FROM city_residents WHERE principal = 'kax:agent:selfheal'`);
   });
 
+  it("puts back COLUMNS the diff deletes, not just tables", async () => {
+    // The 2026-08-15 deploy diff proposed dropping bsky_handle and
+    // bsky_verified_at "with 2 items" — data and all — because a stale build
+    // did not declare them. Restoring tables alone would have left user_bots
+    // unable to record a proven link, with nothing to say why.
+    await db.execute(sql`ALTER TABLE user_bots DROP COLUMN IF EXISTS bsky_handle`);
+    await db.execute(sql`ALTER TABLE user_bots DROP COLUMN IF EXISTS bsky_verified_at`);
+
+    await ensureCriticalSchema();
+
+    const cols = await db.execute(sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'user_bots' AND column_name IN ('bsky_handle','bsky_verified_at')`);
+    expect(cols.rows.map((r) => (r as { column_name: string }).column_name).sort())
+      .toEqual(["bsky_handle", "bsky_verified_at"]);
+  });
+
+  it("restores the enum VALUE without recreating the type", async () => {
+    // Recreating the type is the destructive move the diff wanted: it rewrites
+    // the column and cannot survive a row already carrying the value being
+    // removed. Adding the value back is additive.
+    await ensureCriticalSchema();
+    const vals = await db.execute(sql`
+      SELECT unnest(enum_range(NULL::auth_challenge_kind))::text AS v`);
+    const names = vals.rows.map((r) => (r as { v: string }).v);
+    expect(names).toContain("bsky_bind_challenge");
+    // The pre-existing values must still be there — a recreate would have
+    // silently changed what the column can hold.
+    expect(names).toContain("npub_bind_challenge");
+    expect(names).toContain("wallet_nonce");
+  });
+
   it("is a no-op for city_residents when it is already there", async () => {
     await ensureCriticalSchema();
     await db.execute(sql`

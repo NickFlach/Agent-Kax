@@ -98,6 +98,51 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       )`),
   },
   {
+    /**
+     * The Bluesky link columns, and the enum value that goes with them.
+     *
+     * The diff does not only eat TABLES. Asked to approve a deploy on
+     * 2026-08-15 it proposed, verbatim:
+     *
+     *   You're about to delete bsky_handle column in user_bots with 2 items
+     *   You're about to delete bsky_verified_at column in user_bots with 2 items
+     *   DROP TYPE "public"."auth_challenge_kind";
+     *   CREATE TYPE ... ENUM('wallet_nonce','agent_challenge','password_reset','npub_bind_challenge')
+     *
+     * — reconciling the database DOWN to a stale build's idea of the schema,
+     * data and all. That deploy was refused, but the shape is now understood:
+     * anything the built code does not declare is a candidate for deletion,
+     * columns included. Restoring tables alone would have left a user_bots
+     * with no way to record a proven link and no error to say so.
+     *
+     * ADD COLUMN IF NOT EXISTS never touches an existing column's data.
+     */
+    label: "user_bots bluesky link columns",
+    sql: sql.raw(`
+      ALTER TABLE user_bots
+        ADD COLUMN IF NOT EXISTS bsky_handle varchar,
+        ADD COLUMN IF NOT EXISTS bsky_verified_at timestamptz`),
+  },
+  {
+    label: "user_bots bsky handle unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_bots_bsky_unique
+                  ON user_bots (bsky_handle) WHERE bsky_handle IS NOT NULL`),
+  },
+  {
+    /**
+     * Restoring the enum VALUE, not the type. Recreating the type is what the
+     * diff wanted to do and is exactly the destructive move — it rewrites the
+     * column and cannot survive a row already carrying the value being
+     * removed. Adding a value back is additive and idempotent.
+     *
+     * Runs outside a transaction because each statement here executes on its
+     * own; ALTER TYPE ... ADD VALUE inside a transaction is refused by
+     * Postgres when the type is used in the same one.
+     */
+    label: "auth_challenge_kind bsky value",
+    sql: sql.raw(`ALTER TYPE auth_challenge_kind ADD VALUE IF NOT EXISTS 'bsky_bind_challenge'`),
+  },
+  {
     label: "city_residents last_steer index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS city_residents_last_steer_idx
                   ON city_residents (last_steer)`),
