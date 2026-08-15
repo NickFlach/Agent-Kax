@@ -35,7 +35,7 @@
  */
 
 const BASE = process.env.KAX_BASE_URL || "https://kax.ninja-portal.com";
-const TOKEN = process.env.KAX_TOKEN || "";
+let TOKEN = process.env.KAX_TOKEN || "";
 const room = process.argv[2]?.startsWith("--") ? "city" : (process.argv[2] || "city");
 const sayIdx = process.argv.indexOf("--say");
 const PHRASE = sayIdx > -1 ? process.argv[sayIdx + 1] : null;
@@ -55,10 +55,39 @@ if (!TOKEN) {
   process.exit(2);
 }
 
-const auth = { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` };
+const authHeaders = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` });
+
+/**
+ * Agent tokens last 15 minutes, which is right for a bearer credential and
+ * wrong as the only way to exist. /auth/token/refresh exists precisely so
+ * "CLI/swarm agents can run autonomously" — the oat claim rides through every
+ * refresh and only the 30-day lineage cap forces a human back in. Without this
+ * the agent simply evaporates mid-conversation, which is what happened the
+ * first time somebody stood in the street talking to her.
+ */
+async function refreshToken() {
+  try {
+    const res = await fetch(`${BASE}/api/auth/token/refresh`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ token: TOKEN }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.log(`  token refresh refused (${res.status}): ${body.slice(0, 120)}`);
+      return false;
+    }
+    const j = await res.json();
+    if (j.token) { TOKEN = j.token; console.log("  token refreshed"); return true; }
+    return false;
+  } catch (e) {
+    console.log(`  token refresh failed: ${e.message}`);
+    return false;
+  }
+}
 
 async function post(path, body) {
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch { /* keep text for the error */ }
@@ -99,8 +128,14 @@ const timer = setInterval(async () => {
   const a = (tick / 40) * Math.PI * 2;
   const x = CENTRE.x + Math.cos(a) * RADIUS;
   const z = CENTRE.z + Math.sin(a) * RADIUS;
-  const r = await post("/api/presence/beat", { room, x, z, yaw: -a, since });
+  let r = await post("/api/presence/beat", { room, x, z, yaw: -a, since });
+  if (r.status === 401) {
+    // Expired mid-walk: refresh and retry once rather than vanishing.
+    if (await refreshToken()) r = await post("/api/presence/beat", { room, x, z, yaw: -a, since });
+  }
   if (r.status !== 200) { console.log(`beat failed ${r.status}`); return; }
+  // Refresh well before the 15-minute expiry rather than racing it.
+  if (tick % 600 === 0) await refreshToken();
 
   for (const m of r.json.messages ?? []) {
     since = Math.max(since, m.id);

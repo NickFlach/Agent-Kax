@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
 import { arcadeCarpetTexture, repeated } from "@/lib/city-textures";
@@ -20,6 +21,7 @@ const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF
  */
 export default function ArcadeHall() {
   const [, navigate] = useLocation();
+  const phase = useDayPhase();
   const [apps, setApps] = useState<PlayableApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState<PlayableApp | null>(null);

@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { marbleTexture, concreteTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
@@ -21,6 +22,7 @@ const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF
  */
 export default function BankHall() {
   const [, navigate] = useLocation();
+  const phase = useDayPhase();
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceNote, setBalanceNote] = useState("checking the vault…");
 
@@ -264,7 +266,11 @@ export default function BankHall() {
         >
           <mesh position={[0, 2.6, 9.9]} rotation={[0, Math.PI, 0]}>
             <planeGeometry args={[4.4, 4.8]} />
-            <meshStandardMaterial color="#dfe8ee" emissive="#cfdde8" emissiveIntensity={0.5} />
+            <meshStandardMaterial
+              color={phase.isNight ? "#1b2436" : "#dfe8ee"}
+              emissive={phase.isNight ? "#26344e" : "#cfdde8"}
+              emissiveIntensity={phase.isNight ? 0.3 : 0.55}
+            />
           </mesh>
           {[-1.1, 1.1].map((x) => (
             <mesh key={x} position={[x, 2.4, 9.8]} rotation={[0, Math.PI, 0]}>
