@@ -249,14 +249,36 @@ function HumanBody({
  * A person standing in place (a shopkeeper out front, a gallery attendant).
  * `color` tints their shirt toward the store's brand without making it glow.
  */
-export function NpcFigure({ color, idle = true, scale = 1, seed }: { color: string; idle?: boolean; scale?: number; seed?: number }) {
+export function NpcFigure({
+  color,
+  idle = true,
+  scale = 1,
+  seed,
+  walkingRef,
+  phaseRef,
+}: {
+  color: string;
+  idle?: boolean;
+  scale?: number;
+  seed?: number;
+  /**
+   * Live walk state, for a body driven by somebody else's position reports.
+   * A remote agent's motion is known only frame to frame, so the parent owns
+   * these refs and mutates them during easing — passing them down instead of
+   * props keeps a street full of people from re-rendering on every step.
+   */
+  walkingRef?: React.MutableRefObject<boolean>;
+  phaseRef?: React.MutableRefObject<number>;
+}) {
   const fallback = useMemo(() => Math.floor(hash01(color.length * 7919 + (color.charCodeAt(1) || 65), 13) * 1e6), [color]);
   const s = seed ?? fallback;
   const look = useMemo(() => lookFor(s, color), [s, color]);
-  void idle;
   return (
     <group scale={scale}>
-      <HumanBody look={look} walking={false} idleSeed={s % 17} />
+      {/* `idle` is the static caller's way of saying the same thing walkingRef
+          says for a live one — a figure that is moving must move its legs, or
+          the street fills up with people gliding like furniture on castors. */}
+      <HumanBody look={look} walking={!idle} walkingRef={walkingRef} phaseRef={phaseRef} idleSeed={s % 17} />
     </group>
   );
 }
