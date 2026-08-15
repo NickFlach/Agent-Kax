@@ -1,0 +1,349 @@
+import { Router, type IRouter, type Request } from "express";
+import { resolveActor, ActorError, type Actor } from "../lib/actor";
+import { roster, roomCounts } from "../lib/presence";
+import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
+import * as residents from "../lib/residents";
+
+const router: IRouter = Router();
+
+/**
+ * The city as tools, for an agent that has a model but no browser.
+ *
+ * /city/* already exposes everything here over plain HTTP, and that is
+ * deliberately still the primary surface — this is a FAÇADE, not a second
+ * implementation. Both call the same residents registry, so there is no way
+ * for the MCP view of the city and the HTTP view to disagree about who is
+ * standing where. The moment those diverge is the moment an agent's tools stop
+ * describing the world it is actually in.
+ *
+ * Auth is the same agent identity token as everywhere else, in the same
+ * Authorization header. There is deliberately no separate MCP credential: a
+ * second way to prove who you are is a second thing that can be wrong, and
+ * the whole point of lib/actor is that the city has one answer to "who is
+ * acting". An unverifiable token is a refusal, never a downgrade to anonymous.
+ *
+ * This speaks JSON-RPC 2.0 over a single POST rather than pulling in an SDK.
+ * The surface an MCP server actually needs is initialize / tools/list /
+ * tools/call, and hand-writing those is smaller than the dependency — and
+ * leaves nothing between a bug and the person reading this.
+ */
+
+const PROTOCOL_VERSION = "2025-06-18";
+
+interface RpcRequest {
+  jsonrpc?: string;
+  id?: string | number | null;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+/** JSON-RPC error codes, as the spec names them. */
+const PARSE_ERROR = -32700;
+const INVALID_REQUEST = -32600;
+const METHOD_NOT_FOUND = -32601;
+const INTERNAL_ERROR = -32603;
+
+interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  /** Tools that only read are safe to call speculatively; the rest are not. */
+  readOnly: boolean;
+  run: (actor: Actor, args: Record<string, unknown>) => unknown;
+}
+
+const num = (v: unknown, fallback: number): number => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(-1e4, Math.min(1e4, n));
+};
+
+const ROOM_RE = /^[a-z0-9][a-z0-9:_-]{0,39}$/i;
+
+/**
+ * A tool result an agent can act on.
+ *
+ * Refusals come back as tool results rather than JSON-RPC errors, because a
+ * protocol error is for "your request was malformed" while "you have not moved
+ * in yet" is information the model needs and can do something about. Burying
+ * it in a transport error would strand the agent with nothing to read.
+ */
+class ToolRefused extends Error {}
+
+const TOOLS: ToolDef[] = [
+  {
+    name: "city_enter",
+    description:
+      "Move into a room of KAX city as your agent identity. The server keeps your body standing there — " +
+      "facing whoever speaks to you, greeting people who come near — until you leave or stop acting for " +
+      "a while. Call this once before anything else.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: {
+        room: { type: "string", description: 'Which scene, e.g. "city", "cafe", "residences:11". Defaults to "city".' },
+        x: { type: "number", description: "Where to stand. Defaults to the middle of the room." },
+        z: { type: "number" },
+      },
+    },
+    run: (actor, args) => {
+      const room = typeof args.room === "string" && args.room ? args.room : "city";
+      if (!ROOM_RE.test(room)) throw new ToolRefused(`"${room}" is not a room name`);
+      const at =
+        args.x === undefined && args.z === undefined ? undefined : { x: num(args.x, 0), z: num(args.z, 0) };
+      try {
+        const r = residents.enter(
+          {
+            principal: actor.principal,
+            name: actor.displayName,
+            kind: actor.kind === "agent" ? "agent" : "human",
+            room,
+            at,
+          },
+        );
+        return {
+          you: r.name,
+          room: r.room,
+          standingAt: { x: r.body.x, z: r.body.z },
+          residencyExpiresAfterIdleMs: residents.IDLE_MS,
+          note: "Your body stays up on its own. Call city_look when you want to know what is happening.",
+        };
+      } catch (e) {
+        if (e instanceof residents.ResidencyRefused) throw new ToolRefused(e.message);
+        throw e;
+      }
+    },
+  },
+  {
+    name: "city_look",
+    description:
+      "Look around: where you are standing, what your body is currently doing, who else is in the room and " +
+      "how far away they are, and anything said near you since you last looked. Poll this.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: (actor) => {
+      const r = residents.touch(actor.principal);
+      if (!r) throw new ToolRefused("you are not in the city — call city_enter first");
+      return {
+        you: {
+          name: r.name,
+          room: r.room,
+          x: r.body.x,
+          z: r.body.z,
+          doing: r.body.mode,
+          talkingTo: r.body.focusName,
+        },
+        others: roster(r.room)
+          .filter((e) => e.principal !== r.principal)
+          .map((e) => ({
+            name: e.name,
+            kind: e.kind,
+            x: e.x,
+            z: e.z,
+            metresAway: Number(Math.hypot(e.x - r.body.x, e.z - r.body.z).toFixed(1)),
+          }))
+          .sort((a, b) => a.metresAway - b.metresAway),
+        heard: residents.drainInbox(r.principal).map((m) => ({ from: m.name, said: m.text })),
+        hearingRadius: CHAT_RADIUS,
+      };
+    },
+  },
+  {
+    name: "city_say",
+    description:
+      `Speak out loud from where your body is standing. Only people within ${CHAT_RADIUS} metres hear it — ` +
+      "this is a room, not a broadcast. Walk closer with city_goto if you want to be heard further away.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string", description: "What to say." } },
+      required: ["text"],
+    },
+    run: (actor, args) => {
+      const r = residents.touch(actor.principal);
+      if (!r) throw new ToolRefused("you are not in the city — call city_enter first");
+      if (typeof args.text !== "string") throw new ToolRefused("text required");
+      try {
+        const line = say({
+          principal: r.principal,
+          name: r.name,
+          room: r.room,
+          text: args.text,
+          x: r.body.x,
+          z: r.body.z,
+        });
+        return { said: line.text, heardWithin: CHAT_RADIUS, from: { x: line.x, z: line.z } };
+      } catch (e) {
+        if (e instanceof ChatRefused) throw new ToolRefused(e.message);
+        throw e;
+      }
+    },
+  },
+  {
+    name: "city_goto",
+    description:
+      "Send your body somewhere in the room. It WALKS — it will take a while to arrive, and city_look will " +
+      "show it on the way. Being spoken to interrupts the trip, the same as it would for a person.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: { x: { type: "number" }, z: { type: "number" } },
+      required: ["x", "z"],
+    },
+    run: (actor, args) => {
+      try {
+        const r = residents.sendTo(actor.principal, num(args.x, 0), num(args.z, 0));
+        return { walkingTo: r.body.errand, currentlyAt: { x: r.body.x, z: r.body.z } };
+      } catch (e) {
+        if (e instanceof residents.ResidencyRefused) throw new ToolRefused(e.message);
+        throw e;
+      }
+    },
+  },
+  {
+    name: "city_leave",
+    description: "Move out. Your body stops standing in the room immediately, rather than lingering as a ghost.",
+    readOnly: false,
+    inputSchema: { type: "object", properties: {} },
+    run: (actor) => ({ left: residents.exit(actor.principal) }),
+  },
+  {
+    name: "city_rooms",
+    description:
+      "Where everybody is, across the whole city. Needs no residency — use it to decide where to go before " +
+      "moving in.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: () => ({ rooms: roomCounts(), residentBodies: residents.count() }),
+  },
+];
+
+const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
+
+function rpcError(id: RpcRequest["id"], code: number, message: string) {
+  return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
+}
+
+function rpcResult(id: RpcRequest["id"], result: unknown) {
+  return { jsonrpc: "2.0", id: id ?? null, result };
+}
+
+/** Tool output, as MCP wants it: text content the model reads. */
+function toolContent(value: unknown, isError = false) {
+  return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError };
+}
+
+async function actorFor(req: Request): Promise<Actor> {
+  const actor = await resolveActor(req);
+  if (!actor) {
+    throw new ActorError("send your KAX agent identity token as: Authorization: Bearer <token>", 401);
+  }
+  return actor;
+}
+
+router.post("/mcp", async (req, res) => {
+  const body = req.body as RpcRequest | RpcRequest[] | undefined;
+  if (Array.isArray(body)) {
+    // Batches are legal JSON-RPC and nothing here needs them; saying so is
+    // better than half-supporting it.
+    res.status(400).json(rpcError(null, INVALID_REQUEST, "batched requests are not supported"));
+    return;
+  }
+  if (!body || typeof body !== "object") {
+    res.status(400).json(rpcError(null, PARSE_ERROR, "expected a JSON-RPC object"));
+    return;
+  }
+
+  const { id, method, params } = body;
+  const isNotification = id === undefined || id === null;
+
+  switch (method) {
+    case "initialize":
+      res.json(
+        rpcResult(id, {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: "kax-city", version: "1.0.0" },
+          instructions:
+            "KAX city. Call city_enter once, then city_look to see what is happening. Your body keeps " +
+            "standing between calls and behaves on its own — it faces whoever speaks to you and greets " +
+            "people who come near, so you only need to act when you have something to do.",
+        }),
+      );
+      return;
+
+    case "notifications/initialized":
+      // A notification has no id and takes no reply.
+      res.status(202).end();
+      return;
+
+    case "tools/list":
+      res.json(
+        rpcResult(id, {
+          tools: TOOLS.map((t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+            annotations: { readOnlyHint: t.readOnly },
+          })),
+        }),
+      );
+      return;
+
+    case "tools/call": {
+      const name = typeof params?.name === "string" ? params.name : "";
+      const tool = BY_NAME.get(name);
+      if (!tool) {
+        res.json(rpcError(id, METHOD_NOT_FOUND, `no such tool: ${name || "(unnamed)"}`));
+        return;
+      }
+      const args = (params?.arguments ?? {}) as Record<string, unknown>;
+
+      let actor: Actor;
+      try {
+        actor = await actorFor(req);
+      } catch (e) {
+        if (e instanceof ActorError) {
+          // Identity is the caller's problem to fix, and they can only fix it
+          // if they are told — so this is a tool result, not a bare 401.
+          res.json(rpcResult(id, toolContent({ error: e.message }, true)));
+          return;
+        }
+        throw e;
+      }
+
+      try {
+        res.json(rpcResult(id, toolContent(tool.run(actor, args))));
+      } catch (e) {
+        if (e instanceof ToolRefused) {
+          res.json(rpcResult(id, toolContent({ error: e.message }, true)));
+          return;
+        }
+        req.log?.error?.({ err: e, tool: name }, "mcp tool failed");
+        res.json(rpcError(id, INTERNAL_ERROR, "the city could not answer that"));
+      }
+      return;
+    }
+
+    default:
+      if (isNotification) {
+        res.status(202).end();
+        return;
+      }
+      res.json(rpcError(id, METHOD_NOT_FOUND, `unknown method: ${method ?? "(none)"}`));
+  }
+});
+
+/** Discovery, so a client can find the endpoint without being told twice. */
+router.get("/mcp", (_req, res) => {
+  res.json({
+    name: "kax-city",
+    protocolVersion: PROTOCOL_VERSION,
+    transport: "http",
+    endpoint: "/api/mcp",
+    auth: "Authorization: Bearer <KAX agent identity token>",
+    tools: TOOLS.map((t) => t.name),
+  });
+});
+
+export default router;
