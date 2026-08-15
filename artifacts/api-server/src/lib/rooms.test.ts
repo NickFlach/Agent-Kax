@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ROOMS, isKnownRoom, roomDirectory, roomIds, roomInfo } from "./rooms";
+import { ROOMS, isKnownRoom, roomDirectory, roomIds, roomInfo, residenceRoom } from "./rooms";
 import { beat, _clear as clearPresence } from "./presence";
 
 /**
@@ -73,6 +73,20 @@ describe("rooms", () => {
     // Well past the presence TTL.
     const dir = roomDirectory(T0 + 120_000);
     expect(dir.find((r) => r.id === "cafe")!.here).toBe(0);
+  });
+
+  it("names a residence room the one way", () => {
+    // The scene mirrors this string and cannot import it, so the format is
+    // pinned here: a floor number, the lobby, and the penthouse by name.
+    expect(residenceRoom(5)).toBe("residences:5");
+    expect(residenceRoom(11)).toBe("residences:11");
+    expect(residenceRoom(12)).toBe("residences:PH");
+    expect(residenceRoom("L")).toBe("residences:L");
+    // And whatever it produces must be a room the city admits to having,
+    // which is what stops a doorstep landing somewhere nobody renders.
+    for (const f of [2, 5, 11, 12]) {
+      expect(isKnownRoom(residenceRoom(f)), `${residenceRoom(f)} is not in the directory`).toBe(true);
+    }
   });
 
   it("every room can be looked up by id", () => {

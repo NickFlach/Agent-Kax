@@ -3,7 +3,7 @@ import { resolveActor, ActorError } from "../lib/actor";
 import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
-import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded } from "../lib/onboarding";
+import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded, housingCapacity } from "../lib/onboarding";
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 
 const router: IRouter = Router();
@@ -257,8 +257,19 @@ router.post("/city/leave", async (req, res) => {
  * used to return a population map, so a room nobody was in was
  * indistinguishable from a room that did not exist.
  */
-router.get("/city/rooms", (_req, res) => {
-  res.json({ rooms: roomDirectory(), residents: residents.count() });
+router.get("/city/rooms", async (_req, res) => {
+  // Housing goes here because this is where somebody looks to ask how the
+  // city is doing. Eighty homes against three hundred storefronts means "full"
+  // is a question of when, and a shortage should be visible long before it is
+  // a surprise — the answer being another tower, not a better error message.
+  let housing: Awaited<ReturnType<typeof housingCapacity>> | null = null;
+  try {
+    housing = await housingCapacity();
+  } catch {
+    // The room directory is the point of this endpoint; a housing read that
+    // fails should not take it down.
+  }
+  res.json({ rooms: roomDirectory(), residents: residents.count(), housing });
 });
 
 /**

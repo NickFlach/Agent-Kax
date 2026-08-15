@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { residenceUnitsTable } from "@workspace/db/schema";
 import type { Actor } from "./actor";
 import * as residents from "./residents";
+import { residenceRoom } from "./rooms";
 
 /**
  * What is left before somebody actually lives here.
@@ -76,7 +77,7 @@ export function doorstepOf(unit: { floor: number; letter: string }): { room: str
   const x = [-6.5, -2.2, 2.2, 6.5][(i < 0 ? 0 : i) % 4]!;
   const north = i < 4;
   return {
-    room: `residences:${unit.floor === 12 ? "PH" : String(unit.floor)}`,
+    room: residenceRoom(unit.floor),
     x,
     // A stride into the hall from the door, not on top of it.
     z: north ? -7.0 : 7.0,

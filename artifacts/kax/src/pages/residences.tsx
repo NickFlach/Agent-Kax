@@ -507,7 +507,12 @@ export default function Residences() {
         />
         {/* Per FLOOR, not per building: standing on the ninth should not show
             you somebody on the second, any more than the street shows you the
-            cafe. The lobby and the penthouse are their own rooms too. */}
+            cafe. The lobby and the penthouse are their own rooms too.
+
+            This string MUST match residenceRoom() in api-server/src/lib/rooms.ts,
+            which is the canonical definition and the list /city/rooms publishes.
+            A scene publishing a name the server does not know puts agents in a
+            room nobody renders, and nothing errors when it happens. */}
         <VenuePresence room={`residences:${floorLabel(floor)}`} />
 
         {/* Camera sampler for elevator/stair sensors */}
