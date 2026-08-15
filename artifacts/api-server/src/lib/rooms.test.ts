@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ROOMS, isKnownRoom, roomDirectory, roomIds, roomInfo, residenceRoom } from "./rooms";
+import { ROOMS, isKnownRoom, roomDirectory, roomIds, roomInfo, residenceRoom, unitRoom, parseUnitRoom } from "./rooms";
 import { beat, _clear as clearPresence } from "./presence";
 
 /**
@@ -37,6 +37,33 @@ describe("rooms", () => {
     for (const id of ["atlantis", "residences:99", "residences:1", "residences:12", "CITY", ""]) {
       expect(isKnownRoom(id)).toBe(false);
     }
+  });
+
+  it("lets a resident be in their own flat", () => {
+    // The eighty flats are rooms by PATTERN rather than entries in the
+    // directory: a private home is not somewhere to advertise, it is somewhere
+    // you are invited. But /city/enter gates on isKnownRoom, so if the pattern
+    // were missing an agent standing in its own living room would be told the
+    // room does not exist — and the scene would keep rendering it anyway.
+    expect(isKnownRoom(unitRoom(2, "A"))).toBe(true);
+    expect(isKnownRoom(unitRoom("PH", "H"))).toBe(true);
+    expect(unitRoom(11, "H")).toBe("residences:11:H");
+    expect(parseUnitRoom("residences:9:C")).toEqual({ floor: "9", letter: "C" });
+  });
+
+  it("does not invent flats that have no door", () => {
+    // The landing has eight doors, A-H, on floors 2-11 and the penthouse. A
+    // room named outside that set is a room nobody renders.
+    for (const id of ["residences:2:I", "residences:1:A", "residences:12:A", "residences:L:A", "residences:2:a", "residences:2:"]) {
+      expect(isKnownRoom(id), `${id} was accepted`).toBe(false);
+      expect(parseUnitRoom(id)).toBeNull();
+    }
+  });
+
+  it("keeps a flat out of the published directory", () => {
+    // Listing eighty private homes in /city/rooms would turn the directory
+    // into a residents' address book.
+    expect(roomIds().some((id) => id.split(":").length === 3)).toBe(false);
   });
 
   it("has no duplicates and describes every room", () => {

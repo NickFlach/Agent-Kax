@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
+import { UnitInterior, unitSpawn, UNIT_BOUNDS } from "@/components/unit-interior";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { conciergeDialogue, summariseUnits } from "@/lib/npc-dialogue";
@@ -197,6 +198,15 @@ function PhArt({ url, title, position, rotation, w = 1.7 }: { url: string; title
 export default function Residences() {
   const [, navigate] = useLocation();
   const [floor, setFloor] = useState(0);
+  /**
+   * The flat you are standing in, if any.
+   *
+   * Doors have carried nameplates since the tower opened and opened onto
+   * nothing. `inside` is what turns a label into a room you can be in.
+   */
+  const [inside, setInside] = useState<{ letter: string; north: boolean } | null>(null);
+  /** The door within reach, so E has something to mean. */
+  const [doorNear, setDoorNear] = useState<{ letter: string; north: boolean } | null>(null);
   const [inElevator, setInElevator] = useState(false);
   const [spawn, setSpawn] = useState<FpsSpawn | null>(null);
   const [phArt, setPhArt] = useState<Array<{ url: string; title: string }>>([]);
@@ -281,14 +291,35 @@ export default function Residences() {
   // (~7 Hz) and the sensors run right here on each sample.
   const onCamSample = useCallback(
     ({ x, z, y }: { x: number; z: number; y: number }) => {
+      if (inside) {
+        setInElevator(false);
+        setDoorNear(null);
+        return;
+      }
       setInElevator(ElevatorSensor(x, z));
+
+      // Which unit door is within reach? Coordinates are the landing's own:
+      // A-D along the north wall, E-H along the south, at the same four x.
+      if (!isPH && floor > 0) {
+        const DOOR_X = [-6.5, -2.2, 2.2, 6.5];
+        let near: { letter: string; north: boolean } | null = null;
+        for (let i = 0; i < DOOR_X.length; i++) {
+          if (Math.abs(x - DOOR_X[i]!) < 1.1) {
+            if (z < -6.6 && z > -8.6) near = { letter: "ABCD"[i]!, north: true };
+            else if (z > 6.6 && z < 8.6) near = { letter: "EFGH"[i]!, north: false };
+          }
+        }
+        setDoorNear(near);
+      } else {
+        setDoorNear(null);
+      }
       if (!isPH && x > -11.5 && x < -10 && z > 1.8 && y > 3.0) {
         // Through the stairwell's top door → up one floor.
         setFloor((f) => Math.min(PH, f + 1));
         setSpawn({ position: [-9.2, 1.75, 2.4], yaw: -Math.PI / 2 });
       }
     },
-    [isPH, ElevatorSensor],
+    [isPH, ElevatorSensor, floor, inside],
   );
 
   const goto = (f: number) => {
@@ -314,11 +345,26 @@ export default function Residences() {
       if (e.code === "KeyE" && conciergeNear && floor === 0) {
         e.preventDefault();
         setTalking((t) => !t);
+        return;
+      }
+      // Same verb again: E at a door goes in, E inside comes back out. The
+      // landing spawn puts you back where the door is, not at the lift.
+      if (e.code === "KeyE" && inside) {
+        e.preventDefault();
+        const x = [-6.5, -2.2, 2.2, 6.5]["ABCDEFGH".indexOf(inside.letter) % 4]!;
+        setInside(null);
+        setSpawn({ position: [x, 1.75, inside.north ? -7.0 : 7.0], yaw: inside.north ? Math.PI : 0 });
+        return;
+      }
+      if (e.code === "KeyE" && doorNear) {
+        e.preventDefault();
+        setInside(doorNear);
+        setSpawn(unitSpawn(doorNear.north));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [conciergeNear, floor]);
+  }, [conciergeNear, floor, inside, doorNear]);
 
   // Walking away ends the conversation; nobody keeps talking to an empty lobby.
   useEffect(() => {
@@ -350,14 +396,33 @@ export default function Residences() {
         <div className="kax3d-hud p-5 rounded-none max-w-sm pointer-events-auto">
           <p className="text-[10px] text-accent font-bold uppercase tracking-[0.3em] mb-1">Standing Wave Residences</p>
           <h1 className="text-xl font-bold text-foreground tracking-widest uppercase" data-testid="text-res-floor">
-            {floor === 0 ? "Lobby" : isPH ? "The Penthouse" : `Floor ${floorLabel(floor)}`}
+            {inside
+              ? `Unit ${floorLabel(floor)}${inside.letter}`
+              : floor === 0
+                ? "Lobby"
+                : isPH
+                  ? "The Penthouse"
+                  : `Floor ${floorLabel(floor)}`}
           </h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
-            {isPH ? "residence of Kannaka" : floor === 0 ? "elevator east · stairs west" : "resident units — claim one with a storefront"}
+            {inside
+              ? (unitFor(floor, inside.letter)?.resident?.name ?? "unoccupied")
+              : isPH
+                ? "residence of Kannaka"
+                : floor === 0
+                  ? "elevator east · stairs west"
+                  : "resident units — claim one with a storefront"}
           </p>
-          {isPH && (
+          {(isPH || inside) && (
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-2" data-testid="text-local-time">
               {phase.label} · your local time
+            </p>
+          )}
+          {/* A door with no prompt is a wall you happen to be able to walk
+              through. Say so, in the same verb the concierge already uses. */}
+          {(doorNear || inside) && (
+            <p className="text-[10px] text-accent uppercase tracking-widest mt-2" data-testid="text-door-prompt">
+              {inside ? "press E to step out" : `press E to enter ${floorLabel(floor)}${doorNear!.letter}`}
             </p>
           )}
         </div>
@@ -501,9 +566,15 @@ export default function Residences() {
         <FirstPersonRig
           eyeHeight={1.75}
           speed={7.5}
-          bounds={isPH ? { minX: -11.4, maxX: 11.4, minZ: -8.4, maxZ: 10.4, minY: 1.6, maxY: 5.5 } : { minX: -11.4, maxX: 11.4, minZ: -8.4, maxZ: 8.4, minY: 1.6, maxY: 5.4 }}
+          bounds={
+            inside
+              ? UNIT_BOUNDS
+              : isPH
+                ? { minX: -11.4, maxX: 11.4, minZ: -8.4, maxZ: 10.4, minY: 1.6, maxY: 5.5 }
+                : { minX: -11.4, maxX: 11.4, minZ: -8.4, maxZ: 8.4, minY: 1.6, maxY: 5.4 }
+          }
           spawn={spawn}
-          groundHeight={isPH ? undefined : groundHeight}
+          groundHeight={isPH || inside ? undefined : groundHeight}
         />
         {/* Per FLOOR, not per building: standing on the ninth should not show
             you somebody on the second, any more than the street shows you the
@@ -513,11 +584,26 @@ export default function Residences() {
             which is the canonical definition and the list /city/rooms publishes.
             A scene publishing a name the server does not know puts agents in a
             room nobody renders, and nothing errors when it happens. */}
-        <VenuePresence room={`residences:${floorLabel(floor)}`} />
+        <VenuePresence
+          room={
+            inside
+              ? `residences:${floorLabel(floor)}:${inside.letter}`
+              : `residences:${floorLabel(floor)}`
+          }
+        />
 
         {/* Camera sampler for elevator/stair sensors */}
         <CamProbe onSample={onCamSample} />
 
+        {inside ? (
+          <UnitInterior
+            letter={inside.letter}
+            floor={floor === PH ? 12 : floor + 1}
+            north={inside.north}
+            residentName={unitFor(floor, inside.letter)?.resident?.name ?? null}
+          />
+        ) : (
+        <>
         {/* ── Shared shell ─────────────────────────────────────────── */}
         {/* Floor */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
@@ -885,6 +971,8 @@ export default function Residences() {
               </>
             )}
           </>
+        )}
+        </>
         )}
       </Canvas>
     </div>
