@@ -34,6 +34,24 @@ channel = "stable-25_05"
 KANNAKA_OWNER_EMAIL = "nikolaiflaukowski@gmail.com"
 
 [userenv.development]
+# Keep the DEV database at the same schema as production.
+#
+# Production auto-migrates at boot (REPLIT_DEPLOYMENT=1). Development never
+# did, so dev fell behind by exactly the migrations we added — and the publish
+# step diffs DEV against PROD, which meant every deploy offered to delete the
+# newest column, data and all:
+#
+#   You're about to delete attached_via column in user_bots with 2 items
+#   You're about to delete bsky_handle column in user_bots with 2 items
+#   ...and city_residents, which it actually did drop
+#
+# That looked like three separate incidents and was one cause. With this set,
+# running the dev server applies the same idempotent migrations prod runs, dev
+# can never lag, and the schema diff at publish is empty — which is the state
+# where nobody has to read a destructive prompt carefully at midnight.
+#
+# Failure is non-fatal by design (see index.ts), so this cannot brick dev.
+KAX_AUTO_MIGRATE = "1"
 
 [userenv.production]
 KAX_CLAIM_FROM_USER_ID = "39143452"
