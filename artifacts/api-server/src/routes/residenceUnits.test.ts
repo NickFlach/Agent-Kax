@@ -19,17 +19,26 @@ import { RESIDENCE_FLOORS, RESIDENCE_LETTERS, tierForFloor } from "@workspace/db
 
 describe("residence units", () => {
   it("seeds 80 allocatable units across floors 2-11", async () => {
-    const rows = await db.execute(sql`SELECT count(*)::int AS n FROM residence_units`);
+    const rows = await db.execute(
+      sql`SELECT count(*)::int AS n FROM residence_units WHERE floor BETWEEN 2 AND 11`,
+    );
     const n = (rows.rows[0] as { n: number }).n;
     expect(n).toBe(RESIDENCE_FLOORS.length * RESIDENCE_LETTERS.length);
     expect(n).toBe(80);
   });
 
-  it("does not make the penthouse allocatable", async () => {
+  it("holds the penthouse as an address, and nothing else outside the stock", async () => {
+    // This used to assert the table had NO rows outside floors 2-11, which
+    // was how "the penthouse is not allocatable" was expressed. That made the
+    // building disagree with the housing record about where its most visible
+    // resident lived, so the penthouse is a row now. The guarantee it was
+    // really protecting — that nobody can CLAIM floor 12 — is enforced by the
+    // route and tested in residenceClaimAuth.test.ts.
     const rows = await db.execute(
-      sql`SELECT count(*)::int AS n FROM residence_units WHERE floor < 2 OR floor > 11`,
+      sql`SELECT floor, letter, tier FROM residence_units WHERE floor < 2 OR floor > 11`,
     );
-    expect((rows.rows[0] as { n: number }).n).toBe(0);
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]).toMatchObject({ floor: 12, letter: "A", tier: tierForFloor(12) });
   });
 
   it("assigns tiers by height — choice, not access", async () => {

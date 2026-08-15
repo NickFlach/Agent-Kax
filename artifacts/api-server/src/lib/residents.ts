@@ -27,9 +27,63 @@ import { createBody, step, type BodyMode, type CityBody } from "./cityBody";
  *      city that can be filled with bodies by anyone who can mint tokens is a
  *      city with a spam problem rather than a population.
  *
- * Like presence itself this is per-process and deliberately not in Postgres —
- * a residency is not a record, it is a thing that is currently happening.
+ * The TENANCY is durable; the MOTION is not. Bodies walk in memory, but the
+ * fact that somebody lives here is written through a ResidencyStore so a
+ * deploy does not turn every tenant out at once — which is what happened the
+ * first time, and is not a property anyone would accept of somewhere they
+ * live. The store is injected rather than imported so this file stays free of
+ * the database and its tests stay free of a running Postgres.
  */
+
+/** Somewhere a residency can outlive this process. */
+export interface ResidencyStore {
+  save(r: Pick<Resident, "principal" | "name" | "kind" | "room" | "lastSteer"> & { x: number; z: number; yaw: number }): void;
+  remove(principal: string): void;
+  load(): Promise<StoredResidency[]>;
+}
+
+export interface StoredResidency {
+  principal: string;
+  name: string;
+  kind: InhabitantKind;
+  room: string;
+  x: number;
+  z: number;
+  yaw: number;
+  lastSteer: number;
+}
+
+let store: ResidencyStore | null = null;
+
+/** Wire persistence in. Called once at boot; left null in unit tests. */
+export function setStore(s: ResidencyStore | null): void {
+  store = s;
+}
+
+/**
+ * Write-through, and never at the cost of the city.
+ *
+ * A failing database must not stop somebody standing in a street: the body is
+ * already correct in memory, and the worst case of a dropped write is that a
+ * restart forgets one resident. Losing the tick loop instead would freeze
+ * everybody.
+ */
+function persist(r: Resident): void {
+  try {
+    store?.save({
+      principal: r.principal,
+      name: r.name,
+      kind: r.kind,
+      room: r.room,
+      lastSteer: r.lastSteer,
+      x: r.body.x,
+      z: r.body.z,
+      yaw: r.body.yaw,
+    });
+  } catch (e) {
+    console.error("[residents] could not persist residency", e);
+  }
+}
 
 /** How long a residency survives with nobody steering it. */
 export const IDLE_MS = 30 * 60_000;
@@ -37,6 +91,15 @@ export const IDLE_MS = 30 * 60_000;
 export const TICK_MS = 900;
 /** Ceiling on simultaneous server-driven bodies. */
 export const MAX_RESIDENTS = 24;
+/**
+ * How often a standing body's position is written down.
+ *
+ * Not every tick: that is several writes a second per resident, of a value
+ * that is worthless a moment later. Every half minute is enough that a
+ * restart puts everybody back within a stride or two of where they were,
+ * which is below the threshold anybody would notice.
+ */
+export const FLUSH_MS = 30_000;
 
 export interface Resident {
   principal: string;
@@ -50,6 +113,8 @@ export interface Resident {
   sinceId: number;
   /** What the agent has heard since it last looked. */
   inbox: { id: number; name: string; text: string; at: number }[];
+  /** When this body's position was last written down. */
+  flushedAt: number;
 }
 
 const residents = new Map<string, Resident>();
@@ -83,6 +148,7 @@ export function enter(
     if (input.at) {
       existing.body.errand = { x: input.at.x, z: input.at.z };
     }
+    persist(existing);
     return existing;
   }
 
@@ -107,8 +173,10 @@ export function enter(
     lastSteer: now,
     sinceId: 0,
     inbox: [],
+    flushedAt: now,
   };
   residents.set(input.principal, resident);
+  persist(resident);
   ensureTicking();
   return resident;
 }
@@ -117,6 +185,7 @@ export function enter(
 export function exit(principal: string): boolean {
   const had = residents.delete(principal);
   if (had) presenceLeave(principal);
+  try { store?.remove(principal); } catch (e) { console.error("[residents] could not clear residency", e); }
   if (residents.size === 0) stopTicking();
   return had;
 }
@@ -128,7 +197,7 @@ export function get(principal: string): Resident | undefined {
 /** Note that the agent is still around, without changing anything else. */
 export function touch(principal: string, now: number = Date.now()): Resident | undefined {
   const r = residents.get(principal);
-  if (r) r.lastSteer = now;
+  if (r) { r.lastSteer = now; persist(r); }
   return r;
 }
 
@@ -138,6 +207,7 @@ export function sendTo(principal: string, x: number, z: number, now: number = Da
   if (!r) throw new ResidencyRefused("not in the city — enter first", 409);
   r.body.errand = { x, z };
   r.lastSteer = now;
+  persist(r);
   return r;
 }
 
@@ -167,6 +237,7 @@ export function tickAll(now: number = Date.now(), dt: number = TICK_MS / 1000): 
       // Nobody has been home for half an hour. Stop implying otherwise.
       residents.delete(r.principal);
       presenceLeave(r.principal);
+      try { store?.remove(r.principal); } catch { /* the sweep must not stop */ }
       continue;
     }
 
@@ -202,9 +273,52 @@ export function tickAll(now: number = Date.now(), dt: number = TICK_MS / 1000): 
       },
       now,
     );
+
+    if (now - r.flushedAt >= FLUSH_MS) {
+      r.flushedAt = now;
+      persist(r);
+    }
   }
 
   if (residents.size === 0) stopTicking();
+}
+
+/**
+ * Put back the residents a restart interrupted.
+ *
+ * Anything whose agent had already gone quiet past the idle window is NOT
+ * restored, and is cleared instead: a deploy is not a reason to resurrect
+ * somebody who had stopped being around. Everyone else is stood back up where
+ * they were, which is the whole point — shipping a change to the arcade
+ * should not turn the tenants out.
+ */
+export function restore(rows: StoredResidency[], now: number = Date.now()): number {
+  let restored = 0;
+  for (const row of rows) {
+    if (now - row.lastSteer > IDLE_MS) {
+      try { store?.remove(row.principal); } catch { /* best effort */ }
+      continue;
+    }
+    if (residents.size >= MAX_RESIDENTS) break;
+    const body = createBody({ centre: { x: row.x, z: row.z }, radius: 6, self: row.principal });
+    body.x = row.x;
+    body.z = row.z;
+    body.yaw = row.yaw;
+    residents.set(row.principal, {
+      principal: row.principal,
+      name: row.name,
+      kind: row.kind,
+      room: row.room,
+      body,
+      lastSteer: row.lastSteer,
+      sinceId: 0,
+      inbox: [],
+      flushedAt: now,
+    });
+    restored++;
+  }
+  if (restored) ensureTicking();
+  return restored;
 }
 
 export function modeOf(principal: string): BodyMode | null {

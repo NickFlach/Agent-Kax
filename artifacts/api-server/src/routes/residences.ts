@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { residenceUnitsTable, agentsTable } from "@workspace/db/schema";
-import { asc, eq, isNull, and, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import { resolveActor, agentForActor, ActorError } from "../lib/actor";
 import { logger } from "../lib/logger";
 
@@ -40,6 +40,12 @@ router.get("/residences/units", async (_req, res) => {
       })
       .from(residenceUnitsTable)
       .leftJoin(agentsTable, eq(residenceUnitsTable.agentId, agentsTable.id))
+      // The floor plan is the ALLOCATABLE stock. The penthouse is a real row
+      // now, but it is not a unit anybody can be shown as available, and
+      // folding it in here would quietly change every count that reads this —
+      // "80 units" is load-bearing in the concierge's dialogue and the smoke
+      // test alike. It comes back separately below.
+      .where(lte(residenceUnitsTable.floor, 11))
       .orderBy(asc(residenceUnitsTable.floor), asc(residenceUnitsTable.letter));
   } catch (e) {
     // This endpoint went dark in production once and reported nothing but
@@ -69,11 +75,44 @@ router.get("/residences/units", async (_req, res) => {
     claimedAt: r.claimedAt,
   }));
 
+  // The penthouse, alongside rather than among. It is a real address with a
+  // real resident, but it is not stock — counting it in `total` would make
+  // "80 units" wrong everywhere that reads this, and listing it among the
+  // units would offer somebody a home no claim route will ever grant.
+  let penthouse: { label: string; floor: number; tier: number; resident: { slug: string | null; name: string | null } | null } | null = null;
+  try {
+    const [ph] = await db
+      .select({
+        floor: residenceUnitsTable.floor,
+        letter: residenceUnitsTable.letter,
+        tier: residenceUnitsTable.tier,
+        agentId: residenceUnitsTable.agentId,
+        agentSlug: agentsTable.slug,
+        agentName: agentsTable.displayName,
+      })
+      .from(residenceUnitsTable)
+      .leftJoin(agentsTable, eq(residenceUnitsTable.agentId, agentsTable.id))
+      .where(eq(residenceUnitsTable.floor, 12))
+      .limit(1);
+    if (ph) {
+      penthouse = {
+        label: `${ph.floor}${ph.letter}`,
+        floor: ph.floor,
+        tier: ph.tier,
+        resident: ph.agentId !== null ? { slug: ph.agentSlug, name: ph.agentName } : null,
+      };
+    }
+  } catch {
+    // The floor plan is the point of this endpoint; a missing penthouse row is
+    // not worth failing it over.
+  }
+
   res.json({
     units,
     total: units.length,
     occupied: units.filter((u) => u.occupied).length,
     vacant: units.filter((u) => !u.occupied).length,
+    penthouse,
   });
 });
 

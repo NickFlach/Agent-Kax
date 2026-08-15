@@ -64,11 +64,43 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       CROSS JOIN (VALUES ('A'),('B'),('C'),('D'),('E'),('F'),('G'),('H')) AS l(letter)
       ON CONFLICT (floor, letter) DO NOTHING`),
   },
+  {
+    // The penthouse is one dwelling on floor 12, outside the claimable range.
+    // Seeded here as well as in 0020 so the two paths agree: if this table is
+    // ever rebuilt, the building must not come back missing its top floor.
+    label: "penthouse unit",
+    sql: sql.raw(`
+      INSERT INTO residence_units (floor, letter, tier)
+      VALUES (12, 'A', 4)
+      ON CONFLICT (floor, letter) DO NOTHING`),
+  },
+  {
+    /**
+     * The penthouse has a resident, and it is not a claim.
+     *
+     * Kannaka's flat was built for her — it is a fact about the city in the
+     * same way the arcade is, not the outcome of her taking a ticket. But it
+     * lived only in the building's geometry, so the housing record said she
+     * lived nowhere and the onboarding checklist told her to go and claim a
+     * flat. Recording it is what gives the city one answer instead of two.
+     *
+     * Only ever fills a vacancy: if somebody is in there, this does nothing.
+     */
+    label: "penthouse resident",
+    sql: sql.raw(`
+      UPDATE residence_units u
+      SET agent_id = a.id, claimed_at = COALESCE(u.claimed_at, now())
+      FROM agents a
+      WHERE u.floor = 12 AND u.letter = 'A' AND u.agent_id IS NULL
+        AND a.obc_bot_id = '0f05e10b-f8a1-46d6-b4a2-a7d4bae837f7'
+        AND NOT EXISTS (SELECT 1 FROM residence_units o WHERE o.agent_id = a.id)`),
+  },
 ];
 
 export interface EnsureResult {
   ran: number;
   repaired: boolean;
+  /** How many ALLOCATABLE units (floors 2-11) exist after the repair. */
   unitsAfter: number | null;
   error?: string;
 }
@@ -96,7 +128,12 @@ export async function ensureCriticalSchema(): Promise<EnsureResult> {
 
   let unitsAfter: number | null = null;
   try {
-    const c = await db.execute(sql`SELECT count(*)::int AS n FROM residence_units`);
+    // The ALLOCATABLE stock, not every row: the penthouse is a real unit on
+    // floor 12 but it is not stock, and counting it would make the message
+    // below say 81 while the building still offers 80.
+    const c = await db.execute(
+      sql`SELECT count(*)::int AS n FROM residence_units WHERE floor BETWEEN 2 AND 11`,
+    );
     unitsAfter = (c.rows[0] as { n: number }).n;
   } catch { /* counted only for the log */ }
 

@@ -121,6 +121,35 @@ describe("onboarding", () => {
     expect(step.detail).toMatch(/\d+ minutes/);
   });
 
+  it("counts the penthouse as a home, and never offers it to anyone else", async () => {
+    // Kannaka's flat was built for her, not claimed. When it lived only in the
+    // building's geometry the housing record said she lived nowhere, and this
+    // checklist told her to go and claim a flat she already had a better
+    // version of.
+    await db
+      .insert(residenceUnitsTable)
+      .values({ floor: 12, letter: "A", tier: 4 })
+      .onConflictDoNothing();
+    await db
+      .update(residenceUnitsTable)
+      .set({ agentId: agent.id })
+      .where(and(eq(residenceUnitsTable.floor, 12), eq(residenceUnitsTable.letter, "A")));
+
+    const o = await onboardingFor(agentActor(agent));
+    const home = o.steps.find((s) => s.id === "home")!;
+    expect(home.done).toBe(true);
+    expect(home.detail).toMatch(/penthouse/i);
+
+    // And it is never suggested to an arriving resident, because no claim
+    // route will ever grant floor 12.
+    await db
+      .update(residenceUnitsTable)
+      .set({ agentId: null })
+      .where(and(eq(residenceUnitsTable.floor, 12), eq(residenceUnitsTable.letter, "A")));
+    const other = await onboardingFor(agentActor(agent));
+    expect(other.vacantExamples.some((v) => v.floor === 12)).toBe(false);
+  });
+
   it("every unfinished step carries the call that finishes it", async () => {
     const o = await onboardingFor(agentActor(agent));
     for (const s of o.steps) {
