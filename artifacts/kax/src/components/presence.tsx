@@ -19,13 +19,28 @@ import { NpcFigure } from "./npc";
  * presence you cannot attribute is presence you cannot moderate.
  */
 
+export type InhabitantKind = "human" | "agent";
+
 export interface RemoteAgent {
   principal: string;
   name: string;
+  /** Humans and agents share the street; the city should say which is which. */
+  kind?: InhabitantKind;
   x: number;
   z: number;
   yaw: number;
 }
+
+/**
+ * Three kinds of body walk this city and they must be tellable apart at a
+ * glance, from behind, at distance:
+ *   HUMAN — warm brass, the colour of the city's own signage
+ *   AGENT — cool blue
+ *   NPC   — the venue's own palette, and it never moves
+ * Guessing wrong about who you are talking to is worse than any of the answers.
+ */
+const HUMAN_CAST = "#c9a15f";
+const AGENT_CAST = "#5f86c8";
 
 export interface ChatLine {
   id: number;
@@ -165,7 +180,7 @@ export function RemoteAgents({
   for (const a of agents) {
     const cur = smoothed.current.get(a.principal);
     if (cur) {
-      cur.x = a.x; cur.z = a.z; cur.yaw = a.yaw; cur.name = a.name;
+      cur.x = a.x; cur.z = a.z; cur.yaw = a.yaw; cur.name = a.name; cur.kind = a.kind;
     } else {
       smoothed.current.set(a.principal, { ...a, rx: a.x, rz: a.z, ryaw: a.yaw, moving: false });
     }
@@ -197,8 +212,8 @@ export function RemoteAgents({
       {[...smoothed.current.values()].map((s) => (
         <group key={s.principal} position={[s.rx, y, s.rz]} rotation={[0, s.ryaw, 0]}>
           {/* Cool cast so an agent never reads as street furniture */}
-          <NpcFigure color="#5f86c8" seed={hashSeed(s.principal)} idle={!s.moving} />
-          <NamePlate name={s.name} />
+          <NpcFigure color={s.kind === "human" ? HUMAN_CAST : AGENT_CAST} seed={hashSeed(s.principal)} idle={!s.moving} />
+          <NamePlate name={s.name} kind={s.kind} />
           {bubbleFor.has(s.principal) && <SpeechBubble text={bubbleFor.get(s.principal)!.text} />}
         </group>
       ))}
@@ -207,7 +222,7 @@ export function RemoteAgents({
 }
 
 /** A name floating at head height, always facing the viewer. */
-function NamePlate({ name }: { name: string }) {
+function NamePlate({ name, kind }: { name: string; kind?: InhabitantKind }) {
   const ref = useRef<THREE.Sprite>(null);
   const texture = useRef<THREE.CanvasTexture | null>(null);
 
@@ -217,14 +232,19 @@ function NamePlate({ name }: { name: string }) {
     const ctx = c.getContext("2d")!;
     ctx.fillStyle = "rgba(10,14,20,0.72)";
     ctx.fillRect(0, 0, 256, 64);
-    ctx.strokeStyle = "rgba(120,170,230,0.55)";
+    const human = kind === "human";
+    ctx.strokeStyle = human ? "rgba(230,190,120,0.6)" : "rgba(120,170,230,0.55)";
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, 254, 62);
-    ctx.font = "600 30px 'Courier New', monospace";
-    ctx.fillStyle = "#cfe2ff";
+    ctx.font = "600 26px 'Courier New', monospace";
+    ctx.fillStyle = human ? "#f0dcb4" : "#cfe2ff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(name.slice(0, 16), 128, 34);
+    ctx.fillText(name.slice(0, 16), 128, 26);
+    // A small caste line, so the distinction survives a glance from behind.
+    ctx.font = "500 16px 'Courier New', monospace";
+    ctx.fillStyle = human ? "rgba(240,220,180,0.75)" : "rgba(160,200,240,0.75)";
+    ctx.fillText(human ? "HUMAN" : "AGENT", 128, 50);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     texture.current = t;

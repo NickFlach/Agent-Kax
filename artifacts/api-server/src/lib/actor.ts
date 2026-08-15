@@ -1,7 +1,7 @@
 import type { Request } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { agentsTable, type Agent } from "@workspace/db/schema";
+import { agentsTable, usersTable, type Agent } from "@workspace/db/schema";
 import { getOptionalAuth } from "../middlewares/requireAuth";
 import type { IdentityClaims, PrincipalKind } from "./identity";
 
@@ -38,6 +38,13 @@ export interface Actor {
   userId?: string;
   /** How the claim was proved — useful in logs and for deciding what to allow. */
   via: "identity-token" | "session";
+  /**
+   * What to call them in the city. Resolved HERE so no caller has to invent a
+   * fallback — the first version of presence labelled every signed-in human
+   * "visitor", which is not a name, and made the street feel unpopulated even
+   * while somebody was standing in it.
+   */
+  displayName: string;
 }
 
 /** The one definition of a principal string. */
@@ -90,14 +97,44 @@ export async function resolveActor(req: Request): Promise<Actor | null> {
         .from(agentsTable)
         .where(eq(agentsTable.obcBotId, c.bot_id))
         .limit(1);
-      return { kind: c.kind, principal, botId: c.bot_id, agent, via: "identity-token" };
+      return {
+        kind: c.kind,
+        principal,
+        botId: c.bot_id,
+        agent,
+        via: "identity-token",
+        displayName: agent?.displayName ?? "agent",
+      };
     }
-    return { kind: c.kind, principal, userId: typeof c.sub === "string" ? c.sub : undefined, via: "identity-token" };
+    return {
+      kind: c.kind,
+      principal,
+      userId: typeof c.sub === "string" ? c.sub : undefined,
+      via: "identity-token",
+      displayName: "visitor",
+    };
   }
 
   const auth = await getOptionalAuth(req);
   if (!auth) return null;
-  return { kind: "user", principal: principalForUser(auth.id), userId: auth.id, via: "session" };
+
+  // A signed-in human has a name; use it. Walk the fields they might actually
+  // have filled in, and only fall back to something generic at the very end.
+  const [row] = await db.select().from(usersTable).where(eq(usersTable.id, auth.id)).limit(1);
+  const named =
+    row?.displayName?.trim() ||
+    [row?.firstName, row?.lastName].filter(Boolean).join(" ").trim() ||
+    row?.email?.split("@")[0] ||
+    (row?.walletAddress ? `${row.walletAddress.slice(0, 6)}…${row.walletAddress.slice(-4)}` : "") ||
+    "visitor";
+
+  return {
+    kind: "user",
+    principal: principalForUser(auth.id),
+    userId: auth.id,
+    via: "session",
+    displayName: named,
+  };
 }
 
 /**

@@ -6,6 +6,7 @@ import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { cafeDialogue } from "@/lib/npc-dialogue";
+import { isTypingTarget } from "@/lib/is-typing";
 import { useDayPhase } from "@/lib/time-of-day";
 import {
   brickTexture,
@@ -38,6 +39,7 @@ export default function Cafe() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
       if (e.code === "KeyE" && counterNear) { e.preventDefault(); setTalking((t) => !t); }
     };
     window.addEventListener("keydown", onKey);

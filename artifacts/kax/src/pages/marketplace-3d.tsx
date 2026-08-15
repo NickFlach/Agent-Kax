@@ -11,6 +11,7 @@ import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { Horizon } from "@/components/horizon";
 import { BackAlley, SideStreet, FlaukowskiCafe, ALLEY_X } from "@/components/city-back-streets";
 import { usePresence, RemoteAgents } from "@/components/presence";
+import { isTypingTarget } from "@/lib/is-typing";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
@@ -1332,8 +1333,8 @@ export default function Marketplace3D() {
   // Press T to speak. The FPS rig already ignores keys while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = document.activeElement?.tagName === "INPUT";
-      if (e.code === "KeyT" && !typing && !chatOpen) {
+      if (isTypingTarget()) return;
+      if (e.code === "KeyT" && !chatOpen) {
         e.preventDefault();
         setChatOpen(true);
         return;
@@ -1347,6 +1348,7 @@ export default function Marketplace3D() {
   // Walk up to a store and press E to enter it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
       if (e.code === "KeyE" && nearby) {
         e.preventDefault();
         navigate(dest(nearby));
