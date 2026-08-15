@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
+import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { joineryDialogue } from "@/lib/npc-dialogue";
@@ -102,6 +103,7 @@ export default function FurnitureHall() {
   const [loaded, setLoaded] = useState(false);
   const [deskNear, setDeskNear] = useState(false);
   const [talking, setTalking] = useState(false);
+  const phase = useDayPhase();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -187,11 +189,20 @@ export default function FurnitureHall() {
         gl={{ antialias: true }}
       >
         <color attach="background" args={["#15130f"]} />
-        {/* Bright loft: daylight through big windows + warm fill */}
-        <ambientLight intensity={0.65} color="#f8f2e4" />
-        <hemisphereLight args={["#eef0ea", "#7a7060", 0.7]} />
-        <directionalLight position={[6, 8, 4]} intensity={1.1} color="#fff4de" castShadow />
-        <pointLight position={[0, 3.4, 0]} intensity={30} distance={24} color="#ffeecb" />
+        {/* A loft lit through big windows, so it has to follow the clock: the
+            daylight terms fall away after dark and the workshop's own lamps
+            carry the room. Every other interior already did this; the Joinery
+            was the one left reading like noon at midnight. */}
+        <ambientLight intensity={phase.isNight ? 0.16 : 0.65} color={phase.isNight ? "#9fb0cf" : "#f8f2e4"} />
+        <hemisphereLight args={[phase.isNight ? "#2b3550" : "#eef0ea", "#7a7060", phase.isNight ? 0.28 : 0.7]} />
+        <directionalLight
+          position={[6, 8, 4]}
+          intensity={phase.isNight ? 0.1 : 1.1}
+          color={phase.isNight ? "#8fa6d8" : phase.sunColor}
+          castShadow
+        />
+        {/* The bench lamps. Brighter after dark, because somebody is still working. */}
+        <pointLight position={[0, 3.4, 0]} intensity={phase.isNight ? 42 : 30} distance={24} color="#ffeecb" />
 
         <FirstPersonRig eyeHeight={1.75} speed={7.5} bounds={{ minX: -10.4, maxX: 10.4, minZ: -5.4, maxZ: 8.4, minY: 1.6, maxY: 3.6 }} />
         <VenuePresence room="joinery" />
@@ -226,7 +237,11 @@ export default function FurnitureHall() {
           <group key={x} position={[x, 2.3, -5.44]}>
             <mesh>
               <planeGeometry args={[3.2, 2.6]} />
-              <meshStandardMaterial color="#dfe8ee" emissive="#cfdde8" emissiveIntensity={0.55} />
+              <meshStandardMaterial
+                color={phase.isNight ? "#1b2436" : "#dfe8ee"}
+                emissive={phase.isNight ? "#26344e" : "#cfdde8"}
+                emissiveIntensity={phase.isNight ? 0.35 : 0.55}
+              />
             </mesh>
             {[-0.8, 0.8].map((mx) => (
               <mesh key={mx} position={[mx, 0, 0.02]}>

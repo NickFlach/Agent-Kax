@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
-import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
 import { arcadeCarpetTexture, repeated } from "@/lib/city-textures";
@@ -22,7 +21,10 @@ import { DISPLAY_FONT } from "@/lib/fonts";
  */
 export default function ArcadeHall() {
   const [, navigate] = useLocation();
-  const phase = useDayPhase();
+  // No clock here on purpose: the hall has no windows, so noon and midnight
+  // look the same from inside and should. It used to hold a useDayPhase()
+  // result it never read — re-rendering every minute for nothing, and reading
+  // to anyone skimming as though the arcade followed the day when it did not.
   const [apps, setApps] = useState<PlayableApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState<PlayableApp | null>(null);
