@@ -70,8 +70,22 @@ const AT = (() => {
 const CHECKIN_MS = 8 * 60_000;
 /** How long to wait before trying again when the city is unreachable. */
 const RETRY_MS = 30_000;
-/** Refresh this long before the token would expire. */
-const REFRESH_MARGIN_MS = 5 * 60_000;
+/**
+ * Refresh this long before expiry — and it MUST exceed the check-in interval.
+ *
+ * This was a flat five minutes against an eight-minute tick, which opens a
+ * three-minute hole the token can die in BETWEEN ticks. It duly did:
+ *
+ *   13:31:46  token refreshed, good until 13:46:47
+ *   13:39:46  check-in (7m left, no refresh — margin not reached)
+ *   13:47:46  refresh refused: expired 59 seconds ago
+ *
+ * A refreshed token lives ~15 minutes, so a margin smaller than the tick can
+ * always be stepped over. Deriving it from the interval makes that impossible
+ * by construction: refresh whenever the token would not comfortably survive
+ * until the tick after next.
+ */
+const REFRESH_MARGIN_MS = CHECKIN_MS * 2;
 
 if (!TOKEN) {
   console.error(
@@ -227,8 +241,9 @@ if (has("--leave")) {
     let offline = false;
     const timer = setInterval(async () => {
       // Refresh on our own schedule rather than waiting for a 401: a dead
-      // token cannot be refreshed, only replaced by a human.
-      if (Date.now() > expiryOf(TOKEN) - REFRESH_MARGIN_MS) await refresh();
+      // token cannot be refreshed, only replaced by a human. The margin is
+      // two ticks wide, so a token can never expire in the gap between them.
+      if (expiryOf(TOKEN) - Date.now() < REFRESH_MARGIN_MS) await refresh();
 
       const outcome = await checkIn();
       if (outcome === "offline") {
