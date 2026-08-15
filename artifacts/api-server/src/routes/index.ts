@@ -28,6 +28,7 @@ import predictionsRouter from "./predictions";
 import arcadeRouter from "./arcade";
 import showcaseRouter from "./showcase";
 import residencesRouter from "./residences";
+import presenceRouter from "./presence";
 
 const router: IRouter = Router();
 
@@ -45,6 +46,7 @@ router.use(artifactsRouter);
 router.use(arcadeRouter);
 router.use(showcaseRouter);
 router.use(residencesRouter);
+router.use(presenceRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);

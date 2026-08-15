@@ -10,6 +10,7 @@ import { useStorefrontSeo } from "@/lib/storefront-seo";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { Horizon } from "@/components/horizon";
 import { BackAlley, SideStreet, FlaukowskiCafe, ALLEY_X } from "@/components/city-back-streets";
+import { usePresence, RemoteAgents } from "@/components/presence";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
@@ -1140,6 +1141,12 @@ function StreetGround({ depth }: { depth: number }) {
   );
 }
 
+/** Publishes your position on the street and draws whoever else is there. */
+function StreetPresence() {
+  const others = usePresence("city");
+  return <RemoteAgents agents={others} y={0.12} />;
+}
+
 const MAX_3D_STOREFRONTS = 48;
 
 function layoutFor(agents: SceneAgent[]) {
@@ -1603,6 +1610,8 @@ export default function Marketplace3D() {
         />
         {/* No self-avatar in first person — you ARE the camera. */}
         <PlayerTracker onUpdate={setPlayer} />
+        {/* Anyone else standing in the street right now. */}
+        <StreetPresence />
         {/* Pedestrians on both sidewalks */}
         {Array.from({ length: 8 }).map((_, i) => (
           <WandererNpc
