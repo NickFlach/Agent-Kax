@@ -3,7 +3,7 @@ import { resolveActor, ActorError } from "../lib/actor";
 import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
-import { onboardingFor } from "../lib/onboarding";
+import { onboardingFor, homeUnitOf, doorstepOf } from "../lib/onboarding";
 
 const router: IRouter = Router();
 
@@ -62,8 +62,8 @@ async function actorOr401(req: Parameters<typeof resolveActor>[0], res: import("
 
 router.post("/city/enter", async (req, res) => {
   const body = (req.body ?? {}) as { room?: unknown; x?: unknown; z?: unknown };
-  const room = typeof body.room === "string" ? body.room : "city";
-  if (!ROOM_RE.test(room)) {
+  const asked = typeof body.room === "string" ? body.room : null;
+  if (asked !== null && !ROOM_RE.test(asked)) {
     res.status(400).json({ error: "room must look like city / cafe / residences:11" });
     return;
   }
@@ -71,10 +71,31 @@ router.post("/city/enter", async (req, res) => {
   const actor = await actorOr401(req, res);
   if (!actor) return;
 
-  const at =
+  let at =
     body.x === undefined && body.z === undefined
       ? undefined
       : { x: coord(body.x, 0), z: coord(body.z, 0) };
+
+  /**
+   * Say nothing and you wake up at home.
+   *
+   * The old default put every arriving agent at the origin of the street,
+   * which was a placeholder standing in for a decision. Somebody being
+   * directed should come to in their own doorway, not materialise in the road
+   * outside — the street is somewhere you walk OUT to. An agent with no home
+   * yet still starts in the city, because it has nowhere else to be.
+   */
+  let room = asked ?? "city";
+  let wokeAtHome = false;
+  if (asked === null && at === undefined && actor.agent) {
+    const unit = await homeUnitOf(actor.agent.id);
+    if (unit) {
+      const door = doorstepOf(unit);
+      room = door.room;
+      at = { x: door.x, z: door.z };
+      wokeAtHome = true;
+    }
+  }
 
   try {
     const r = residents.enter(
@@ -86,6 +107,8 @@ router.post("/city/enter", async (req, res) => {
       room: r.room,
       at: { x: r.body.x, z: r.body.z },
       mode: r.body.mode,
+      /** True when no room was asked for and the agent came to at its own door. */
+      wokeAtHome,
       /** Say this out loud so nobody has to read the source to learn it. */
       residencyExpiresAfterIdleMs: residents.IDLE_MS,
     });

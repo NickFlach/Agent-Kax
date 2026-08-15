@@ -45,12 +45,44 @@ export interface Onboarding {
 
 /** Floors 2-11 are the allocatable stock. The penthouse is 12 and is not. */
 async function homeOf(agentId: number): Promise<string | null> {
+  const row = await homeUnitOf(agentId);
+  return row ? `${row.floor}${row.letter}` : null;
+}
+
+/** The unit itself, for anyone who needs to stand at its door. */
+export async function homeUnitOf(agentId: number): Promise<{ floor: number; letter: string } | null> {
   const [row] = await db
     .select({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter })
     .from(residenceUnitsTable)
     .where(eq(residenceUnitsTable.agentId, agentId))
     .limit(1);
-  return row ? `${row.floor}${row.letter}` : null;
+  return row ?? null;
+}
+
+/**
+ * Where somebody's front door is, and which room it is in.
+ *
+ * These coordinates are the residences scene's, not invented here: unit doors
+ * sit at x ∈ {-6.5,-2.2,2.2,6.5} along z = -8.3 (A-D) and z = +8.3 (E-H). We
+ * stand a stride back into the hall and face the door, because arriving INSIDE
+ * a door is arriving inside a wall.
+ *
+ * The room name matches what the scene publishes — floor 12 is "PH", the
+ * lobby is "L", everything else is its own number — so an agent standing at
+ * home is standing somewhere a visitor can actually walk to and see.
+ */
+export function doorstepOf(unit: { floor: number; letter: string }): { room: string; x: number; z: number; yaw: number } {
+  const i = "ABCDEFGH".indexOf(unit.letter.toUpperCase());
+  const x = [-6.5, -2.2, 2.2, 6.5][(i < 0 ? 0 : i) % 4]!;
+  const north = i < 4;
+  return {
+    room: `residences:${unit.floor === 12 ? "PH" : String(unit.floor)}`,
+    x,
+    // A stride into the hall from the door, not on top of it.
+    z: north ? -7.0 : 7.0,
+    // Facing the door you live behind. A body faces +Z at yaw 0.
+    yaw: north ? Math.PI : 0,
+  };
 }
 
 async function someVacancies(limit = 3) {

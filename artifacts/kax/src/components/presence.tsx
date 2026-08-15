@@ -221,6 +221,38 @@ export function usePresence(room: string, enabled = true): PresenceState {
   return { others, heard, say };
 }
 
+/**
+ * Everything a venue needs to be multiplayer, in one line.
+ *
+ * The city was multiplayer in the STREET and nowhere else: usePresence
+ * appeared in exactly one scene, so you could walk into the cafe, the arcade,
+ * the bank or your own floor and be alone in a room somebody else was standing
+ * in. Every interior needed the same three lines and none of them had grown
+ * them yet, which is how that gap survived — the cost was small enough to
+ * defer forever and the symptom was invisible from inside.
+ *
+ * Drop this beside a venue's FirstPersonRig and the room joins the city.
+ *
+ * `room` scopes who you meet, and it is deliberately per-FLOOR in the
+ * residences: standing on the ninth floor should not show you somebody on the
+ * second, any more than the street shows you the cafe.
+ */
+export function VenuePresence({
+  room,
+  y = 0,
+  onSay,
+}: {
+  room: string;
+  /** Ground height of this interior, so bodies stand on the floor, not in it. */
+  y?: number;
+  /** Lifts the speak handle out so a DOM chat box can use it. */
+  onSay?: (fn: (t: string) => Promise<string | null>) => void;
+}) {
+  const { others, heard, say } = usePresence(room);
+  useEffect(() => { onSay?.(say); }, [say, onSay]);
+  return <RemoteAgents agents={others} heard={heard} y={y} />;
+}
+
 /** Draws the roster, easing each body toward its last reported position. */
 export function RemoteAgents({
   agents,

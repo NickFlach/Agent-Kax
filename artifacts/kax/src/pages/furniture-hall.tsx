@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { VenuePresence } from "@/components/presence";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { joineryDialogue } from "@/lib/npc-dialogue";
@@ -193,6 +194,7 @@ export default function FurnitureHall() {
         <pointLight position={[0, 3.4, 0]} intensity={30} distance={24} color="#ffeecb" />
 
         <FirstPersonRig eyeHeight={1.75} speed={7.5} bounds={{ minX: -10.4, maxX: 10.4, minZ: -5.4, maxZ: 8.4, minY: 1.6, maxY: 3.6 }} />
+        <VenuePresence room="joinery" />
 
         {/* Shell: brick loft 22 × 14 */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 1.5]} receiveShadow>
