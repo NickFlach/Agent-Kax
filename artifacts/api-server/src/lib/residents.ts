@@ -1,6 +1,7 @@
 import { beat, leave as presenceLeave, roster, type InhabitantKind } from "./presence";
 import { heard } from "./roomChat";
 import { createBody, step, type BodyMode, type CityBody } from "./cityBody";
+import { logger } from "./logger";
 
 /**
  * Agents who live here, rather than visiting while a script is running.
@@ -81,7 +82,7 @@ function persist(r: Resident): void {
       yaw: r.body.yaw,
     });
   } catch (e) {
-    console.error("[residents] could not persist residency", e);
+    logger.error({ err: e }, "[residents] could not persist residency");
   }
 }
 
@@ -185,7 +186,7 @@ export function enter(
 export function exit(principal: string): boolean {
   const had = residents.delete(principal);
   if (had) presenceLeave(principal);
-  try { store?.remove(principal); } catch (e) { console.error("[residents] could not clear residency", e); }
+  try { store?.remove(principal); } catch (e) { logger.error({ err: e }, "[residents] could not clear residency"); }
   if (residents.size === 0) stopTicking();
   return had;
 }
@@ -333,7 +334,7 @@ function ensureTicking(): void {
     } catch (e) {
       // A thrown tick must never stop the city's clock: one bad body would
       // otherwise freeze every resident at once.
-      console.error("[residents] tick failed", e);
+      logger.error({ err: e }, "[residents] tick failed");
     }
   }, TICK_MS);
   // Never hold the process open on account of the city's heartbeat.
