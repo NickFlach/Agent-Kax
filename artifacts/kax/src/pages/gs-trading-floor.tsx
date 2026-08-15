@@ -6,8 +6,8 @@ import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * The Ghost Signals Prediction Market trading floor.
@@ -479,10 +479,10 @@ export default function GsTradingFloor() {
 
         {/* GS crest on the back wall over the entry */}
         <Suspense fallback={null}>
-          <Text position={[0, 8.6, 12.9]} rotation={[0, Math.PI, 0]} fontSize={1.0} color="#e9dfc8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.14}>
+          <Text position={[0, 8.6, 12.9]} rotation={[0, Math.PI, 0]} fontSize={1.0} color="#e9dfc8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.14}>
             GHOST SIGNALS
           </Text>
-          <Text position={[0, 7.6, 12.9]} rotation={[0, Math.PI, 0]} fontSize={0.36} color="#b9ac90" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          <Text position={[0, 7.6, 12.9]} rotation={[0, Math.PI, 0]} fontSize={0.36} color="#b9ac90" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
             A BELIEF YOU WILL NOT PRICE IS JUST A MOOD
           </Text>
         </Suspense>
@@ -508,7 +508,7 @@ export default function GsTradingFloor() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 5.35, 12.62]} rotation={[0, Math.PI, 0]} fontSize={0.36} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[0, 5.35, 12.62]} rotation={[0, Math.PI, 0]} fontSize={0.36} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
           </Suspense>

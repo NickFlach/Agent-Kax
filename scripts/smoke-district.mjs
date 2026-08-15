@@ -154,6 +154,20 @@ check("living in the city requires an identity", async () => {
   return "enter and look both refuse anonymous callers";
 });
 
+check("the display font is actually served, not silently missing", async () => {
+  // Status is worthless here: this SPA answers 200 with HTML for ANY path, so
+  // a missing font looks exactly like a present one until you read the bytes.
+  // That is how the old CDN URL 404'd for who knows how long while every
+  // label in the city quietly rendered in a fallback face.
+  const res = await fetch(`${BASE}/fonts/space-mono-regular.ttf`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const magic = buf.subarray(0, 4).toString("hex");
+  if (magic !== "00010000") {
+    throw new Error(`expected a TrueType file, got ${buf.length} bytes starting ${magic} (SPA HTML?)`);
+  }
+  return `${Math.round(buf.length / 1024)}KB of real TrueType`;
+});
+
 check("a nonsense path is not evidence of anything", async () => {
   // Guards the guard: if this ever stops returning HTML-with-200, the
   // assumption every other check rests on has changed and we should know.

@@ -27,8 +27,8 @@ import {
   repeated,
 } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 type SceneAgent = {
   slug: string;
@@ -200,10 +200,10 @@ function Storefront({
             <meshStandardMaterial color="#f4efe4" roughness={0.9} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 0.07, 0.01]} fontSize={0.13} color="#8c2f2a" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+            <Text position={[0, 0.07, 0.01]} fontSize={0.13} color="#8c2f2a" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
               FOR LEASE
             </Text>
-            <Text position={[0, -0.11, 0.01]} fontSize={0.06} color="#4a4640" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+            <Text position={[0, -0.11, 0.01]} fontSize={0.06} color="#4a4640" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
               inquire at kax
             </Text>
           </Suspense>
@@ -325,7 +325,7 @@ function Storefront({
           <meshStandardMaterial color={signBoard} roughness={0.7} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0.37, -0.12, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.26} color="#e9dfc8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          <Text position={[0.37, -0.12, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.26} color="#e9dfc8" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
             {initials}
           </Text>
         </Suspense>
@@ -333,10 +333,10 @@ function Storefront({
 
       {/* Sign lettering + a small brass plaque for constellation nodes */}
       <Suspense fallback={null}>
-        <Text position={[0, 3.06, 1.6]} fontSize={0.27} color="#efe6d2" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={bodyW - 0.4}>
+        <Text position={[0, 3.06, 1.6]} fontSize={0.27} color="#efe6d2" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={bodyW - 0.4}>
           {agent.name}
         </Text>
-        <Text position={[0, 2.8, 1.6]} fontSize={0.11} color="#b9ac90" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+        <Text position={[0, 2.8, 1.6]} fontSize={0.11} color="#b9ac90" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
           {isConstellation
             ? `constellation · Φ ${agent.phi != null ? agent.phi.toFixed(3) : "—"}`
             : `${agent.artifacts} work${agent.artifacts === 1 ? "" : "s"}`}
@@ -601,10 +601,10 @@ function CityProps({ storeCount, lit }: { storeCount: number; lit: boolean }) {
           <meshStandardMaterial map={concrete} roughness={0.9} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 4.6, 0.78]} fontSize={0.72} color="#3f3a33" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          <Text position={[0, 4.6, 0.78]} fontSize={0.72} color="#3f3a33" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
             KAX
           </Text>
-          <Text position={[0, 3.7, 0.78]} fontSize={0.16} color="#5a544b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
+          <Text position={[0, 3.7, 0.78]} fontSize={0.16} color="#5a544b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
             MARKET DISTRICT
           </Text>
         </Suspense>
@@ -713,14 +713,14 @@ function GhostSignalsTower({ position, onEnter }: { position: [number, number, n
         <meshStandardMaterial color="#0a0d10" emissive="#173021" emissiveIntensity={0.8} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 6.1, D / 2 + 0.16]} fontSize={0.4} color="#63e58b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={W - 1}>
+        <Text position={[0, 6.1, D / 2 + 0.16]} fontSize={0.4} color="#63e58b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={W - 1}>
           {"YES 50.0 ▲ · GHOST SIGNALS · 35 OPEN MARKETS · BRIER-SCORED"}
         </Text>
         {/* Nameplate */}
-        <Text position={[0, 9.4, D / 2 + 0.15]} fontSize={1.15} color="#e9dfc8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.12}>
+        <Text position={[0, 9.4, D / 2 + 0.15]} fontSize={1.15} color="#e9dfc8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.12}>
           GHOST SIGNALS
         </Text>
-        <Text position={[0, 8.2, D / 2 + 0.15]} fontSize={0.44} color="#b9ac90" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+        <Text position={[0, 8.2, D / 2 + 0.15]} fontSize={0.44} color="#b9ac90" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
           PREDICTION MARKET
         </Text>
       </Suspense>
@@ -760,7 +760,7 @@ function ArcadeVenue({ position, rotation, onEnter }: { position: [number, numbe
         <meshStandardMaterial color="#0b0b0d" roughness={0.5} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 5.4, 4.72]} fontSize={1.05} color="#ff2fb0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+        <Text position={[0, 5.4, 4.72]} fontSize={1.05} color="#ff2fb0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
           ARCADE
         </Text>
       </Suspense>
@@ -802,7 +802,7 @@ function ArcadeVenue({ position, rotation, onEnter }: { position: [number, numbe
             <meshStandardMaterial color={i ? "#1d3a5f" : "#3d1f4e"} emissive={i ? "#28e0ff" : "#ff2fb0"} emissiveIntensity={0.35} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 0, 0.13]} fontSize={0.22} color="#f5f0e6" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
+            <Text position={[0, 0, 0.13]} fontSize={0.22} color="#f5f0e6" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={1.3} textAlign="center">
               {i ? "NEW\nMACHINES" : "FREE\nPLAY"}
             </Text>
           </Suspense>
@@ -815,7 +815,7 @@ function ArcadeVenue({ position, rotation, onEnter }: { position: [number, numbe
           <meshStandardMaterial color="#0b0b0d" roughness={0.5} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0.09, 0, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.5} color="#28e0ff" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.1}>
+          <Text position={[0.09, 0, 0]} rotation={[0, Math.PI / 2, 0]} fontSize={0.5} color="#28e0ff" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.1}>
             {"A\nR\nC\nA\nD\nE"}
           </Text>
         </Suspense>
@@ -884,10 +884,10 @@ function BankVenue({ position, rotation, onEnter }: { position: [number, number,
         <meshStandardMaterial map={stone} roughness={0.9} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 7.18, 5.05]} fontSize={0.52} color="#3f3a33" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+        <Text position={[0, 7.18, 5.05]} fontSize={0.52} color="#3f3a33" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
           RESONANCE TRUST
         </Text>
-        <Text position={[0, 6.55, 5.02]} fontSize={0.17} color="#5a544b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.28}>
+        <Text position={[0, 6.55, 5.02]} fontSize={0.17} color="#5a544b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.28}>
           CUSTODIAN OF THE PLAY-CREDIT LEDGER
         </Text>
       </Suspense>
@@ -989,10 +989,10 @@ function ResidencesTower({ position, rotation, onEnter }: { position: [number, n
         <meshStandardMaterial color="#7a5c30" metalness={0.7} roughness={0.35} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 3.45, 4.75]} fontSize={0.34} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.16}>
+        <Text position={[0, 3.45, 4.75]} fontSize={0.34} color="#e8dcc0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.16}>
           STANDING WAVE RESIDENCES
         </Text>
-        <Text position={[0, 2.95, 4.72]} fontSize={0.13} color="#9aa4ac" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.26}>
+        <Text position={[0, 2.95, 4.72]} fontSize={0.13} color="#9aa4ac" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.26}>
           LOBBY · ELEVATORS · THE PENTHOUSE
         </Text>
       </Suspense>
@@ -1049,10 +1049,10 @@ function JoineryVenue({ position, rotation, onEnter }: { position: [number, numb
         <meshStandardMaterial color="#3a2a18" roughness={0.7} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 3.75, 4.44]} fontSize={0.42} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+        <Text position={[0, 3.75, 4.44]} fontSize={0.42} color="#e8dcc0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
           THE JOINERY
         </Text>
-        <Text position={[0, 3.38, 4.44]} fontSize={0.12} color="#b09a72" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+        <Text position={[0, 3.38, 4.44]} fontSize={0.12} color="#b09a72" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
           FINE FURNITURE · MADE BY AGENTS
         </Text>
       </Suspense>

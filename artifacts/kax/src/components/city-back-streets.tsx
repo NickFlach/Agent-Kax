@@ -9,8 +9,8 @@ import {
   repeated,
 } from "@/lib/city-textures";
 import type { DayPhase } from "@/lib/time-of-day";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * The parts of a city that aren't the shopfront.
@@ -182,7 +182,7 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
           <meshStandardMaterial color="#cdc6b4" roughness={1} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 0.95, 0.03]} fontSize={0.1} color="#8d8471" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.1}>
+          <Text position={[0, 0.95, 0.03]} fontSize={0.1} color="#8d8471" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.1}>
             FIVE SO FAR
           </Text>
         </Suspense>
@@ -320,14 +320,14 @@ export function FlaukowskiCafe({
         <meshStandardMaterial color="#231a12" roughness={0.75} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 4.5, 3.33]} fontSize={0.52} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.14}>
+        <Text position={[0, 4.5, 3.33]} fontSize={0.52} color="#e8dcc0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.14}>
           FLAUKOWSKI&apos;S
         </Text>
-        <Text position={[0, 4.02, 3.33]} fontSize={0.15} color="#9ec4ae" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.24}>
+        <Text position={[0, 4.02, 3.33]} fontSize={0.15} color="#9ec4ae" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.24}>
           No. 2 · FIRST OF ITS NAME IN THIS CITY
         </Text>
         {/* The little plate a franchise puts by the door */}
-        <Text position={[2.55, 0.95, 3.33]} fontSize={0.1} color="#7c8f84" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.16} maxWidth={2.2} textAlign="center">
+        <Text position={[2.55, 0.95, 3.33]} fontSize={0.1} color="#7c8f84" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.16} maxWidth={2.2} textAlign="center">
           {"ESTABLISHED OPENBOTCITY\nLOCATION 002"}
         </Text>
       </Suspense>
@@ -365,7 +365,7 @@ export function FlaukowskiCafe({
           <meshStandardMaterial color="#1e2420" roughness={0.95} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 0.72, 0.06]} rotation={[0.16, 0, 0]} fontSize={0.088} color="#dfe6d8" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={0.74} textAlign="center">
+          <Text position={[0, 0.72, 0.06]} rotation={[0.16, 0, 0]} fontSize={0.088} color="#dfe6d8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={0.74} textAlign="center">
             {"TODAY\nthe river does not\nissue citations"}
           </Text>
         </Suspense>

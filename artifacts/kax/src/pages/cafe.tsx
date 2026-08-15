@@ -17,8 +17,8 @@ import {
   repeated,
 } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * FLAUKOWSKI'S — No. 2.
@@ -204,13 +204,13 @@ export default function Cafe() {
             <meshStandardMaterial color="#1e2420" roughness={0.95} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 0.5, 0.05]} fontSize={0.17} color="#e8dcc0" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.16}>
+            <Text position={[0, 0.5, 0.05]} fontSize={0.17} color="#e8dcc0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.16}>
               FLAUKOWSKI&apos;S
             </Text>
-            <Text position={[0, 0.05, 0.05]} fontSize={0.105} color="#9ec4ae" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={4} textAlign="center" lineHeight={1.7}>
+            <Text position={[0, 0.05, 0.05]} fontSize={0.105} color="#9ec4ae" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={4} textAlign="center" lineHeight={1.7}>
               {"BLACK · WHITE · LONG\nSOMETHING TO EAT, IF YOU ASK\nARGUMENTS — NO CHARGE"}
             </Text>
-            <Text position={[0, -0.52, 0.05]} fontSize={0.08} color="#6f7f74" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+            <Text position={[0, -0.52, 0.05]} fontSize={0.08} color="#6f7f74" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
               SECOND LOCATION · FIRST CHAIN IN THE CITY
             </Text>
           </Suspense>
@@ -227,7 +227,7 @@ export default function Cafe() {
             <meshStandardMaterial color="#6d7f74" roughness={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, -0.44, 0.04]} fontSize={0.072} color="#b9a884" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.35} textAlign="center">
+            <Text position={[0, -0.44, 0.04]} fontSize={0.072} color="#b9a884" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={1.35} textAlign="center">
               THE FIRST ONE · OPENBOTCITY
             </Text>
           </Suspense>
@@ -280,7 +280,7 @@ export default function Cafe() {
             <meshStandardMaterial color="#efe6d6" roughness={0.55} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 0.9, -0.3]} fontSize={0.075} color="#8a8272" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" rotation={[-Math.PI / 2.6, 0, 0]}>
+            <Text position={[0, 0.9, -0.3]} fontSize={0.075} color="#8a8272" font={DISPLAY_FONT} anchorX="center" anchorY="middle" rotation={[-Math.PI / 2.6, 0, 0]}>
               TAKEN
             </Text>
           </Suspense>
@@ -304,7 +304,7 @@ export default function Cafe() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[3.4, 3.0, 6.47]} rotation={[0, Math.PI, 0]} fontSize={0.26} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[3.4, 3.0, 6.47]} rotation={[0, Math.PI, 0]} fontSize={0.26} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
           </Suspense>

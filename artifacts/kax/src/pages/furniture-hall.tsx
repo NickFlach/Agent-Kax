@@ -11,8 +11,8 @@ import { joineryDialogue } from "@/lib/npc-dialogue";
 import { isTypingTarget } from "@/lib/is-typing";
 import { brickTexture, woodFloorTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /**
  * THE JOINERY — fine furniture by the city's makers.
@@ -83,10 +83,10 @@ function PlinthPiece({ piece, position, rotation }: { piece: FurniturePiece; pos
         <meshStandardMaterial color="#f2ede2" roughness={0.9} />
       </mesh>
       <Suspense fallback={null}>
-        <Text position={[0, 0.77, 0.695]} rotation={[-0.5, 0, 0]} fontSize={0.075} color="#3a332c" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={1.0} textAlign="center">
+        <Text position={[0, 0.77, 0.695]} rotation={[-0.5, 0, 0]} fontSize={0.075} color="#3a332c" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={1.0} textAlign="center">
           {piece.title.slice(0, 34)}
         </Text>
-        <Text position={[0, 0.68, 0.715]} rotation={[-0.5, 0, 0]} fontSize={0.055} color="#8a8272" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+        <Text position={[0, 0.68, 0.715]} rotation={[-0.5, 0, 0]} fontSize={0.055} color="#8a8272" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
           {(piece.creatorName ?? "unknown maker").slice(0, 28)}
         </Text>
       </Suspense>
@@ -243,10 +243,10 @@ export default function FurnitureHall() {
 
         {/* Sign over the floor */}
         <Suspense fallback={null}>
-          <Text position={[0, 3.5, -5.4]} fontSize={0.55} color="#c9ab6b" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.22}>
+          <Text position={[0, 3.5, -5.4]} fontSize={0.55} color="#c9ab6b" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.22}>
             THE JOINERY
           </Text>
-          <Text position={[0, 3.0, -5.4]} fontSize={0.14} color="#8a8272" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.3}>
+          <Text position={[0, 3.0, -5.4]} fontSize={0.14} color="#8a8272" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.3}>
             FINE FURNITURE · MADE BY AGENTS
           </Text>
         </Suspense>
@@ -257,7 +257,7 @@ export default function FurnitureHall() {
         ))}
         {loaded && pieces.length === 0 && (
           <Suspense fallback={null}>
-            <Text position={[0, 1.5, 0]} fontSize={0.22} color="#8a8272" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={9} textAlign="center">
+            <Text position={[0, 1.5, 0]} fontSize={0.22} color="#8a8272" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={9} textAlign="center">
               {"THE FLOOR IS WAITING\ncraft furniture in OBC — the harvester brings it here"}
             </Text>
           </Suspense>
@@ -286,7 +286,7 @@ export default function FurnitureHall() {
             <meshStandardMaterial color="#f2ede2" roughness={0.9} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[0, 1.95, -0.02]} rotation={[-0.18, 0, 0]} fontSize={0.11} color="#3a332c" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={2.4} textAlign="center">
+            <Text position={[0, 1.95, -0.02]} rotation={[-0.18, 0, 0]} fontSize={0.11} color="#3a332c" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={2.4} textAlign="center">
               {"BUY & SELL\nOPENS WITH THE EXCHANGE AT RESONANCE TRUST"}
             </Text>
           </Suspense>
@@ -307,7 +307,7 @@ export default function FurnitureHall() {
             <meshStandardMaterial color="#132015" emissive="#0d3818" emissiveIntensity={0.8} />
           </mesh>
           <Suspense fallback={null}>
-            <Text position={[-3, 3.4, 8.27]} rotation={[0, Math.PI, 0]} fontSize={0.3} color="#6dff8f" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+            <Text position={[-3, 3.4, 8.27]} rotation={[0, Math.PI, 0]} fontSize={0.3} color="#6dff8f" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
               EXIT
             </Text>
           </Suspense>

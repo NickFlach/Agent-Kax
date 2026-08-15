@@ -2,8 +2,8 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
+import { DISPLAY_FONT } from "@/lib/fonts";
 
-const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF5UAWdDRYEF8RQ.woff";
 
 /** The minimum an arcade machine needs to know about its game. */
 export interface PlayableApp {
@@ -208,7 +208,7 @@ export function ArcadeCabinet({
           <meshStandardMaterial color={livery.glow} emissive={livery.glow} emissiveIntensity={0.85} toneMapped={false} />
         </mesh>
         <Suspense fallback={null}>
-          <Text position={[0, 0, 0.075]} fontSize={0.075} color="#141417" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" maxWidth={0.7} textAlign="center">
+          <Text position={[0, 0, 0.075]} fontSize={0.075} color="#141417" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={0.7} textAlign="center">
             {app.title.length > 20 ? app.title.slice(0, 19) + "…" : app.title.toUpperCase()}
           </Text>
         </Suspense>
@@ -220,7 +220,7 @@ export function ArcadeCabinet({
       </mesh>
       {app.creatorName && (
         <Suspense fallback={null}>
-          <Text position={[0, 0.62, 0.44]} fontSize={0.05} color="#8f8468" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle">
+          <Text position={[0, 0.62, 0.44]} fontSize={0.05} color="#8f8468" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
             {`by ${app.creatorName}`.slice(0, 28)}
           </Text>
         </Suspense>
