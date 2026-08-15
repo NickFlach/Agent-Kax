@@ -127,12 +127,16 @@ const TOOLS: ToolDef[] = [
       const r = residents.touch(actor.principal);
       if (!r) throw new ToolRefused("you are not in the city — call city_enter first");
       return {
+        // Same field names as GET /city/look, deliberately. Two façades over
+        // one registry must not invent two vocabularies for the same facts —
+        // a client that reads "doing" from one and "mode" from the other gets
+        // undefined and no error, which is how this was found.
         you: {
           name: r.name,
           room: r.room,
           x: r.body.x,
           z: r.body.z,
-          doing: r.body.mode,
+          mode: r.body.mode,
           talkingTo: r.body.focusName,
         },
         others: roster(r.room)
@@ -142,10 +146,10 @@ const TOOLS: ToolDef[] = [
             kind: e.kind,
             x: e.x,
             z: e.z,
-            metresAway: Number(Math.hypot(e.x - r.body.x, e.z - r.body.z).toFixed(1)),
+            distance: Number(Math.hypot(e.x - r.body.x, e.z - r.body.z).toFixed(1)),
           }))
-          .sort((a, b) => a.metresAway - b.metresAway),
-        heard: residents.drainInbox(r.principal).map((m) => ({ from: m.name, said: m.text })),
+          .sort((a, b) => a.distance - b.distance),
+        heard: residents.drainInbox(r.principal),
         hearingRadius: CHAT_RADIUS,
       };
     },

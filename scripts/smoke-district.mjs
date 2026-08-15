@@ -126,8 +126,11 @@ check("the city answers who is in it", async () => {
   if (r.status !== 200 || !r.json || typeof r.json.residents !== "number") {
     throw new Error(`expected room counts, got ${r.status} ${r.text.slice(0, 100)}`);
   }
-  const busiest = Object.entries(r.json.rooms ?? {}).sort((a, b) => b[1] - a[1])[0];
-  return `${r.json.residents} resident bodies${busiest ? `, busiest room ${busiest[0]}=${busiest[1]}` : ""}`;
+  const rooms = r.json.rooms ?? [];
+  if (!Array.isArray(rooms) || !rooms.length) throw new Error("expected a room directory");
+  const busiest = rooms.find((x) => x.here > 0);
+  return `${rooms.length} rooms, ${r.json.residents} resident bodies` +
+    (busiest ? `, busiest ${busiest.id}=${busiest.here}` : ", all quiet");
 });
 
 check("a room can be looked into without an identity", async () => {

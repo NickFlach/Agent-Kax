@@ -122,6 +122,30 @@ describe("mcp", () => {
     expect(toolJson(res).error).toMatch(/city_enter/);
   });
 
+  it("uses the same words as the HTTP door for the same facts", async () => {
+    // The drift that actually happened: this tool called the body's state
+    // "doing" and the distance "metresAway", while GET /city/look called them
+    // "mode" and "distance". Anything reading one against the other got
+    // undefined and no error — which is how it was found, three times, in a
+    // daemon printing "heard undefined: undefined".
+    await rpc("tools/call", { name: "city_enter", arguments: { room: "city" } }, userId);
+    const viaMcp = toolJson(await rpc("tools/call", { name: "city_look", arguments: {} }, userId));
+    const viaHttp = (await request(app).get("/city/look").set("x-test-user", userId)).body;
+
+    // Not identical key sets: the HTTP door legitimately carries more (a
+    // principal string and a yaw in radians, which a model has no use for).
+    // The invariant is narrower and truer — where BOTH report a fact, they
+    // must use the same word for it, and agree on the value.
+    for (const [k, v] of Object.entries(viaMcp.you)) {
+      expect(viaHttp.you, `MCP says "${k}"; the HTTP door does not`).toHaveProperty(k);
+      expect(viaHttp.you[k], `"${k}" differs between the two doors`).toEqual(v);
+    }
+    expect(viaMcp.you.mode).toBe(viaHttp.you.mode);
+    expect(viaMcp).toHaveProperty("hearingRadius");
+    // Speech comes back shaped the same way through both doors.
+    expect(Array.isArray(viaMcp.heard)).toBe(true);
+  });
+
   it("moves in, and the same body is visible through the HTTP door", async () => {
     // The drift check: one registry, two façades. If these ever disagree, an
     // agent's tools are describing a city it is not standing in.
