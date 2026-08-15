@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db, userBotsTable, usersTable, agentsTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
+import { mayChangeBot } from "../middlewares/botAttachAuth";
 
 const router: Router = Router();
 
@@ -50,13 +51,16 @@ router.get("/auth/bots", requireAuth, async (req, res) => {
  * you own, and a session that could never have attached it should not be able
  * to relabel it.
  */
-router.patch("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
+router.patch("/auth/bots/:botId", requireAuth, async (req, res) => {
   const raw = req.params["botId"];
   const botId = (typeof raw === "string" ? raw : "").toLowerCase();
   if (!BOT_ID_RE.test(botId)) {
     res.status(400).json({ error: "botId must be an OBC bot UUID" });
     return;
   }
+  // Renaming is a CHANGE to an existing attachment, so it needs at least the
+  // credential that made it. A wallet-attached bot stays wallet-only (#112).
+  if (!(await mayChangeBot(req, res, botId))) return;
   const body = (req.body ?? {}) as { displayName?: unknown };
   if (typeof body.displayName !== "string") {
     res.status(400).json({ error: "displayName required" });
@@ -91,13 +95,18 @@ router.patch("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
 // `obc_agent:` session with no wallet could DETACH a bot it could never have
 // attached — undoing a wallet-proven attestation without holding the wallet.
 // (#112)
-router.delete("/auth/bots/:botId", requireWalletAuth, async (req, res) => {
+router.delete("/auth/bots/:botId", requireAuth, async (req, res) => {
   const botIdRaw = req.params.botId;
   const botId = (typeof botIdRaw === "string" ? botIdRaw : "").toLowerCase();
   if (!BOT_ID_RE.test(botId)) {
     res.status(400).json({ error: "botId must be an OBC bot UUID" });
     return;
   }
+  // #112 in its original form: a weaker credential must not undo a stronger
+  // attestation. Expressed directly now rather than via a blanket wallet
+  // requirement, so a session-attached bot can be detached by that session
+  // while a wallet-attached one still cannot.
+  if (!(await mayChangeBot(req, res, botId))) return;
   const deleted = await db
     .delete(userBotsTable)
     .where(and(

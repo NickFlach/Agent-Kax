@@ -132,6 +132,21 @@ export const userBotsTable = pgTable(
     // authorship is proved by construction rather than asserted.
     bskyHandle: varchar("bsky_handle"),
     bskyVerifiedAt: timestamp("bsky_verified_at", { withTimezone: true }),
+    /**
+     * How strong the session was when this bot was attached: "wallet" or
+     * "session".
+     *
+     * Attaching never needed a wallet to be SAFE — control of the bot is
+     * proved by publishing a challenge phrase from it, and a wallet adds
+     * nothing to that proof. What the wallet gate actually protected was
+     * asymmetry (#112): a weaker credential must never undo a stronger
+     * attestation. So the strength is recorded instead of demanded, and
+     * detaching or renaming requires at least what attaching did.
+     *
+     * Existing rows are backfilled to "wallet", which is true of every one of
+     * them and keeps their protection exactly as it was.
+     */
+    attachedVia: varchar("attached_via").notNull().default("wallet"),
   },
   (table) => [index("idx_user_bots_user").on(table.userId)],
 );
