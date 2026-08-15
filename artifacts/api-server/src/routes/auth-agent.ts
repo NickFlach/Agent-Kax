@@ -15,6 +15,7 @@ import {
   creatorDisplayNameOf,
 } from "../lib/partnerClient";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
+import { requireAttachAuth, sessionStrength, mayChangeBot } from "../middlewares/botAttachAuth";
 import { npubBindDigest, verifyNpubBinding } from "../lib/npubBind";
 
 const router: Router = Router();
@@ -47,7 +48,7 @@ function generateChallenge(): string {
  * This is the ATTACHMENT flow — the user is already authenticated by
  * wallet; we're just linking an OBC bot to their existing user row.
  */
-router.post("/auth/agent/challenge", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/challenge", requireAttachAuth, async (req, res) => {
   if (!partnerApiAvailable()) {
     res.status(503).json({ error: "OBC partner API not configured on server" });
     return;
@@ -112,7 +113,7 @@ router.post("/auth/agent/challenge", requireWalletAuth, async (req, res) => {
  * to a different user). Returns the updated bot list — does NOT issue
  * a new session.
  */
-router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/verify", requireAttachAuth, async (req, res) => {
   if (!partnerApiAvailable()) {
     res.status(503).json({ error: "OBC partner API not configured on server" });
     return;
@@ -238,12 +239,17 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
   // about. (#81)
   const inferredName = creatorDisplayNameOf(artifact);
   try {
+    // Record how strong this session was. Not to gate the attach — the OCC
+    // proof above already did that — but so that undoing it later cannot be
+    // done with less (#112).
+    const attachedVia = (await sessionStrength(req)) ?? "session";
     await db
       .insert(userBotsTable)
       .values({
         userId,
         obcBotId,
         displayName: inferredName,
+        attachedVia,
       })
       .onConflictDoNothing({ target: userBotsTable.obcBotId });
   } catch (err) {
@@ -303,7 +309,7 @@ router.post("/auth/agent/verify", requireWalletAuth, async (req, res) => {
  * the npub must sign. Requiring the bot be pre-attached is the second leg of
  * the three-legged proof; the wallet session is the first.
  */
-router.post("/auth/agent/npub/challenge", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/npub/challenge", requireAttachAuth, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const obcBotIdRaw = typeof body.obcBotId === "string" ? body.obcBotId : "";
   const npub = typeof body.npub === "string" ? body.npub : "";
@@ -316,6 +322,10 @@ router.post("/auth/agent/npub/challenge", requireWalletAuth, async (req, res) =>
     return;
   }
   const obcBotId = obcBotIdRaw.toLowerCase();
+  // Binding another identity CHANGES an existing attachment, so it needs
+  // at least the credential that made it (#112).
+  if (!(await mayChangeBot(req, res, obcBotId))) return;
+
   const userId = req.user!.id;
 
   // Leg 2: the bot must already belong to this user.
@@ -384,7 +394,7 @@ router.post("/auth/agent/npub/challenge", requireWalletAuth, async (req, res) =>
  * On success the npub is written to the user_bots row. Idempotent for the same
  * (bot, npub); 409 if the npub is bound elsewhere.
  */
-router.post("/auth/agent/npub/verify", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/npub/verify", requireAttachAuth, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const obcBotIdRaw = typeof body.obcBotId === "string" ? body.obcBotId : "";
   const npub = typeof body.npub === "string" ? body.npub : "";
@@ -402,6 +412,10 @@ router.post("/auth/agent/npub/verify", requireWalletAuth, async (req, res) => {
     return;
   }
   const obcBotId = obcBotIdRaw.toLowerCase();
+  // Binding another identity CHANGES an existing attachment, so it needs
+  // at least the credential that made it (#112).
+  if (!(await mayChangeBot(req, res, obcBotId))) return;
+
   const userId = req.user!.id;
   const subject = `${userId}:${obcBotId}:${npub}`;
 
@@ -489,7 +503,7 @@ export default router;
 
 const BSKY_BIND_TTL_MS = 60 * 60_000;
 
-router.post("/auth/agent/bsky/challenge", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/bsky/challenge", requireAttachAuth, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const obcBotId = (typeof body.obcBotId === "string" ? body.obcBotId : "").toLowerCase();
   const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
@@ -502,6 +516,13 @@ router.post("/auth/agent/bsky/challenge", requireWalletAuth, async (req, res) =>
     res.status(400).json({ error: "handle must be a Bluesky handle, e.g. yourname.bsky.social" });
     return;
   }
+
+  // Binding another identity CHANGES an existing attachment, so it needs
+
+  // at least the credential that made it (#112).
+
+  if (!(await mayChangeBot(req, res, obcBotId))) return;
+
 
   const userId = req.user!.id;
   const [owned] = await db
@@ -555,10 +576,14 @@ router.post("/auth/agent/bsky/challenge", requireWalletAuth, async (req, res) =>
   });
 });
 
-router.post("/auth/agent/bsky/verify", requireWalletAuth, async (req, res) => {
+router.post("/auth/agent/bsky/verify", requireAttachAuth, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const obcBotId = (typeof body.obcBotId === "string" ? body.obcBotId : "").toLowerCase();
   const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
+  // Binding another identity CHANGES an existing attachment, so it needs
+  // at least the credential that made it (#112).
+  if (!(await mayChangeBot(req, res, obcBotId))) return;
+
   const userId = req.user!.id;
   const subject = `${userId}:${obcBotId}:${handle}`;
 
