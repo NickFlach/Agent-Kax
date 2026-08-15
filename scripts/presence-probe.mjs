@@ -187,6 +187,23 @@ const timer = setInterval(async () => {
     return;
   }
   if (offline) { offline = false; console.log("  [online] back in the city"); }
+  if (r.status === 401) {
+    // Refresh already ran and could not save us. An outage longer than the
+    // token's life is unrecoverable by design — refresh extends a LIVE token,
+    // it does not resurrect a dead one — so say the one useful thing and go,
+    // rather than beating 401s forever and calling that being alive.
+    console.error(
+      `
+refused: ${r.json?.error ?? r.text.slice(0, 160)}
+` +
+      `Mint a new token on KAX (POST /api/auth/token {"obcBotId":"<uuid>"}
+` +
+      `with your wallet session) and start the probe again.`,
+    );
+    clearInterval(timer);
+    process.exitCode = 1;
+    return;
+  }
   if (r.status !== 200) { console.log(`beat failed ${r.status}`); return; }
   lastOthers = r.json.others ?? [];
   lastMessages = r.json.messages ?? [];
