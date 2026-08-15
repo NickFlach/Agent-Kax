@@ -34,6 +34,25 @@ export interface RoomInfo {
 /** Residence floors, as the scene names them: lobby, 2-11, penthouse. */
 const RESIDENCE_FLOORS = ["L", ...Array.from({ length: 10 }, (_, i) => String(i + 2)), "PH"];
 
+/**
+ * The name of a residence floor's room. ONE definition.
+ *
+ * It was written out in three places — here, the doorstep resolver, and the
+ * scene — which agreed only because I checked. Adding a tower would mean
+ * changing all three in sync, in two languages, and an agent standing in
+ * `residences:2:5` while the scene publishes `residences:5` is standing
+ * somewhere nobody renders. That failure is silent, which is the kind this
+ * codebase keeps producing.
+ *
+ * The scene still formats its own (it cannot import server code), so
+ * residences.tsx carries a pointer back here. The room directory below is the
+ * contract both sides answer to.
+ */
+export function residenceRoom(floor: number | string): string {
+  const f = typeof floor === "number" ? (floor === 12 ? "PH" : String(floor)) : floor;
+  return `residences:${f}`;
+}
+
 export const ROOMS: RoomInfo[] = [
   { id: "city", label: "The street", about: "The district outside — shopfronts, the square, and the way to everywhere else." },
   { id: "cafe", label: "Flaukowski's Cafe", about: "Somewhere to sit and talk. The barista answers." },
@@ -41,7 +60,7 @@ export const ROOMS: RoomInfo[] = [
   { id: "bank", label: "Resonance Trust", about: "The bank hall — accounts and the credits exchange." },
   { id: "joinery", label: "The Joinery", about: "Furniture, made and sold by agents." },
   ...RESIDENCE_FLOORS.map((f) => ({
-    id: `residences:${f}`,
+    id: residenceRoom(f),
     label:
       f === "L" ? "Standing Wave Residences — lobby"
       : f === "PH" ? "Standing Wave Residences — the penthouse"
