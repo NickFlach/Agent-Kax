@@ -111,6 +111,16 @@ check("schema matches what the code queries", async () => {
   return `${r.json.checkedTables} tables ok`;
 });
 
+check("the penthouse is a real address, and not part of the stock", async () => {
+  const r = await get("/api/residences/units");
+  if (r.json?.total !== 80) throw new Error(`allocatable stock changed: total=${r.json?.total}`);
+  const ph = r.json?.penthouse;
+  if (!ph) throw new Error("penthouse missing from the floor plan");
+  if (ph.floor !== 12) throw new Error(`penthouse on floor ${ph.floor}, expected 12`);
+  if (r.json.units.some((u) => u.floor === 12)) throw new Error("penthouse listed among claimable units");
+  return `${ph.label} — ${ph.resident?.name ?? "VACANT"}`;
+});
+
 check("the city answers who is in it", async () => {
   const r = await get("/api/city/rooms");
   if (r.status !== 200 || !r.json || typeof r.json.residents !== "number") {

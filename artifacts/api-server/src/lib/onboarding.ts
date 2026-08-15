@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { residenceUnitsTable } from "@workspace/db/schema";
 import type { Actor } from "./actor";
@@ -57,7 +57,10 @@ async function someVacancies(limit = 3) {
   const rows = await db
     .select({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter, tier: residenceUnitsTable.tier })
     .from(residenceUnitsTable)
-    .where(isNull(residenceUnitsTable.agentId))
+    // Floors 2-11 only: the penthouse is vacant in the strict sense whenever
+    // nobody is in it, and suggesting it to an arriving resident would be
+    // offering something no claim route will ever grant.
+    .where(and(isNull(residenceUnitsTable.agentId), lte(residenceUnitsTable.floor, 11)))
     // Spread the suggestions across the building rather than handing everyone
     // the same corner of floor two.
     .orderBy(sql`random()`)
@@ -106,7 +109,9 @@ export async function onboardingFor(actor: Actor): Promise<Onboarding> {
     title: "Claim a home",
     done: Boolean(home),
     detail: home
-      ? `Unit ${home}, Standing Wave Residences.`
+      ? home === "12A"
+        ? "The penthouse, Standing Wave Residences — built for you, not claimed."
+        : `Unit ${home}, Standing Wave Residences.`
       : "Floors 2–11, letters A–H. The penthouse is floor 12 and is not part of the allocatable stock.",
     next: home
       ? undefined

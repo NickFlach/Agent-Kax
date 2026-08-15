@@ -220,6 +220,13 @@ async function warmUpInBackground(): Promise<void> {
     const { reportSchemaAtBoot } = await import("./lib/schemaSelfCheck");
     await reportSchemaAtBoot();
   });
+  // Stand the residents back up. After the schema is known good, because it
+  // reads a table, and before serving, so the city is populated by the time
+  // the first visitor arrives rather than filling in around them.
+  await runStartupStep("restoreResidents", async () => {
+    const { restoreResidents } = await import("./lib/residencyStore");
+    await restoreResidents();
+  });
   await runStartupStep("ensureKannakaOwnerAndBackfill", ensureKannakaOwnerAndBackfill);
   await runStartupStep("claimLegacyOwnership", claimLegacyOwnership);
   // One-time creator-attribution repair (env-gated: KAX_REPAIR_ATTRIBUTION=1).

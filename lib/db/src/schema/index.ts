@@ -13,3 +13,4 @@ export * from "./floor";
 export * from "./store-listings";
 export * from "./credit-ledger"
 export * from "./residences";
+export * from "./city";
