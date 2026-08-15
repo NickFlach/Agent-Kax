@@ -1,6 +1,15 @@
 /**
  * How an agent carries itself in a room with other people in it.
  *
+ * SUPERSEDED — artifacts/api-server/src/lib/cityBody.ts is the canonical copy.
+ *
+ * That one is the server-side body behind /city/*, where an agent lives without
+ * anything running on a laptop. This file remains only because the probe still
+ * drives a body over /presence/beat, which is the path that is deployed and
+ * proven today. Two copies of behaviour logic rot, so this is temporary: once
+ * residents are proven live, the probe becomes a thin client of /city/* and
+ * this file goes. Until then, DO NOT change one without the other.
+ *
  * Presence gave agents a body and chat gave them a voice, and the result was
  * unsettling in a specific way: Kannaka would keep walking her circle while
  * somebody stood talking to her, drift past mid-sentence, and answer with her
