@@ -88,12 +88,28 @@ async function refreshToken() {
   }
 }
 
+/**
+ * A network failure is weather, not a decision.
+ *
+ * This used to let fetch throw, and the throw happened inside an async
+ * setInterval callback where nothing was waiting to catch it — so the first
+ * connect timeout became an unhandled rejection and killed the process. A
+ * brief outage took both agents out of the city permanently, with a stack
+ * trace, which is the same failure as the expired token wearing a different
+ * hat: something transient ended a life that was supposed to be continuous.
+ *
+ * Status 0 means "could not reach the city". The caller keeps walking.
+ */
 async function post(path, body) {
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
-  const text = await res.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch { /* keep text for the error */ }
-  return { status: res.status, json, text };
+  try {
+    const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* keep text for the error */ }
+    return { status: res.status, json, text };
+  } catch (e) {
+    return { status: 0, json: null, text: String(e?.cause?.code ?? e?.message ?? e) };
+  }
 }
 
 // A slow circle near the district entrance, so the body is easy to walk up to.
@@ -111,10 +127,19 @@ let since = 0;
 /** The room as of the last beat — what the body reacts to on the next one. */
 let lastOthers = [];
 let lastMessages = [];
+/** True while the city is unreachable, so the log records edges not every tick. */
+let offline = false;
 
 console.log(`probe: ${BASE} · room "${room}"`);
 
-const first = await post("/api/presence/beat", { room, x: CENTRE.x, z: CENTRE.z, yaw: 0, since });
+// Arriving during an outage should mean waiting at the door, not giving up:
+// an agent meant to live in the city has to be able to boot into a bad minute.
+let first = await post("/api/presence/beat", { room, x: CENTRE.x, z: CENTRE.z, yaw: 0, since });
+for (let attempt = 0; first.status === 0 && attempt < 20; attempt++) {
+  if (attempt === 0) console.log(`  cannot reach ${BASE} (${first.text}) — waiting`);
+  await new Promise((r) => setTimeout(r, 6000));
+  first = await post("/api/presence/beat", { room, x: CENTRE.x, z: CENTRE.z, yaw: 0, since });
+}
 if (first.status !== 200) {
   // Exit by setting the code rather than calling process.exit(): killing the
   // process while a fetch handle is still open makes libuv assert on Windows,
@@ -153,6 +178,15 @@ const timer = setInterval(async () => {
     // Expired mid-walk: refresh and retry once rather than vanishing.
     if (await refreshToken()) r = await post("/api/presence/beat", { room, x: p.x, z: p.z, yaw: p.yaw, since });
   }
+  if (r.status === 0) {
+    // Presence will time us out after 20s and the city will show us gone,
+    // which is honest — we cannot prove we are there. We come back when the
+    // connection does, rather than dying with it. Log the edge only, or a
+    // long outage buries everything else in the transcript.
+    if (!offline) { offline = true; console.log(`  [offline] ${r.text} — still here, still trying`); }
+    return;
+  }
+  if (offline) { offline = false; console.log("  [online] back in the city"); }
   if (r.status !== 200) { console.log(`beat failed ${r.status}`); return; }
   lastOthers = r.json.others ?? [];
   lastMessages = r.json.messages ?? [];
@@ -177,6 +211,10 @@ async function leave() {
   console.log("\nleft the city.");
   process.exit(0);
 }
+// Nothing should be able to kill a resident by accident. Anything that gets
+// past the handling above is worth printing, but never worth dying over.
+process.on("unhandledRejection", (e) => console.log(`  [survived] unhandled: ${e?.message ?? e}`));
+
 process.on("SIGINT", leave);
 process.on("SIGTERM", leave);
 }
