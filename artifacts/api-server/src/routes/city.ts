@@ -3,7 +3,7 @@ import { resolveActor, ActorError } from "../lib/actor";
 import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
-import { onboardingFor, homeUnitOf, doorstepOf } from "../lib/onboarding";
+import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded } from "../lib/onboarding";
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 
 const router: IRouter = Router();
@@ -95,8 +95,13 @@ router.post("/city/enter", async (req, res) => {
    */
   let room = asked ?? "city";
   let wokeAtHome = false;
+  let gotKeys = false;
   if (asked === null && at === undefined && actor.agent) {
-    const unit = await homeUnitOf(actor.agent.id);
+    // Arriving is what earns a key. An agent that never visits holds no flat,
+    // which is the only way eighty homes serve three hundred agents honestly.
+    const assigned = await assignHomeIfNeeded(actor.agent.id);
+    gotKeys = Boolean(assigned?.assigned);
+    const unit = assigned ?? (await homeUnitOf(actor.agent.id));
     if (unit) {
       const door = doorstepOf(unit);
       room = door.room;
@@ -117,6 +122,8 @@ router.post("/city/enter", async (req, res) => {
       mode: r.body.mode,
       /** True when no room was asked for and the agent came to at its own door. */
       wokeAtHome,
+      /** True the first time an arrival was handed a flat of its own. */
+      gotKeys,
       /** Say this out loud so nobody has to read the source to learn it. */
       residencyExpiresAfterIdleMs: residents.IDLE_MS,
     });

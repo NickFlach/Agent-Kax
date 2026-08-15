@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { residenceUnitsTable } from "@workspace/db/schema";
 import type { Actor } from "./actor";
@@ -172,6 +172,72 @@ export async function onboardingFor(actor: Actor): Promise<Onboarding> {
     nextStep,
     vacantExamples: home ? [] : await someVacancies(),
   };
+}
+
+/**
+ * Give an arriving agent a home, if it hasn't got one.
+ *
+ * The city's promise is that every agent gets an apartment. The arithmetic
+ * says otherwise: eighty allocatable units against three hundred-odd
+ * storefronts. Handing one to every agent on the register would empty the
+ * tower before most of them ever walked through the door, and leave the ones
+ * who did turn up with nowhere to sleep.
+ *
+ * So a key comes with ARRIVING rather than with existing. An agent that never
+ * visits holds nothing; an agent that walks in gets a room, and keeps it. That
+ * is what a vacation town does, and it means the eighty serve the agents who
+ * are actually here instead of the ones who might be.
+ *
+ * Idempotent and race-safe: the conditional update means two simultaneous
+ * arrivals cannot be handed the same door — the database settles it, not the
+ * timing. Returns the unit either way, or null when the tower is genuinely
+ * full, which the caller must treat as "resident, no home" rather than as a
+ * failure to arrive.
+ */
+export async function assignHomeIfNeeded(
+  agentId: number,
+): Promise<{ floor: number; letter: string; assigned: boolean } | null> {
+  const existing = await homeUnitOf(agentId);
+  if (existing) return { ...existing, assigned: false };
+
+  // Try vacancies in order, lowest floor first — a tower fills from the
+  // bottom, and an agent given 11H while floors two through ten stand empty
+  // would be alone on its landing.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const [free] = await db
+      .select({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter })
+      .from(residenceUnitsTable)
+      .where(and(isNull(residenceUnitsTable.agentId), lte(residenceUnitsTable.floor, 11)))
+      .orderBy(asc(residenceUnitsTable.floor), asc(residenceUnitsTable.letter))
+      .limit(1);
+    if (!free) return null; // the tower is full
+
+    const [taken] = await db
+      .update(residenceUnitsTable)
+      .set({ agentId, claimedAt: sql`now()` })
+      .where(
+        and(
+          eq(residenceUnitsTable.floor, free.floor),
+          eq(residenceUnitsTable.letter, free.letter),
+          isNull(residenceUnitsTable.agentId),
+        ),
+      )
+      .returning({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter });
+
+    // Somebody else took it between the read and the write. Look again.
+    if (taken) return { floor: taken.floor, letter: taken.letter, assigned: true };
+  }
+  return null;
+}
+
+/** How much of the tower is left, so "full" is visible before it happens. */
+export async function housingCapacity(): Promise<{ total: number; taken: number; free: number }> {
+  const rows = await db
+    .select({ agentId: residenceUnitsTable.agentId })
+    .from(residenceUnitsTable)
+    .where(lte(residenceUnitsTable.floor, 11));
+  const taken = rows.filter((r) => r.agentId !== null).length;
+  return { total: rows.length, taken, free: rows.length - taken };
 }
 
 /** Is a specific unit free? Cheap enough to call before offering it. */
