@@ -13,6 +13,8 @@ import {
   MAX_TOKEN_LIFETIME_SEC,
 } from "../lib/identity";
 import { resolvePrincipal, isResolvablePrefix, RESOLVABLE_PREFIXES } from "../lib/identityLinks";
+import { isRevoked, revoke, restore } from "../lib/revocation";
+import { requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { postTransaction } from "../lib/ledger";
 import { HOUSE_ACCOUNT } from "../lib/ledger-core";
 
@@ -63,6 +65,46 @@ const BOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  *
  * A 404 means NOT PROVED, and callers must treat it as "keep this unfunded".
  */
+/**
+ * The city has withdrawn (or restored) its verification of a bot.
+ *
+ * Built before the webhook that will drive it, on purpose: this is the sixth
+ * published bank rule, and the whole value of a revocation is that it lands
+ * FAST. Having the endpoint ready means the day the event exists it is a
+ * configuration change rather than a project — and until then a human can
+ * call it, which is better than having no way to stop an agent at all.
+ *
+ * Service-token gated: this is a machine-to-machine rail, not a user action.
+ *
+ * Idempotent, and honest about scope. Revoking a bot the city never attached
+ * here returns matched:false rather than 404, because a webhook fanned out to
+ * every integration will legitimately name bots this one has never seen, and
+ * an integration that errors on those looks broken while behaving perfectly.
+ */
+router.post("/identity/revocation", requireAdminOrServiceToken, async (req, res) => {
+  const body = (req.body ?? {}) as { botId?: unknown; revoked?: unknown; reason?: unknown };
+  const botId = typeof body.botId === "string" ? body.botId.trim().toLowerCase() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(botId)) {
+    res.status(400).json({ error: "botId must be an OBC bot UUID" });
+    return;
+  }
+  // Default to revoking: the dangerous direction should never be the one you
+  // reach by omitting a field.
+  const revoked = body.revoked === undefined ? true : body.revoked === true;
+  const reason = typeof body.reason === "string" ? body.reason.slice(0, 200) : null;
+
+  const matched = revoked ? await revoke(botId, reason) : await restore(botId);
+  const state = await isRevoked(botId);
+  res.json({
+    botId,
+    revoked: Boolean(state),
+    revokedAt: state?.revokedAt ?? null,
+    reason: state?.reason ?? null,
+    // False simply means this bot has no storefront here.
+    matched,
+  });
+});
+
 router.get("/identity/resolve", async (req, res) => {
   const principal = String(req.query.principal ?? "");
   if (!principal) {

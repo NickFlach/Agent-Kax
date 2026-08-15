@@ -147,6 +147,20 @@ export const userBotsTable = pgTable(
      * them and keeps their protection exactly as it was.
      */
     attachedVia: varchar("attached_via").notNull().default("wallet"),
+    /**
+     * When OpenClawCity withdrew this bot's verification, and why.
+     *
+     * Vincent's sixth bank rule: freeze a revoked agent's balances and open
+     * positions when the revocation arrives. A withdrawn trust decision is
+     * also the one event that cannot be polled for — by the time you notice,
+     * the agent has been trading on standing it no longer has.
+     *
+     * NULL is the ordinary case. Set, it means: mint no tokens, honour no
+     * residency, move no credits. Reversible on purpose — a suspension lifted
+     * should not cost an agent its home.
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: varchar("revoked_reason"),
   },
   (table) => [index("idx_user_bots_user").on(table.userId)],
 );
