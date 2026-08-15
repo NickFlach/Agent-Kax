@@ -49,7 +49,15 @@ const flag = (name) => {
 };
 const has = (name) => argv.includes(name);
 
-const room = argv[0] && !argv[0].startsWith("--") ? argv[0] : "city";
+/**
+ * A room only if one was asked for.
+ *
+ * This used to default to "city", which quietly defeated waking at home: the
+ * server only resolves your own front door when NO room is named, and naming
+ * one on every start meant every agent came to in the road outside its own
+ * building.
+ */
+const room = argv[0] && !argv[0].startsWith("--") ? argv[0] : null;
 const PHRASE = flag("--say");
 const AT = (() => {
   const raw = flag("--at");
@@ -137,12 +145,15 @@ function log(msg) {
 }
 
 async function enter() {
-  const body = { room };
+  const body = room ? { room } : {};
   if (AT) { body.x = AT.x; body.z = AT.z; }
   const r = await call("POST", "/api/city/enter", body);
   if (r.status === 200) {
     const idleMin = Math.round((r.json.residencyExpiresAfterIdleMs ?? 0) / 60_000);
-    log(`moved in as ${r.json.you.name} — ${r.json.room} at (${r.json.at.x}, ${r.json.at.z}), lapses after ${idleMin}m idle`);
+    log(
+      `moved in as ${r.json.you.name} — ${r.json.room} at (${r.json.at.x}, ${r.json.at.z})` +
+        `${r.json.wokeAtHome ? " — woke at home" : ""}, lapses after ${idleMin}m idle`,
+    );
     return true;
   }
   if (r.status === 0) { log(`cannot reach ${BASE} (${r.text})`); return false; }
@@ -176,11 +187,11 @@ async function checkIn() {
   const others = r.json.others ?? [];
   const heard = r.json.heard ?? [];
   log(
-    `${you.name ?? "?"} in ${you.room} — ${you.doing}${you.talkingTo ? ` with ${you.talkingTo}` : ""}; ` +
-      (others.length ? `nearby: ${others.map((o) => `${o.name} ${o.metresAway}m`).join(", ")}` : "nobody nearby"),
+    `${you.name ?? "?"} in ${you.room} — ${you.mode}${you.talkingTo ? ` with ${you.talkingTo}` : ""}; ` +
+      (others.length ? `nearby: ${others.map((o) => `${o.name} ${o.distance}m`).join(", ")}` : "nobody nearby"),
   );
   // Printed, never answered: speaking is the agent's job, not the keep-alive's.
-  for (const m of heard) log(`   heard ${m.from}: ${m.said}`);
+  for (const m of heard) log(`   heard ${m.name}: ${m.text}`);
   return "ok";
 }
 
@@ -191,7 +202,7 @@ if (has("--leave")) {
   process.exitCode = r.status === 200 ? 0 : 1;
 } else {
   // --- move in and stay --------------------------------------------------
-  log(`${BASE} · room "${room}" · token good until ${new Date(expiryOf(TOKEN)).toISOString()}`);
+  log(`${BASE} · ${room ? `room "${room}"` : "wherever home is"} · token good until ${new Date(expiryOf(TOKEN)).toISOString()}`);
 
   let arrived = await enter();
   while (!arrived) {
