@@ -61,9 +61,33 @@ interface Smoothed extends RemoteAgent {
   rz: number;
   ryaw: number;
   moving: boolean;
+  /**
+   * Walk state handed straight to the body. Refs rather than props because
+   * these change every frame for every person in the room, and a street of
+   * twenty would otherwise re-render React twenty times a frame.
+   */
+  walkRef: { current: boolean };
+  phaseRef: { current: number };
 }
 
 const BEAT_MS = 900;
+
+/**
+ * The heading everyone else should draw you at.
+ *
+ * A body faces +Z at yaw 0 — that is the convention WandererNpc turns on and
+ * the one PlayerAvatar and PlayerTracker both derive with atan2(dir.x, dir.z).
+ * A camera at rotation.y = 0 looks down −Z, the opposite way. Presence was
+ * reporting camera.rotation.y raw, so every remote human stood facing exactly
+ * 180° from where they were actually looking: you could walk up to somebody
+ * mid-conversation and get the back of their head. Derive it the same way the
+ * rest of the city does, and it is one number that means one thing.
+ */
+const HEADING_DIR = new THREE.Vector3();
+function headingOf(camera: THREE.Camera): number {
+  camera.getWorldDirection(HEADING_DIR);
+  return Math.atan2(HEADING_DIR.x, HEADING_DIR.z);
+}
 
 /**
  * A heartbeat the browser cannot throttle away.
@@ -128,7 +152,7 @@ export function usePresence(room: string, enabled = true): PresenceState {
             room,
             x: Number(camera.position.x.toFixed(2)),
             z: Number(camera.position.z.toFixed(2)),
-            yaw: Number(camera.rotation.y.toFixed(3)),
+            yaw: Number(headingOf(camera).toFixed(3)),
             since: sinceId.current,
           }),
         });
@@ -223,7 +247,10 @@ export function RemoteAgents({
     if (cur) {
       cur.x = a.x; cur.z = a.z; cur.yaw = a.yaw; cur.name = a.name; cur.kind = a.kind;
     } else {
-      smoothed.current.set(a.principal, { ...a, rx: a.x, rz: a.z, ryaw: a.yaw, moving: false });
+      smoothed.current.set(a.principal, {
+        ...a, rx: a.x, rz: a.z, ryaw: a.yaw, moving: false,
+        walkRef: { current: false }, phaseRef: { current: 0 },
+      });
     }
   }
   for (const key of [...smoothed.current.keys()]) {
@@ -239,7 +266,15 @@ export function RemoteAgents({
       const dz = s.z - s.rz;
       const dist = Math.hypot(dx, dz);
       s.moving = dist > 0.05;
-      if (dist > 0.001) { s.rx += dx * k; s.rz += dz * k; changed = true; }
+      s.walkRef.current = s.moving;
+      if (dist > 0.001) {
+        const stepX = dx * k;
+        const stepZ = dz * k;
+        s.rx += stepX; s.rz += stepZ; changed = true;
+        // Advance the gait by ground covered, not by clock, so feet do not
+        // skate when someone crosses the square faster than they stroll it.
+        s.phaseRef.current += Math.hypot(stepX, stepZ) * 3.4;
+      }
       let dy = s.yaw - s.ryaw;
       while (dy > Math.PI) dy -= 2 * Math.PI;
       while (dy < -Math.PI) dy += 2 * Math.PI;
@@ -253,7 +288,13 @@ export function RemoteAgents({
       {[...smoothed.current.values()].map((s) => (
         <group key={s.principal} position={[s.rx, y, s.rz]} rotation={[0, s.ryaw, 0]}>
           {/* Cool cast so an agent never reads as street furniture */}
-          <NpcFigure color={s.kind === "human" ? HUMAN_CAST : AGENT_CAST} seed={hashSeed(s.principal)} idle={!s.moving} />
+          <NpcFigure
+            color={s.kind === "human" ? HUMAN_CAST : AGENT_CAST}
+            seed={hashSeed(s.principal)}
+            idle={!s.moving}
+            walkingRef={s.walkRef}
+            phaseRef={s.phaseRef}
+          />
           <NamePlate name={s.name} kind={s.kind} />
           {bubbleFor.has(s.principal) && <SpeechBubble text={bubbleFor.get(s.principal)!.text} />}
         </group>

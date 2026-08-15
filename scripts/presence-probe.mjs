@@ -34,6 +34,8 @@
  *   KAX_TOKEN=<token> KAX_BASE_URL=http://127.0.0.1:5199 node scripts/presence-probe.mjs city
  */
 
+import { createBody, step } from "./agent-body.mjs";
+
 const BASE = process.env.KAX_BASE_URL || "https://kax.ninja-portal.com";
 let TOKEN = process.env.KAX_TOKEN || "";
 const room = process.argv[2]?.startsWith("--") ? "city" : (process.argv[2] || "city");
@@ -102,8 +104,13 @@ const CENTRE = (() => {
   return { x: Number.isFinite(raw[0]) ? raw[0] : 0, z: Number.isFinite(raw[1]) ? raw[1] : 0 };
 })();
 const RADIUS = Number(process.env.KAX_RADIUS) > 0 ? Number(process.env.KAX_RADIUS) : 6;
+const BEAT_MS = 900;
+const BEAT_S = BEAT_MS / 1000;
 let tick = 0;
 let since = 0;
+/** The room as of the last beat — what the body reacts to on the next one. */
+let lastOthers = [];
+let lastMessages = [];
 
 console.log(`probe: ${BASE} · room "${room}"`);
 
@@ -128,17 +135,27 @@ if (PHRASE) {
   console.log(r.status === 201 ? `said: "${PHRASE}"` : `could not speak: ${r.json?.error ?? r.status}`);
 }
 
+// The manners live in agent-body: stop when spoken to, turn to face whoever is
+// talking, stand at conversational distance, resume the patrol when it is over.
+const body = createBody({ centre: CENTRE, radius: RADIUS, self: first.json.you.principal });
+let lastMode = "";
+
 const timer = setInterval(async () => {
   tick++;
-  const a = (tick / 40) * Math.PI * 2;
-  const x = CENTRE.x + Math.cos(a) * RADIUS;
-  const z = CENTRE.z + Math.sin(a) * RADIUS;
-  let r = await post("/api/presence/beat", { room, x, z, yaw: -a, since });
+  const p = step(body, { others: lastOthers, messages: lastMessages, now: Date.now(), dt: BEAT_S });
+  lastMessages = [];
+  if (p.mode !== lastMode) {
+    lastMode = p.mode;
+    console.log(`  [${p.mode}]${p.focusName ? ` → ${p.focusName}` : ""}`);
+  }
+  let r = await post("/api/presence/beat", { room, x: p.x, z: p.z, yaw: p.yaw, since });
   if (r.status === 401) {
     // Expired mid-walk: refresh and retry once rather than vanishing.
-    if (await refreshToken()) r = await post("/api/presence/beat", { room, x, z, yaw: -a, since });
+    if (await refreshToken()) r = await post("/api/presence/beat", { room, x: p.x, z: p.z, yaw: p.yaw, since });
   }
   if (r.status !== 200) { console.log(`beat failed ${r.status}`); return; }
+  lastOthers = r.json.others ?? [];
+  lastMessages = r.json.messages ?? [];
   // Refresh well before the 15-minute expiry rather than racing it.
   if (tick % 600 === 0) await refreshToken();
 
@@ -152,7 +169,7 @@ const timer = setInterval(async () => {
       ? `  ${others.length} nearby: ${others.map((o) => o.name).join(", ")}`
       : "  nobody else here yet");
   }
-}, 900);
+}, BEAT_MS);
 
 async function leave() {
   clearInterval(timer);
