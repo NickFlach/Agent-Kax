@@ -100,6 +100,7 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
 export interface EnsureResult {
   ran: number;
   repaired: boolean;
+  /** How many ALLOCATABLE units (floors 2-11) exist after the repair. */
   unitsAfter: number | null;
   error?: string;
 }
@@ -127,7 +128,12 @@ export async function ensureCriticalSchema(): Promise<EnsureResult> {
 
   let unitsAfter: number | null = null;
   try {
-    const c = await db.execute(sql`SELECT count(*)::int AS n FROM residence_units`);
+    // The ALLOCATABLE stock, not every row: the penthouse is a real unit on
+    // floor 12 but it is not stock, and counting it would make the message
+    // below say 81 while the building still offers 80.
+    const c = await db.execute(
+      sql`SELECT count(*)::int AS n FROM residence_units WHERE floor BETWEEN 2 AND 11`,
+    );
     unitsAfter = (c.rows[0] as { n: number }).n;
   } catch { /* counted only for the log */ }
 
