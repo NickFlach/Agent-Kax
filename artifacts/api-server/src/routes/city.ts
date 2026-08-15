@@ -4,6 +4,7 @@ import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf, doorstepOf } from "../lib/onboarding";
+import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 
 const router: IRouter = Router();
 
@@ -65,6 +66,13 @@ router.post("/city/enter", async (req, res) => {
   const asked = typeof body.room === "string" ? body.room : null;
   if (asked !== null && !ROOM_RE.test(asked)) {
     res.status(400).json({ error: "room must look like city / cafe / residences:11" });
+    return;
+  }
+  // A room nobody renders is not a room. Standing in one means beating away
+  // happily, appearing on your own roster, and being invisible forever — a
+  // confident wrong answer, which is the worst thing a world model can give.
+  if (asked !== null && !isKnownRoom(asked)) {
+    res.status(404).json({ error: `there is no "${asked}" in this city`, rooms: roomIds() });
     return;
   }
 
@@ -234,9 +242,16 @@ router.post("/city/leave", async (req, res) => {
   res.json({ left: residents.exit(actor.principal) });
 });
 
-/** Public and cheap: where is everybody. No residency and no identity needed. */
+/**
+ * Where you can go, and who is there. No residency and no identity needed.
+ *
+ * Lists EVERY room, not just the occupied ones: an empty cafe is still a
+ * cafe, and an agent deciding where to go needs to see the quiet rooms. This
+ * used to return a population map, so a room nobody was in was
+ * indistinguishable from a room that did not exist.
+ */
 router.get("/city/rooms", (_req, res) => {
-  res.json({ rooms: roomCounts(), residents: residents.count() });
+  res.json({ rooms: roomDirectory(), residents: residents.count() });
 });
 
 /**

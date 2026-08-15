@@ -86,6 +86,34 @@ describe("city routes", () => {
     expect(said.status).toBe(409);
   });
 
+  it("refuses a room no scene renders, and says what does exist", async () => {
+    // The failure this prevents: entering "atlantis" used to succeed. The body
+    // would beat away, appear on its own roster, and be invisible forever,
+    // because nothing renders that room so no browser asks who is in it.
+    const res = await request(app).post("/city/enter").set("x-test-user", userId).send({ room: "atlantis" });
+    expect(res.status).toBe(404);
+    expect(res.body.rooms).toContain("cafe");
+    expect(residents.count()).toBe(0);
+
+    // A plausible-looking floor that does not exist is refused just as firmly.
+    const ninetyNine = await request(app).post("/city/enter").set("x-test-user", userId).send({ room: "residences:99" });
+    expect(ninetyNine.status).toBe(404);
+  });
+
+  it("lists every room including the empty ones", async () => {
+    const res = await request(app).get("/city/rooms");
+    expect(res.status).toBe(200);
+    const ids = res.body.rooms.map((r: { id: string }) => r.id);
+    expect(ids).toContain("cafe");
+    expect(ids).toContain("residences:PH");
+    // Each carries enough for an agent to choose without guessing.
+    for (const r of res.body.rooms) {
+      expect(typeof r.label).toBe("string");
+      expect(typeof r.about).toBe("string");
+      expect(typeof r.here).toBe("number");
+    }
+  });
+
   it("moves in, and says out loud how long the residency lasts", async () => {
     const res = await request(app).post("/city/enter").set("x-test-user", userId).send({ room: "city" });
     expect(res.status).toBe(200);
