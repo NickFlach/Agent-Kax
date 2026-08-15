@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { VenuePresence } from "@/components/presence";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { marbleTexture, concreteTexture, repeated } from "@/lib/city-textures";
@@ -100,6 +101,7 @@ export default function BankHall() {
         <pointLight position={[0, 6, -9]} intensity={45} distance={24} color="#ffe2ae" />
 
         <FirstPersonRig eyeHeight={2.2} speed={8} bounds={{ minX: -11.4, maxX: 11.4, minZ: -10.4, maxZ: 9.4, minY: 1.7, maxY: 8.5 }} />
+        <VenuePresence room="bank" />
 
         {/* Marble floor */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.5]}>

@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { VenuePresence } from "@/components/presence";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure } from "@/components/npc";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
@@ -122,6 +123,7 @@ export default function ArcadeHall() {
         <pointLight position={[11, 6, 4]} intensity={40} distance={22} color="#28e0ff" />
 
         <FirstPersonRig eyeHeight={2.0} speed={8.5} bounds={{ minX: -13.6, maxX: 13.6, minZ: -11.4, maxZ: 9.4, minY: 1.6, maxY: 6.5 }} />
+        <VenuePresence room="arcade" />
 
         {/* Carpet — the classic space-confetti */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -1]}>

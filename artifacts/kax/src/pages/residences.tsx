@@ -4,6 +4,7 @@ import { Text, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
+import { VenuePresence } from "@/components/presence";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { conciergeDialogue, summariseUnits } from "@/lib/npc-dialogue";
@@ -504,6 +505,11 @@ export default function Residences() {
           spawn={spawn}
           groundHeight={isPH ? undefined : groundHeight}
         />
+        {/* Per FLOOR, not per building: standing on the ninth should not show
+            you somebody on the second, any more than the street shows you the
+            cafe. The lobby and the penthouse are their own rooms too. */}
+        <VenuePresence room={`residences:${floorLabel(floor)}`} />
+
         {/* Camera sampler for elevator/stair sensors */}
         <CamProbe onSample={onCamSample} />
 

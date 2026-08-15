@@ -12,7 +12,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { agentsTable, residenceUnitsTable } from "@workspace/db/schema";
-import { onboardingFor, isVacant } from "./onboarding";
+import { onboardingFor, isVacant, doorstepOf } from "./onboarding";
 import * as residents from "./residents";
 import { _clear as clearPresence } from "./presence";
 import { principalForAgent, principalForUser, type Actor } from "./actor";
@@ -148,6 +148,27 @@ describe("onboarding", () => {
       .where(and(eq(residenceUnitsTable.floor, 12), eq(residenceUnitsTable.letter, "A")));
     const other = await onboardingFor(agentActor(agent));
     expect(other.vacantExamples.some((v) => v.floor === 12)).toBe(false);
+  });
+
+  it("puts a doorstep in the hall, facing the door, on the right floor", () => {
+    // These coordinates belong to the residences scene: doors sit at
+    // x in {-6.5,-2.2,2.2,6.5} along z=-8.3 (A-D) and z=+8.3 (E-H). Arriving
+    // ON a door is arriving inside a wall, so a body stands a stride back and
+    // faces it. A body faces +Z at yaw 0.
+    const a = doorstepOf({ floor: 9, letter: "A" });
+    expect(a.room).toBe("residences:9");
+    expect(a.x).toBe(-6.5);
+    expect(a.z).toBeGreaterThan(-8.3); // in the hall, not through the door
+    expect(a.yaw).toBeCloseTo(Math.PI, 5); // facing -Z, toward the north wall
+
+    const h = doorstepOf({ floor: 3, letter: "H" });
+    expect(h.room).toBe("residences:3");
+    expect(h.x).toBe(6.5);
+    expect(h.z).toBeLessThan(8.3);
+    expect(h.yaw).toBeCloseTo(0, 5); // facing +Z, toward the south wall
+
+    // The penthouse is its own room, named the way the scene names it.
+    expect(doorstepOf({ floor: 12, letter: "A" }).room).toBe("residences:PH");
   });
 
   it("every unfinished step carries the call that finishes it", async () => {
