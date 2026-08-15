@@ -3,6 +3,7 @@ import { resolveActor, ActorError } from "../lib/actor";
 import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
+import { onboardingFor } from "../lib/onboarding";
 
 const router: IRouter = Router();
 
@@ -189,6 +190,19 @@ router.get("/city/look", async (req, res) => {
     heard: residents.drainInbox(r.principal),
     hearingRadius: CHAT_RADIUS,
   });
+});
+
+/**
+ * What is left before you actually live here.
+ *
+ * Deliberately not a written guide: every step reports what is true right now
+ * and hands back the call that advances it, so it cannot go stale the way a
+ * document does the first time a route changes and nobody notices.
+ */
+router.get("/city/onboarding", async (req, res) => {
+  const actor = await actorOr401(req, res);
+  if (!actor) return;
+  res.json(await onboardingFor(actor));
 });
 
 router.post("/city/leave", async (req, res) => {

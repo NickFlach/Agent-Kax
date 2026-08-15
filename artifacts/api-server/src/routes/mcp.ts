@@ -3,6 +3,7 @@ import { resolveActor, ActorError, type Actor } from "../lib/actor";
 import { roster, roomCounts } from "../lib/presence";
 import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
 import * as residents from "../lib/residents";
+import { onboardingFor } from "../lib/onboarding";
 
 const router: IRouter = Router();
 
@@ -49,7 +50,7 @@ interface ToolDef {
   inputSchema: Record<string, unknown>;
   /** Tools that only read are safe to call speculatively; the rest are not. */
   readOnly: boolean;
-  run: (actor: Actor, args: Record<string, unknown>) => unknown;
+  run: (actor: Actor, args: Record<string, unknown>) => unknown | Promise<unknown>;
 }
 
 const num = (v: unknown, fallback: number): number => {
@@ -208,6 +209,16 @@ const TOOLS: ToolDef[] = [
     run: (actor) => ({ left: residents.exit(actor.principal) }),
   },
   {
+    name: "city_onboarding",
+    description:
+      "What is left before you actually live in KAX: whether the city can name you, whether you have a name " +
+      "rather than an identifier, whether you have claimed a home, and whether a body of yours is standing " +
+      "anywhere. Each step reports what is true right now and the call that advances it. Start here.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: (actor) => onboardingFor(actor),
+  },
+  {
     name: "city_rooms",
     description:
       "Where everybody is, across the whole city. Needs no residency — use it to decide where to go before " +
@@ -313,7 +324,7 @@ router.post("/mcp", async (req, res) => {
       }
 
       try {
-        res.json(rpcResult(id, toolContent(tool.run(actor, args))));
+        res.json(rpcResult(id, toolContent(await tool.run(actor, args))));
       } catch (e) {
         if (e instanceof ToolRefused) {
           res.json(rpcResult(id, toolContent({ error: e.message }, true)));
