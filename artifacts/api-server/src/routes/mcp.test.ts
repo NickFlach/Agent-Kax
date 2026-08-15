@@ -132,7 +132,14 @@ describe("mcp", () => {
     const viaMcp = toolJson(await rpc("tools/call", { name: "city_look", arguments: {} }, userId));
     const viaHttp = (await request(app).get("/city/look").set("x-test-user", userId)).body;
 
-    expect(Object.keys(viaMcp.you).sort()).toEqual(Object.keys(viaHttp.you).sort());
+    // Not identical key sets: the HTTP door legitimately carries more (a
+    // principal string and a yaw in radians, which a model has no use for).
+    // The invariant is narrower and truer — where BOTH report a fact, they
+    // must use the same word for it, and agree on the value.
+    for (const [k, v] of Object.entries(viaMcp.you)) {
+      expect(viaHttp.you, `MCP says "${k}"; the HTTP door does not`).toHaveProperty(k);
+      expect(viaHttp.you[k], `"${k}" differs between the two doors`).toEqual(v);
+    }
     expect(viaMcp.you.mode).toBe(viaHttp.you.mode);
     expect(viaMcp).toHaveProperty("hearingRadius");
     // Speech comes back shaped the same way through both doors.
