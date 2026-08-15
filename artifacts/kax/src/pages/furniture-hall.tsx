@@ -5,6 +5,8 @@ import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
+import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
+import { joineryDialogue } from "@/lib/npc-dialogue";
 import { brickTexture, woodFloorTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
 
@@ -96,6 +98,17 @@ export default function FurnitureHall() {
   const [, navigate] = useLocation();
   const [pieces, setPieces] = useState<FurniturePiece[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [deskNear, setDeskNear] = useState(false);
+  const [talking, setTalking] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyE" && deskNear) { e.preventDefault(); setTalking((v) => !v); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deskNear]);
+  useEffect(() => { if (!deskNear) setTalking(false); }, [deskNear]);
 
   useEffect(() => {
     let alive = true;
@@ -158,8 +171,10 @@ export default function FurnitureHall() {
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        WASD to walk · Drag to look · buying & selling opens with the exchange
+        WASD to walk · Drag to look · E to talk · buying & selling opens with the exchange
       </div>
+
+      {talking && <DialoguePanel dialogue={joineryDialogue(pieces)} onClose={() => setTalking(false)} />}
 
       <Canvas
         className="!absolute inset-0"
@@ -254,9 +269,14 @@ export default function FurnitureHall() {
             <boxGeometry args={[3.2, 0.08, 1.05]} />
             <meshStandardMaterial color="#5c4530" roughness={0.4} />
           </mesh>
-          <group position={[0, 0, -1.1]}>
-            <NpcFigure color="#6a4b3a" seed={77} />
-          </group>
+          <TalkableNpc
+            position={[0, 0, -1.1]}
+            color="#6a4b3a"
+            seed={77}
+            name="The Sales Desk"
+            onRangeChange={setDeskNear}
+            active={talking}
+          />
           <mesh position={[0, 1.85, -0.1]} rotation={[-0.18, 0, 0]}>
             <boxGeometry args={[2.6, 0.55, 0.06]} />
             <meshStandardMaterial color="#f2ede2" roughness={0.9} />

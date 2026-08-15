@@ -1,9 +1,11 @@
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { NpcFigure } from "@/components/npc";
+import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
+import { cafeDialogue } from "@/lib/npc-dialogue";
 import { useDayPhase } from "@/lib/time-of-day";
 import {
   brickTexture,
@@ -31,6 +33,17 @@ const SPACE_MONO_WOFF = "https://fonts.gstatic.com/s/spacemono/v12/i7dPIFZifjKcF
 export default function Cafe() {
   const [, navigate] = useLocation();
   const phase = useDayPhase();
+  const [counterNear, setCounterNear] = useState(false);
+  const [talking, setTalking] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyE" && counterNear) { e.preventDefault(); setTalking((t) => !t); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [counterNear]);
+  useEffect(() => { if (!counterNear) setTalking(false); }, [counterNear]);
 
   const floor = useMemo(() => repeated(woodFloorTexture(), 6, 5), []);
   const wall = useMemo(() => repeated(brickTexture(0), 5, 1.6), []);
@@ -72,8 +85,10 @@ export default function Cafe() {
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        WASD to walk · Drag to look · the corner table is taken
+        WASD to walk · Drag to look · E to talk · the corner table is taken
       </div>
+
+      {talking && <DialoguePanel dialogue={cafeDialogue(phase)} onClose={() => setTalking(false)} />}
 
       <Canvas
         className="!absolute inset-0"
@@ -168,9 +183,14 @@ export default function Cafe() {
             </mesh>
           ))}
           {/* Whoever is working the counter */}
-          <group position={[0.2, 0, -1.15]}>
-            <NpcFigure color="#2f5d46" seed={317} />
-          </group>
+          <TalkableNpc
+            position={[0.2, 0, -1.15]}
+            color="#2f5d46"
+            seed={317}
+            name="The Counter"
+            onRangeChange={setCounterNear}
+            active={talking}
+          />
         </group>
 
         {/* Menu board */}
