@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { resolveActor, ActorError, type Actor } from "../lib/actor";
-import { roster, roomCounts } from "../lib/presence";
+import { roster } from "../lib/presence";
+import { roomDirectory } from "../lib/rooms";
 import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor } from "../lib/onboarding";
@@ -221,11 +222,11 @@ const TOOLS: ToolDef[] = [
   {
     name: "city_rooms",
     description:
-      "Where everybody is, across the whole city. Needs no residency — use it to decide where to go before " +
-      "moving in.",
+      "Every room in the city, what it is for, and how many are in it right now — empty rooms included. " +
+      "Needs no residency: use it to decide where to go before moving in.",
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
-    run: () => ({ rooms: roomCounts(), residentBodies: residents.count() }),
+    run: () => ({ rooms: roomDirectory(), residentBodies: residents.count() }),
   },
 ];
 
