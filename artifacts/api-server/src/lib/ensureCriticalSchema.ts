@@ -65,6 +65,44 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       ON CONFLICT (floor, letter) DO NOTHING`),
   },
   {
+    /**
+     * city_residents, for the same reason and on the same evidence.
+     *
+     * I argued this table did NOT need to live here: the host's schema diff
+     * looked fixed, residence_units had survived a deploy intact, and a normal
+     * migration is cleaner than a workaround. That reasoning was wrong, and it
+     * was wrong in an instructive way — residence_units survives partly
+     * BECAUSE this file rebuilds it every boot, so "it survived" could never
+     * have distinguished "the diff stopped" from "we keep putting it back".
+     *
+     * The deploy of 2026-08-15 settled it. Boot self-check immediately after:
+     * 25 tables checked, missingTables ['city_residents'], everything else
+     * intact — a brand new table, gone, exactly as residence_units used to go.
+     * Migration 0021 had already run and recorded itself, so nothing would
+     * ever have replaced it.
+     *
+     * Same shape as above: idempotent, drops nothing, cheap when present.
+     */
+    label: "city_residents table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS city_residents (
+        principal   text PRIMARY KEY,
+        name        text NOT NULL,
+        kind        text NOT NULL,
+        room        text NOT NULL,
+        x           real NOT NULL DEFAULT 0,
+        z           real NOT NULL DEFAULT 0,
+        yaw         real NOT NULL DEFAULT 0,
+        last_steer  timestamp NOT NULL DEFAULT now(),
+        entered_at  timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "city_residents last_steer index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS city_residents_last_steer_idx
+                  ON city_residents (last_steer)`),
+  },
+  {
     // The penthouse is one dwelling on floor 12, outside the claimable range.
     // Seeded here as well as in 0020 so the two paths agree: if this table is
     // ever rebuilt, the building must not come back missing its top floor.
