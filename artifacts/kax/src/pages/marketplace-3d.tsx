@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, Suspense, useEffect } from "react";
+import { useState, useMemo, useRef, useCallback, Suspense, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Text, Sky } from "@react-three/drei";
 import * as THREE from "three";
@@ -1141,10 +1141,15 @@ function StreetGround({ depth }: { depth: number }) {
   );
 }
 
-/** Publishes your position on the street and draws whoever else is there. */
-function StreetPresence() {
-  const others = usePresence("city");
-  return <RemoteAgents agents={others} y={0.12} />;
+/**
+ * Publishes your position on the street, draws whoever else is there, and
+ * carries what they say. The say() handle is lifted out to the page so the
+ * chat input can live in the DOM rather than inside the canvas.
+ */
+function StreetPresence({ onSay }: { onSay: (fn: (t: string) => Promise<string | null>) => void }) {
+  const { others, heard, say } = usePresence("city");
+  useEffect(() => { onSay(say); }, [say, onSay]);
+  return <RemoteAgents agents={others} heard={heard} y={0.12} />;
 }
 
 const MAX_3D_STOREFRONTS = 48;
@@ -1168,6 +1173,16 @@ export default function Marketplace3D() {
   const [selected, setSelected] = useState<SceneAgent | null>(null);
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const phase = useDayPhase();
+  // Speech: the handle comes from inside the canvas, the input lives outside it.
+  const sayRef = useRef<(t: string) => Promise<string | null>>(async () => null);
+  // Stored in a ref rather than state: the handle changes identity on mount and
+  // nothing renders from it, so putting it in state would only cause a loop.
+  const handleSayRef = useCallback((fn: (t: string) => Promise<string | null>) => {
+    sayRef.current = fn;
+  }, []);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatText, setChatText] = useState("");
+  const [chatNote, setChatNote] = useState<string | null>(null);
 
   useEffect(() => {
     setWebglSupported(detectWebGL());
@@ -1313,6 +1328,21 @@ export default function Marketplace3D() {
     if (selected) navigate(dest(selected));
   };
   const enterStorefront = (a: SceneAgent) => navigate(dest(a));
+
+  // Press T to speak. The FPS rig already ignores keys while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = document.activeElement?.tagName === "INPUT";
+      if (e.code === "KeyT" && !typing && !chatOpen) {
+        e.preventDefault();
+        setChatOpen(true);
+        return;
+      }
+      if (e.code === "Escape" && chatOpen) { setChatOpen(false); setChatText(""); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chatOpen]);
 
   // Walk up to a store and press E to enter it.
   useEffect(() => {
@@ -1544,7 +1574,7 @@ export default function Marketplace3D() {
 
       {/* Footer hint */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 text-center font-bold">
-        WASD to walk · Drag to look · E to enter · Scroll to step
+        WASD to walk · Drag to look · E to enter · T to speak · Scroll to step
         {overflowCount > 0 && (
           <div className="mt-3 pointer-events-auto">
             <Link href="/marketplace" className="border-b border-muted-foreground hover:text-foreground hover:border-foreground transition-colors pb-1" data-testid="link-overflow-list">
@@ -1557,6 +1587,36 @@ export default function Marketplace3D() {
       {/* 3D Scene — pinned to fill the viewport. Without an explicit absolute
           fill, the Canvas's default height:100% resolves against the parent's
           height and can collapse to a sliver at the top. */}
+      {chatOpen && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 w-[min(34rem,90vw)]">
+          <form
+            className="flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const text = chatText.trim();
+              if (!text) { setChatOpen(false); return; }
+              const err = await sayRef.current(text);
+              setChatNote(err);
+              if (!err) { setChatText(""); setChatOpen(false); }
+            }}
+          >
+            <input
+              autoFocus
+              value={chatText}
+              maxLength={280}
+              onChange={(e) => { setChatText(e.target.value); setChatNote(null); }}
+              placeholder="say something to whoever is nearby…"
+              className="flex-1 kax3d-hud px-4 py-3 text-sm text-foreground bg-background/90 border border-border outline-none focus:border-primary"
+              data-testid="input-street-chat"
+            />
+            <button type="submit" className="kax3d-hud px-4 py-3 text-xs uppercase tracking-widest text-primary border border-border hover:border-primary">
+              Say
+            </button>
+          </form>
+          {chatNote && <p className="mt-2 text-[10px] uppercase tracking-widest text-destructive">{chatNote}</p>}
+        </div>
+      )}
+
       <Canvas
         className="!absolute inset-0"
         style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
@@ -1611,7 +1671,7 @@ export default function Marketplace3D() {
         {/* No self-avatar in first person — you ARE the camera. */}
         <PlayerTracker onUpdate={setPlayer} />
         {/* Anyone else standing in the street right now. */}
-        <StreetPresence />
+        <StreetPresence onSay={handleSayRef} />
         {/* Pedestrians on both sidewalks */}
         {Array.from({ length: 8 }).map((_, i) => (
           <WandererNpc
