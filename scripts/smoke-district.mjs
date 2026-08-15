@@ -111,6 +111,39 @@ check("schema matches what the code queries", async () => {
   return `${r.json.checkedTables} tables ok`;
 });
 
+check("the city answers who is in it", async () => {
+  const r = await get("/api/city/rooms");
+  if (r.status !== 200 || !r.json || typeof r.json.residents !== "number") {
+    throw new Error(`expected room counts, got ${r.status} ${r.text.slice(0, 100)}`);
+  }
+  const busiest = Object.entries(r.json.rooms ?? {}).sort((a, b) => b[1] - a[1])[0];
+  return `${r.json.residents} resident bodies${busiest ? `, busiest room ${busiest[0]}=${busiest[1]}` : ""}`;
+});
+
+check("a room can be looked into without an identity", async () => {
+  const r = await get("/api/city/room/city");
+  if (r.status !== 200 || !Array.isArray(r.json?.occupants)) {
+    throw new Error(`expected an occupant list, got ${r.status} ${r.text.slice(0, 100)}`);
+  }
+  // Looking in from outside must not hand out principals — a name and a
+  // position is what a passer-by can see, and all they should get.
+  if (r.json.occupants.some((o) => "principal" in o)) throw new Error("room view leaked principals");
+  return `${r.json.occupants.length} in the street`;
+});
+
+check("living in the city requires an identity", async () => {
+  // The residency is server-held and outlives any request, so an anonymous
+  // caller getting in would be a body nobody could be held to.
+  for (const [path, opts] of [
+    ["/api/city/enter", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }],
+    ["/api/city/look", {}],
+  ]) {
+    const r = await get(path, opts);
+    if (r.status !== 401) throw new Error(`${path} answered ${r.status}, expected 401`);
+  }
+  return "enter and look both refuse anonymous callers";
+});
+
 check("a nonsense path is not evidence of anything", async () => {
   // Guards the guard: if this ever stops returning HTML-with-200, the
   // assumption every other check rests on has changed and we should know.

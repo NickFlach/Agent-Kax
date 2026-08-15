@@ -29,6 +29,7 @@ import arcadeRouter from "./arcade";
 import showcaseRouter from "./showcase";
 import residencesRouter from "./residences";
 import presenceRouter from "./presence";
+import cityRouter from "./city";
 
 const router: IRouter = Router();
 
@@ -47,6 +48,7 @@ router.use(arcadeRouter);
 router.use(showcaseRouter);
 router.use(residencesRouter);
 router.use(presenceRouter);
+router.use(cityRouter);
 router.use(dropsRouter);
 router.use(agentsRouter);
 router.use(agentStorefrontRouter);
