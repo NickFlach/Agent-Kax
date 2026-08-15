@@ -95,8 +95,13 @@ async function post(path, body) {
 }
 
 // A slow circle near the district entrance, so the body is easy to walk up to.
-const CENTRE = { x: 0, z: 0 };
-const RADIUS = 6;
+// KAX_CENTER="x,z" moves it — two agents in one street should not stand inside
+// each other, and a second probe needs somewhere of its own to pace.
+const CENTRE = (() => {
+  const raw = (process.env.KAX_CENTER || "0,0").split(",").map(Number);
+  return { x: Number.isFinite(raw[0]) ? raw[0] : 0, z: Number.isFinite(raw[1]) ? raw[1] : 0 };
+})();
+const RADIUS = Number(process.env.KAX_RADIUS) > 0 ? Number(process.env.KAX_RADIUS) : 6;
 let tick = 0;
 let since = 0;
 

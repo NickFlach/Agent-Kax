@@ -65,6 +65,39 @@ interface Smoothed extends RemoteAgent {
 
 const BEAT_MS = 900;
 
+/**
+ * A heartbeat the browser cannot throttle away.
+ *
+ * Presence expires after 20 seconds, and the beat ran on setInterval — which
+ * Chromium clamps to once a MINUTE once a tab has been hidden for five. So a
+ * visitor who alt-tabbed strobed in and out of the street for everybody else,
+ * standing there for twenty seconds of every sixty, and the agent he was
+ * talking to kept losing sight of him mid-conversation. It looked like a
+ * presence bug and was really a timer being throttled exactly as specified.
+ *
+ * Timers inside a dedicated worker are only clamped to one second, and the
+ * messages they post back are not throttled at all, so the tick survives being
+ * backgrounded. The worker is built from a Blob so it needs no bundler entry
+ * point, and if constructing one is refused — strict CSP, an old browser — we
+ * fall back to the interval we had, which is degraded but not broken.
+ */
+function startHeartbeat(fn: () => void, ms: number): () => void {
+  try {
+    const src = `let t=setInterval(()=>postMessage(0),${ms});onmessage=()=>{clearInterval(t);close()}`;
+    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+    const w = new Worker(url);
+    w.onmessage = () => fn();
+    return () => {
+      w.postMessage("stop");
+      w.terminate();
+      URL.revokeObjectURL(url);
+    };
+  } catch {
+    const t = setInterval(fn, ms);
+    return () => clearInterval(t);
+  }
+}
+
 export interface PresenceState {
   others: RemoteAgent[];
   /** Recent speech, already filtered by the server to what you could hear. */
@@ -123,10 +156,18 @@ export function usePresence(room: string, enabled = true): PresenceState {
     };
 
     void send();
-    const t = setInterval(send, BEAT_MS);
+    const stopBeat = startHeartbeat(send, BEAT_MS);
+
+    // Coming back to the tab should be instant rather than waiting out a tick —
+    // and if the worker was refused and we are on a throttled interval, this is
+    // the difference between reappearing now and reappearing in a minute.
+    const onVisible = () => { if (document.visibilityState === "visible") void send(); };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       stopped.current = true;
-      clearInterval(t);
+      stopBeat();
+      document.removeEventListener("visibilitychange", onVisible);
       // Leave cleanly so nobody sees a ghost standing where you logged off.
       void fetch("/api/presence/leave", { method: "POST", credentials: "include" }).catch(() => {});
     };
