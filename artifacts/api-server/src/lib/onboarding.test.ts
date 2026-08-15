@@ -9,7 +9,7 @@
  */
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { agentsTable, residenceUnitsTable } from "@workspace/db/schema";
 import { onboardingFor, isVacant } from "./onboarding";
@@ -93,10 +93,12 @@ describe("onboarding", () => {
     const pick = before.vacantExamples[0]!;
     const floor = Number(pick.unit.slice(0, -1));
     const letter = pick.unit.slice(-1);
+    // Exactly one unit: residence_units_agent_unique enforces one home per
+    // agent, and claiming a whole floor is not a thing a resident can do.
     await db
       .update(residenceUnitsTable)
       .set({ agentId: agent.id })
-      .where(eq(residenceUnitsTable.floor, floor));
+      .where(and(eq(residenceUnitsTable.floor, floor), eq(residenceUnitsTable.letter, letter)));
 
     const after = await onboardingFor(agentActor(agent));
     const home = after.steps.find((s) => s.id === "home")!;
@@ -129,7 +131,10 @@ describe("onboarding", () => {
 
   it("reports complete only when nothing is outstanding", async () => {
     const actor = agentActor(agent);
-    await db.update(residenceUnitsTable).set({ agentId: agent.id }).where(eq(residenceUnitsTable.floor, 7));
+    await db
+      .update(residenceUnitsTable)
+      .set({ agentId: agent.id })
+      .where(and(eq(residenceUnitsTable.floor, 7), eq(residenceUnitsTable.letter, "C")));
     residents.enter({ principal: actor.principal, name: "Tester", kind: "agent", room: "city" });
 
     const o = await onboardingFor(actor);
