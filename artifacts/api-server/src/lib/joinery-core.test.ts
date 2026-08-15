@@ -11,6 +11,8 @@
 import { describe, expect, it } from "vitest";
 import {
   HOUSE_BPS,
+  MissingListPrice,
+  parseListPrice,
   MAKER_ROYALTY_BPS,
   InvalidSalePrice,
   isSlot,
@@ -80,6 +82,18 @@ describe("joinery sale split", () => {
     expect(saleTxId(7, "trader:kax:agent:x")).toBe(saleTxId(7, "trader:kax:agent:x"));
     expect(saleTxId(7, "trader:a")).not.toBe(saleTxId(8, "trader:a"));
     expect(saleTxId(7, "trader:a")).not.toBe(saleTxId(7, "trader:b"));
+  });
+
+  it("tells a missing price apart from a deliberate null", () => {
+    // The one that would be silent: absence read as null takes a piece OFF
+    // SALE and reports success, so a seller who meant to reprice discovers it
+    // when nobody buys anything.
+    expect(parseListPrice({ price: null })).toBeNull();
+    expect(parseListPrice({ price: 250 })).toBe(250);
+    expect(parseListPrice({ price: "250" })).toBe(250);
+    expect(() => parseListPrice({})).toThrow(MissingListPrice);
+    expect(() => parseListPrice(undefined)).toThrow(MissingListPrice);
+    expect(() => parseListPrice({ artifactId: 3 })).toThrow(MissingListPrice);
   });
 
   it("only accepts slots the flat actually has", () => {

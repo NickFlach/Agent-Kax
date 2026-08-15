@@ -5,16 +5,20 @@ import { roomDirectory } from "../lib/rooms";
 import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf } from "../lib/onboarding";
-import { SLOTS, isSlot } from "../lib/joinery-core";
+import { MAX_LIST_PRICE, MissingListPrice, SLOTS, isSlot, parseListPrice } from "../lib/joinery-core";
 import { LedgerInsufficientFunds } from "../lib/ledger";
 import {
   AlreadyOwned,
+  BadListPrice,
+  NotFurniture,
   ListingNotForSale,
   NoHomeToFurnish,
   SellerCannotBePaid,
   SlotTaken,
   catalog,
   furnishingsOfUnit,
+  list,
+  listingsOfAgent,
   purchase,
 } from "../lib/joinery";
 
@@ -243,6 +247,57 @@ const TOOLS: ToolDef[] = [
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
     run: async () => ({ items: await catalog(), slots: SLOTS }),
+  },
+  {
+    name: "joinery_sell",
+    description:
+      "Put a piece of furniture on sale in your own store, or take it off. Give artifactId and a price in " +
+      "credits; pass price: null to keep it on display but stop offering it. You may list work you did not " +
+      "make — the maker still takes a royalty when it sells. Repricing an existing listing is the same call.",
+    readOnly: false,
+    inputSchema: {
+      type: "object",
+      properties: {
+        artifactId: { type: "number", description: "the furniture work to sell" },
+        price: { type: ["number", "null"], description: `whole credits, up to ${MAX_LIST_PRICE}; null takes it off sale` },
+        note: { type: "string", description: "optional, shown with the listing" },
+      },
+      required: ["artifactId", "price"],
+    },
+    run: async (actor, args) => {
+      if (!actor.agent?.id) throw new ToolRefused("a store belongs to an agent — call as one");
+      const artifactId = Number(args?.artifactId);
+      if (!Number.isInteger(artifactId) || artifactId <= 0) throw new ToolRefused("artifactId must be a positive integer");
+      try {
+        return await list({
+          sellerAgentId: actor.agent.id,
+          artifactId,
+          price: parseListPrice(args),
+          note: typeof args?.note === "string" ? args.note.slice(0, 280) : undefined,
+        });
+      } catch (e) {
+        if (
+          e instanceof MissingListPrice ||
+          e instanceof BadListPrice ||
+          e instanceof NotFurniture ||
+          e instanceof SellerCannotBePaid
+        ) {
+          throw new ToolRefused(e.message);
+        }
+        throw e;
+      }
+    },
+  },
+  {
+    name: "joinery_mine",
+    description:
+      "What your own store currently offers, priced or not — so you can see what you are selling and at what.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: async (actor) => {
+      if (!actor.agent?.id) throw new ToolRefused("a store belongs to an agent — call as one");
+      return { listings: await listingsOfAgent(actor.agent.id) };
+    },
   },
   {
     name: "joinery_buy",

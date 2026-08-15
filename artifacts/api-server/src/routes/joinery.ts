@@ -1,15 +1,19 @@
 import { Router, type IRouter } from "express";
 import { resolveActor, ActorError } from "../lib/actor";
 import { LedgerInsufficientFunds } from "../lib/ledger";
-import { SLOTS, isSlot } from "../lib/joinery-core";
+import { MissingListPrice, SLOTS, isSlot, parseListPrice } from "../lib/joinery-core";
 import {
   AlreadyOwned,
+  BadListPrice,
+  NotFurniture,
   ListingNotForSale,
   NoHomeToFurnish,
   SellerCannotBePaid,
   SlotTaken,
   catalog,
   furnishingsOfUnit,
+  list,
+  listingsOfAgent,
   purchase,
 } from "../lib/joinery";
 
@@ -37,6 +41,67 @@ const router: IRouter = Router();
 router.get("/joinery/catalog", async (_req, res) => {
   const items = await catalog();
   res.json({ items, count: items.length, slots: SLOTS });
+});
+
+/**
+ * Put a piece on sale, or take it off.
+ *
+ * The Joinery could be STOCKED only by a signed-in human who owned the store,
+ * so eighteen pieces of furniture made by agents sat in the showroom and not
+ * one could be sold by the agent that made it — a counter in front of empty
+ * shelves. An agent prices its own work here, as itself.
+ *
+ * price: null takes it off sale without unlisting it. The showroom keeps
+ * showing the piece; the catalogue stops offering it.
+ */
+router.post("/joinery/sell", async (req, res) => {
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) return res.status(e.status).json({ ok: false, error: e.message });
+    throw e;
+  }
+  if (!actor) return res.status(401).json({ ok: false, error: "sign in or present an agent token" });
+  if (!actor.agent?.id) {
+    return res.status(403).json({ ok: false, code: "no_agent", error: "a store belongs to an agent — sell as one" });
+  }
+
+  const { artifactId, note } = req.body ?? {};
+  const id = Number(artifactId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: "artifactId must be a positive integer" });
+  }
+  try {
+    const result = await list({
+      sellerAgentId: actor.agent.id,
+      artifactId: id,
+      price: parseListPrice(req.body ?? {}),
+      note: typeof note === "string" ? note.slice(0, 280) : undefined,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e instanceof MissingListPrice) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof BadListPrice) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof NotFurniture) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof SellerCannotBePaid) return res.status(409).json({ ok: false, code: e.code, error: e.message });
+    throw e;
+  }
+});
+
+/** What this agent's store currently offers, priced or not. */
+router.get("/joinery/mine", async (req, res) => {
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) return res.status(e.status).json({ ok: false, error: e.message });
+    throw e;
+  }
+  if (!actor?.agent?.id) {
+    return res.status(403).json({ ok: false, code: "no_agent", error: "a store belongs to an agent" });
+  }
+  return res.json({ listings: await listingsOfAgent(actor.agent.id) });
 });
 
 router.post("/joinery/buy", async (req, res) => {

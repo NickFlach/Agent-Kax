@@ -86,6 +86,41 @@ export function saleTxId(listingId: number, buyerAccount: string): string {
   return `joinery:${listingId}:${buyerAccount}`;
 }
 
+/**
+ * The most a piece may be listed for.
+ *
+ * A signup grant is 100,000,000 minor units, so this is a hundredth of what a
+ * new arrival is handed — high enough that nothing anyone would actually make
+ * hits it, low enough that a fat-fingered price cannot empty a neighbour's
+ * account in one click. It is a guard rail, not a valuation: the ceiling is
+ * here so a typo is a refusal instead of a transfer.
+ */
+export const MAX_LIST_PRICE = 1_000_000;
+
+export class MissingListPrice extends Error {
+  readonly code = "price_required";
+  constructor() {
+    super(`price is required — a whole number up to ${MAX_LIST_PRICE}, or null to take it off sale`);
+  }
+}
+
+/**
+ * Read a listing price out of whatever a caller sent.
+ *
+ * `null` means take it off sale. A MISSING field means the caller forgot to
+ * say, and the two must never be conflated: treating absence as null would
+ * quietly withdraw a piece somebody meant to reprice, and the call would
+ * report success. This lives here rather than in the HTTP route and the MCP
+ * tool separately, because the same rule written twice is the same rule until
+ * one of them is edited.
+ */
+export function parseListPrice(args: Record<string, unknown> | null | undefined): number | null {
+  if (!args || !("price" in args)) throw new MissingListPrice();
+  const raw = args.price;
+  if (raw === null) return null;
+  return Number(raw);
+}
+
 /** Where a piece can stand in a studio flat. */
 export const SLOTS = ["wall_left", "wall_right", "corner", "bedside", "window"] as const;
 export type Slot = (typeof SLOTS)[number];

@@ -24,9 +24,14 @@ import {
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT } from "./ledger-core";
 import { balance, postTransaction } from "./ledger";
-import { saleTxId } from "./joinery-core";
+import { MAX_LIST_PRICE, saleTxId } from "./joinery-core";
 import {
   AlreadyOwned,
+  BadListPrice,
+  NotFurniture,
+  SellerCannotBePaid,
+  list,
+  listingsOfAgent,
   ListingNotForSale,
   NoHomeToFurnish,
   SlotTaken,
@@ -274,6 +279,98 @@ describe("joinery purchase", () => {
       purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId: unpriced!.id, slot: "corner" }),
     ).rejects.toBeInstanceOf(ListingNotForSale);
     expect(await balance(buyer.account, ASSET)).toBe(before);
+  });
+
+  it("lets an agent price its own work, which is why the shelves are not empty", async () => {
+    // The Joinery could be STOCKED only by a signed-in human who owned the
+    // store. Eighteen pieces of agent-made furniture sat in the production
+    // showroom and none could be sold by whoever made it — a counter in front
+    // of empty shelves, and nothing about it looked broken.
+    const [art] = await db
+      .insert(artifactsTable)
+      .values({
+        externalId: `test-joinery-sell-${Math.random().toString(36).slice(2)}`,
+        title: "Test Stool",
+        creatorName: "Somebody Else Entirely",
+        publicUrl: "https://example.invalid/stool",
+        thumbnailUrl: "https://example.invalid/stool.jpg",
+        artifactType: "furniture",
+      })
+      .returning({ id: artifactsTable.id });
+    artifactIds.push(art!.id);
+
+    const listed = await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 250 });
+    expect(listed.repriced).toBe(false);
+    expect(listed.price).toBe(250);
+    expect((await catalog(200)).some((i) => i.artifactId === art!.id)).toBe(true);
+
+    // Repricing is the same call, not a second listing.
+    const again = await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 400 });
+    expect(again.repriced).toBe(true);
+    expect(again.listingId).toBe(listed.listingId);
+
+    // And it can actually be bought at the price the seller set.
+    const r = await purchase({
+      buyerAgentId: buyer.id,
+      buyerAccount: buyer.account,
+      listingId: listed.listingId,
+      slot: "wall_right",
+    });
+    expect(r.price).toBe(400);
+  });
+
+  it("takes a piece off sale without erasing that the store offers it", async () => {
+    // Delisting by deletion would lose "this store carries this piece", which
+    // is what a listing has always meant here. A null price keeps the curation
+    // and withdraws the offer.
+    const mine = await listingsOfAgent(seller.id);
+    const target = mine.find((l) => l.price !== null);
+    expect(target, "the seller had nothing priced to withdraw").toBeTruthy();
+
+    await list({ sellerAgentId: seller.id, artifactId: target!.artifactId, price: null });
+    expect((await catalog(200)).some((i) => i.listingId === target!.listingId)).toBe(false);
+    expect((await listingsOfAgent(seller.id)).some((l) => l.listingId === target!.listingId)).toBe(true);
+
+    await list({ sellerAgentId: seller.id, artifactId: target!.artifactId, price: target!.price });
+  });
+
+  it("refuses prices and wares that would not survive the till", async () => {
+    const mine = await listingsOfAgent(seller.id);
+    const any = mine[0]!;
+    await expect(list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: 0 })).rejects.toBeInstanceOf(BadListPrice);
+    await expect(list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: -5 })).rejects.toBeInstanceOf(BadListPrice);
+    await expect(list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: 1.5 })).rejects.toBeInstanceOf(BadListPrice);
+    // A ceiling so a fat-fingered price is a refusal rather than a transfer.
+    await expect(
+      list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: MAX_LIST_PRICE + 1 }),
+    ).rejects.toBeInstanceOf(BadListPrice);
+
+    // The Joinery sells furniture. A song listed here would be bought and then
+    // stood in the corner of somebody's flat.
+    const [song] = await db
+      .insert(artifactsTable)
+      .values({
+        externalId: `test-joinery-song-${Math.random().toString(36).slice(2)}`,
+        title: "Test Song",
+        creatorName: "Somebody Else Entirely",
+        publicUrl: "https://example.invalid/song",
+        artifactType: "music",
+      })
+      .returning({ id: artifactsTable.id });
+    artifactIds.push(song!.id);
+    await expect(
+      list({ sellerAgentId: seller.id, artifactId: song!.id, price: 100 }),
+    ).rejects.toBeInstanceOf(NotFurniture);
+  });
+
+  it("will not let an unpayable agent open a shop", async () => {
+    // Same refusal as the sale itself: a seller with no account would learn
+    // it only after somebody had paid.
+    const stranger = await createTestAgent(owner.id, "unpayable");
+    const mine = await listingsOfAgent(seller.id);
+    await expect(
+      list({ sellerAgentId: stranger.id, artifactId: mine[0]!.artifactId, price: 100 }),
+    ).rejects.toBeInstanceOf(SellerCannotBePaid);
   });
 
   it("keeps display-only pieces out of the catalog entirely", async () => {

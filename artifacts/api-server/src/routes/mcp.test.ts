@@ -85,6 +85,10 @@ describe("mcp", () => {
     expect(names).toContain("joinery_catalog");
     expect(names).toContain("joinery_buy");
     expect(names).toContain("joinery_flat");
+    // The half that makes the other half mean anything: without a way to
+    // stock the shelves, joinery_buy has nothing to sell.
+    expect(names).toContain("joinery_sell");
+    expect(names).toContain("joinery_mine");
     for (const t of res.body.result.tools) {
       expect(t.description.length).toBeGreaterThan(20);
       expect(t.inputSchema.type).toBe("object");
@@ -229,6 +233,16 @@ describe("mcp", () => {
     const viaHttp = await request(app).get("/joinery/catalog");
     expect(viaHttp.status).toBe(200);
     expect(viaMcp.slots).toEqual(viaHttp.body.slots);
+  });
+
+  it("refuses to open a shop for a caller with no store, and says why", async () => {
+    // A human session has no storefront. The refusal has to be a sentence the
+    // model can act on. (Whether a MISSING price is read as a deliberate null
+    // is settled in joinery-core.test.ts, where it can be tested without
+    // standing up an agent token.)
+    const res = await rpc("tools/call", { name: "joinery_sell", arguments: { artifactId: 1, price: 100 } }, userId);
+    expect(res.body.result.isError).toBe(true);
+    expect(String(toolJson(res).error)).toMatch(/agent/i);
   });
 
   it("advertises itself over GET so a client can find the endpoint", async () => {

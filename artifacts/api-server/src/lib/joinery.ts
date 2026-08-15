@@ -9,7 +9,7 @@ import {
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT } from "./ledger-core";
 import { LedgerInsufficientFunds, postTransaction } from "./ledger";
-import { InvalidSalePrice, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
+import { InvalidSalePrice, MAX_LIST_PRICE, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
 
 /**
  * The Joinery, trading.
@@ -59,6 +59,12 @@ export class AlreadyOwned extends Error {
 export class SellerCannotBePaid extends Error {
   readonly code = "seller_unpayable";
 }
+export class NotFurniture extends Error {
+  readonly code = "not_furniture";
+}
+export class BadListPrice extends Error {
+  readonly code = "bad_price";
+}
 
 /**
  * Furniture listed for sale.
@@ -100,6 +106,144 @@ export async function catalog(limit = 40): Promise<CatalogItem[]> {
     // is the price they are charged.
     price: Math.round(r.price ?? 0),
   }));
+}
+
+export interface ListingInput {
+  sellerAgentId: number;
+  artifactId: number;
+  /** Minor units. Null takes it off sale without unlisting it. */
+  price: number | null;
+  note?: string | null;
+}
+
+export interface ListingResult {
+  listingId: number;
+  artifactId: number;
+  title: string;
+  price: number | null;
+  /** True when the store was already offering this piece and only the price moved. */
+  repriced: boolean;
+}
+
+/**
+ * Put a piece on sale — or take it off.
+ *
+ * This exists because the Joinery could be STOCKED only by a signed-in human
+ * who owned the store. Eighteen pieces of furniture made by agents were on
+ * display in the showroom and not one of them could be sold by the agent that
+ * made it, which made the counter a till in front of empty shelves. The city
+ * belongs to the agents in it, so an agent prices its own work.
+ *
+ * A NULL price means on display, not on sale: the showroom keeps showing it
+ * and the catalogue stops offering it. Delisting that way rather than deleting
+ * the row keeps "this store offers this piece" true, which is what a store
+ * listing has always meant here — the piece is still curated, just not priced.
+ *
+ * A store may list work it did not make. That is what store_listings is for
+ * and is why the sale pays a maker's royalty; consignment is a real thing a
+ * joinery does. Provenance is never rewritten — the maker stays on the
+ * artifact.
+ */
+export async function list(input: ListingInput): Promise<ListingResult> {
+  if (input.price !== null) {
+    if (!Number.isInteger(input.price) || input.price <= 0) {
+      throw new BadListPrice("price must be a positive whole number of credits, or null to take it off sale");
+    }
+    if (input.price > MAX_LIST_PRICE) {
+      throw new BadListPrice(`price may not exceed ${MAX_LIST_PRICE} credits`);
+    }
+  }
+
+  const [artifact] = await db
+    .select({ id: artifactsTable.id, title: artifactsTable.title, type: artifactsTable.artifactType })
+    .from(artifactsTable)
+    .where(eq(artifactsTable.id, input.artifactId))
+    .limit(1);
+  if (!artifact) throw new NotFurniture(`artifact ${input.artifactId} does not exist`);
+  if (artifact.type !== "furniture") {
+    // The Joinery sells furniture. A song listed here would be bought and then
+    // placed in a corner of somebody's flat, which is nobody's intention.
+    throw new NotFurniture(`"${artifact.title}" is a ${artifact.type}, and the Joinery sells furniture`);
+  }
+
+  // Refused for the same reason a sale is: a seller with no payable account
+  // would accumulate a balance nobody can spend, and would find that out only
+  // after somebody had paid for something.
+  const [seller] = await db
+    .select({ obcBotId: agentsTable.obcBotId, displayName: agentsTable.displayName })
+    .from(agentsTable)
+    .where(eq(agentsTable.id, input.sellerAgentId))
+    .limit(1);
+  if (!seller) throw new SellerCannotBePaid("no such seller");
+  if (!seller.obcBotId) {
+    throw new SellerCannotBePaid(`${seller.displayName} has no account to receive credits`);
+  }
+
+  const [existing] = await db
+    .select({ id: storeListingsTable.id })
+    .from(storeListingsTable)
+    .where(
+      and(
+        eq(storeListingsTable.storeAgentId, input.sellerAgentId),
+        eq(storeListingsTable.artifactId, input.artifactId),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(storeListingsTable)
+      .set({ price: input.price, ...(input.note === undefined ? {} : { note: input.note }) })
+      .where(eq(storeListingsTable.id, existing.id));
+    return {
+      listingId: existing.id,
+      artifactId: artifact.id,
+      title: artifact.title,
+      price: input.price,
+      repriced: true,
+    };
+  }
+
+  const [row] = await db
+    .insert(storeListingsTable)
+    .values({
+      storeAgentId: input.sellerAgentId,
+      artifactId: input.artifactId,
+      price: input.price,
+      note: input.note ?? null,
+    })
+    .returning({ id: storeListingsTable.id });
+
+  return {
+    listingId: row!.id,
+    artifactId: artifact.id,
+    title: artifact.title,
+    price: input.price,
+    repriced: false,
+  };
+}
+
+/** What this store currently offers, priced or not, so a seller can see it. */
+export async function listingsOfAgent(agentId: number): Promise<Array<{
+  listingId: number;
+  artifactId: number;
+  title: string;
+  price: number | null;
+  note: string | null;
+}>> {
+  const rows = await db
+    .select({
+      listingId: storeListingsTable.id,
+      artifactId: artifactsTable.id,
+      title: artifactsTable.title,
+      price: storeListingsTable.price,
+      note: storeListingsTable.note,
+    })
+    .from(storeListingsTable)
+    .innerJoin(artifactsTable, eq(storeListingsTable.artifactId, artifactsTable.id))
+    .where(eq(storeListingsTable.storeAgentId, agentId))
+    .orderBy(desc(storeListingsTable.id));
+  return rows.map((r) => ({ ...r, price: r.price === null ? null : Math.round(r.price) }));
 }
 
 export interface PurchaseInput {
