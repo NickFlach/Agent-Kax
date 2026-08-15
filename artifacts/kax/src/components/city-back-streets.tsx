@@ -66,6 +66,26 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
         <meshStandardMaterial map={backWall} roughness={0.95} />
       </mesh>
 
+      {/* Puddles. They only read at night, when the service bulbs give them
+          something to hold — which is the point: the alley is worth walking
+          into after dark, and merely a service road before it. */}
+      {props.map((p, i) => (
+        <mesh
+          key={`pud${i}`}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[ALLEY_X * side + (i % 2 ? 0.9 : -0.7) * side, 0.105, p.z - 2.4]}
+        >
+          <circleGeometry args={[0.55 + (i % 3) * 0.35, 18]} />
+          <meshStandardMaterial
+            color={lit ? "#1d2733" : "#22262c"}
+            roughness={0.08}
+            metalness={0.85}
+            emissive={lit ? "#2a2010" : "#000000"}
+            emissiveIntensity={lit ? 0.35 : 0}
+          />
+        </mesh>
+      ))}
+
       {props.map((p, i) => (
         <group key={i} position={[ALLEY_X * side, 0.1, p.z]}>
           {p.kind === "dumpster" && (
@@ -148,6 +168,25 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
           )}
         </group>
       ))}
+      {/* Somebody kept a tally back here. Nobody announces it; you either
+          wander down and find it or you never know it exists. */}
+      <group position={[(ALLEY_X - 3.0) * side, 0, depth * 0.45]} rotation={[0, -side * Math.PI / 2, 0]}>
+        {[0, 1, 2, 3].map((k) => (
+          <mesh key={k} position={[-0.36 + k * 0.16, 1.35, 0.02]} rotation={[0, 0, 0.06 - k * 0.04]}>
+            <boxGeometry args={[0.035, 0.34, 0.01]} />
+            <meshStandardMaterial color="#cdc6b4" roughness={1} />
+          </mesh>
+        ))}
+        <mesh position={[0.12, 1.35, 0.02]} rotation={[0, 0, 1.25]}>
+          <boxGeometry args={[0.035, 0.52, 0.01]} />
+          <meshStandardMaterial color="#cdc6b4" roughness={1} />
+        </mesh>
+        <Suspense fallback={null}>
+          <Text position={[0, 0.95, 0.03]} fontSize={0.1} color="#8d8471" font={SPACE_MONO_WOFF} anchorX="center" anchorY="middle" letterSpacing={0.1}>
+            FIVE SO FAR
+          </Text>
+        </Suspense>
+      </group>
     </group>
   );
 }

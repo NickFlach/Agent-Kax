@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getListUserBotsQueryKey,
@@ -21,6 +21,78 @@ import {
 import { toast } from "@/hooks/use-toast";
 import { AttachBotDialog } from "@/components/attach-bot-dialog";
 import { Plus, Trash2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+
+
+/**
+ * What the city calls you.
+ *
+ * Presence walked a signed-in human around the district labelled "visitor",
+ * then as a truncated wallet address, because nothing ever asked their name.
+ * A city where people are named after their keys is a ledger, not a place.
+ */
+function ProfileName() {
+  const [name, setName] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive) return;
+        const u = (j?.user ?? j) as { displayName?: string | null } | null;
+        setName(u?.displayName ?? "");
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ displayName: name.trim() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) toast({ title: "Name updated", description: "This is how the city will address you." });
+      else toast({ title: "Could not save", description: j?.error ?? `Error ${res.status}`, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="mb-6">
+      <CardHeader>
+        <CardTitle>Your name in the city</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-3">
+          Shown on your nameplate when you walk the district. Without one you appear as your wallet address.
+        </p>
+        <div className="flex gap-2">
+          <Input
+            value={name}
+            disabled={!loaded || saving}
+            maxLength={40}
+            placeholder="e.g. Nick"
+            onChange={(e) => setName(e.target.value)}
+            data-testid="input-display-name"
+          />
+          <Button onClick={save} disabled={!loaded || saving || !name.trim()} data-testid="button-save-display-name">
+            Save
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function BotsManager() {
   const [attachOpen, setAttachOpen] = useState(false);
@@ -47,6 +119,8 @@ export function BotsManager() {
   const bots = data?.bots ?? [];
 
   return (
+    <>
+    <ProfileName />
     <Card data-testid="card-bots-manager">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
@@ -132,5 +206,6 @@ export function BotsManager() {
         </AlertDialogContent>
       </AlertDialog>
     </Card>
+    </>
   );
 }
