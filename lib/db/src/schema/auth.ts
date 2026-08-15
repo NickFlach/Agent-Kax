@@ -71,6 +71,10 @@ export const authChallengeKindEnum = pgEnum("auth_challenge_kind", [
   "password_reset",
   // ADR-0043: nonce a Nostr npub schnorr-signs to bind itself to an OBC bot.
   "npub_bind_challenge",
+  // A nonce a Bluesky account posts publicly to bind itself to an OBC bot.
+  // Unlike the others the proof is a PUBLIC artifact, which is why the
+  // challenge hands back a composed announcement rather than a bare code.
+  "bsky_bind_challenge",
 ]);
 
 export const authChallengesTable = pgTable(
@@ -122,6 +126,12 @@ export const userBotsTable = pgTable(
     // at most one bot.
     npub: varchar("npub"),
     npubVerifiedAt: timestamp("npub_verified_at", { withTimezone: true }),
+    // Bluesky handle↔bot attestation, mirroring the npub pair above. Nullable:
+    // a bot need not have one. Set only after the account publicly posted a
+    // nonce we issued, fetched back from the DID that handle resolves to — so
+    // authorship is proved by construction rather than asserted.
+    bskyHandle: varchar("bsky_handle"),
+    bskyVerifiedAt: timestamp("bsky_verified_at", { withTimezone: true }),
   },
   (table) => [index("idx_user_bots_user").on(table.userId)],
 );

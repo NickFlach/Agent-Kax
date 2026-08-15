@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { detectNonPublic } from "../lib/artifactPublication";
+import { composeAnnouncement, findNoncePost, linkNonce, HANDLE_RE as bskyHandleRe, BlueskyError } from "../lib/bluesky";
 import crypto from "node:crypto";
 import { and, desc, eq, lt } from "drizzle-orm";
 import {
@@ -473,3 +474,144 @@ router.post("/auth/agent/npub/verify", requireWalletAuth, async (req, res) => {
 });
 
 export default router;
+
+// ── Bluesky link ───────────────────────────────────────────────────────
+//
+// The same shape as the OBC artifact proof, with one difference that changes
+// the design: the artifact here is a PUBLIC POST. So the challenge hands back
+// a composed announcement worth reading rather than a bare code — the thing
+// somebody has to publish anyway becomes the thing that tells their followers
+// where their agent now lives.
+//
+// We compose it. We never post it. A human reads it, approves it, publishes
+// it. An identity flow that posts under your handle before you have seen the
+// words is a bad way to begin a relationship, whatever the copy says.
+
+const BSKY_BIND_TTL_MS = 60 * 60_000;
+
+router.post("/auth/agent/bsky/challenge", requireWalletAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obcBotId = (typeof body.obcBotId === "string" ? body.obcBotId : "").toLowerCase();
+  const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
+
+  if (!BOT_ID_RE.test(obcBotId)) {
+    res.status(400).json({ error: "obcBotId must be an OBC bot UUID" });
+    return;
+  }
+  if (!bskyHandleRe.test(handle)) {
+    res.status(400).json({ error: "handle must be a Bluesky handle, e.g. yourname.bsky.social" });
+    return;
+  }
+
+  const userId = req.user!.id;
+  const [owned] = await db
+    .select()
+    .from(userBotsTable)
+    .where(and(eq(userBotsTable.obcBotId, obcBotId), eq(userBotsTable.userId, userId)))
+    .limit(1);
+  if (!owned) {
+    res.status(403).json({ error: "attach this bot to your wallet before linking anything to it" });
+    return;
+  }
+
+  // Fail early and clearly rather than at verify: a handle attests to at most
+  // one bot, and the partial-unique index would reject it there anyway.
+  const [taken] = await db
+    .select()
+    .from(userBotsTable)
+    .where(eq(userBotsTable.bskyHandle, handle))
+    .limit(1);
+  if (taken && taken.obcBotId !== obcBotId) {
+    res.status(409).json({ error: "that handle is already linked to a different bot" });
+    return;
+  }
+
+  const subject = `${userId}:${obcBotId}:${handle}`;
+  await db.delete(authChallengesTable).where(and(
+    eq(authChallengesTable.kind, "bsky_bind_challenge"),
+    eq(authChallengesTable.claimSubject, subject),
+    lt(authChallengesTable.expiresAt, new Date()),
+  ));
+
+  const nonce = linkNonce(crypto.randomBytes(5).toString("hex"));
+  const post = composeAnnouncement({ agentName: owned.displayName || "My agent", nonce });
+  await db.insert(authChallengesTable).values({
+    kind: "bsky_bind_challenge",
+    challenge: nonce,
+    payload: post,
+    claimSubject: subject,
+    consumed: false,
+    expiresAt: new Date(Date.now() + BSKY_BIND_TTL_MS),
+  });
+
+  res.json({
+    nonce,
+    handle,
+    // Exactly what to publish. Read it first — nothing is posted for you.
+    post,
+    postLength: post.length,
+    expiresInMs: BSKY_BIND_TTL_MS,
+    next: "Publish this from that account, then POST /auth/agent/bsky/verify with the same obcBotId and handle.",
+  });
+});
+
+router.post("/auth/agent/bsky/verify", requireWalletAuth, async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obcBotId = (typeof body.obcBotId === "string" ? body.obcBotId : "").toLowerCase();
+  const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
+  const userId = req.user!.id;
+  const subject = `${userId}:${obcBotId}:${handle}`;
+
+  const [challenge] = await db
+    .select()
+    .from(authChallengesTable)
+    .where(and(
+      eq(authChallengesTable.kind, "bsky_bind_challenge"),
+      eq(authChallengesTable.claimSubject, subject),
+      eq(authChallengesTable.consumed, false),
+    ))
+    .orderBy(desc(authChallengesTable.createdAt))
+    .limit(1);
+
+  if (!challenge || challenge.expiresAt.getTime() < Date.now()) {
+    res.status(410).json({ error: "no live challenge for that bot and handle — ask for a new one" });
+    return;
+  }
+
+  let found;
+  try {
+    found = await findNoncePost(handle, challenge.challenge);
+  } catch (e) {
+    const err = e as BlueskyError;
+    // Unreachable is UNKNOWN, not unproven: leave the challenge live so a
+    // retry costs nothing, and say which of the two happened.
+    res.status(err.status ?? 502).json({ error: err.message, proved: false, retryable: true });
+    return;
+  }
+  if (!found) {
+    res.status(404).json({
+      error: "no recent post from that account contains the phrase",
+      proved: false,
+      retryable: true,
+      expected: challenge.challenge,
+    });
+    return;
+  }
+
+  // Consume first: a proof is single-use, and a replay must not re-link.
+  await db.update(authChallengesTable)
+    .set({ consumed: true })
+    .where(eq(authChallengesTable.id, challenge.id));
+
+  await db.update(userBotsTable)
+    .set({ bskyHandle: handle, bskyVerifiedAt: new Date() })
+    .where(and(eq(userBotsTable.obcBotId, obcBotId), eq(userBotsTable.userId, userId)));
+
+  res.json({
+    proved: true,
+    handle,
+    obcBotId,
+    principal: `obc:${obcBotId}`,
+    post: { uri: found.uri, postedAt: found.postedAt },
+  });
+});
