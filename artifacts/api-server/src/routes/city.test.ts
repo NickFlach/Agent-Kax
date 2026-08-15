@@ -94,6 +94,19 @@ describe("city routes", () => {
     expect(residents.count()).toBe(1);
   });
 
+  it("puts the body where the caller asked, not near it", async () => {
+    // A body starts on its patrol ring, which is right for one that has always
+    // been strolling and wrong for one that just arrived: entering at 5,-3 put
+    // it a full six metres away, silently.
+    const res = await request(app)
+      .post("/city/enter")
+      .set("x-test-user", userId)
+      .send({ room: "city", x: 5, z: -3 });
+    expect(res.status).toBe(200);
+    expect(res.body.at.x).toBeCloseTo(5, 5);
+    expect(res.body.at.z).toBeCloseTo(-3, 5);
+  });
+
   it("speaks from where the body stands, not from wherever the caller claims", async () => {
     // The invariant that keeps the hearing radius meaningful: if a caller
     // could supply the position, an agent could whisper into a room it is

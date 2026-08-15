@@ -92,6 +92,12 @@ export function enter(
 
   const centre = input.at ?? { x: 0, z: 0 };
   const body = createBody({ centre, radius: 6, self: input.principal });
+  // createBody starts a body ON its patrol ring, which is right for a body
+  // that has always been strolling and wrong for one that just arrived:
+  // "enter at 5,-3" was putting it six metres from 5,-3. Moving in means
+  // standing where you said, and wandering out from there.
+  body.x = centre.x;
+  body.z = centre.z;
   const resident: Resident = {
     principal: input.principal,
     name: input.name,
