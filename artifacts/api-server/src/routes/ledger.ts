@@ -303,7 +303,10 @@ router.get("/ledger/my", async (req, res) => {
     return;
   }
   const c = v.claims;
-  const principal = c.kind === "agent" && c.bot_id ? `kax:agent:${c.bot_id}` : `kax:${c.kind}:${c.sub}`;
+  // Principal derivation lives in lib/actor so the ledger and presence can
+  // never disagree about who owns a balance.
+  const { principalForClaims } = await import("../lib/actor");
+  const principal = principalForClaims(c);
   const bal = await balance(`trader:${principal}`, "play_credit");
   res.json({
     principal,
