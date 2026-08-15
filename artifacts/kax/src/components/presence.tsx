@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { NpcFigure } from "./npc";
@@ -27,6 +27,19 @@ export interface RemoteAgent {
   yaw: number;
 }
 
+export interface ChatLine {
+  id: number;
+  principal: string;
+  name: string;
+  text: string;
+  x: number;
+  z: number;
+  at: number;
+}
+
+/** How long a spoken line stays above the speaker's head. */
+const BUBBLE_MS = 8000;
+
 interface Smoothed extends RemoteAgent {
   /** Rendered position, eased toward the last reported one. */
   rx: number;
@@ -37,10 +50,20 @@ interface Smoothed extends RemoteAgent {
 
 const BEAT_MS = 900;
 
-/** Publishes your position and keeps the roster of everyone else. */
-export function usePresence(room: string, enabled = true): RemoteAgent[] {
+export interface PresenceState {
+  others: RemoteAgent[];
+  /** Recent speech, already filtered by the server to what you could hear. */
+  heard: ChatLine[];
+  /** Say something from where you are standing. */
+  say: (text: string) => Promise<string | null>;
+}
+
+/** Publishes your position, keeps the roster, and carries speech both ways. */
+export function usePresence(room: string, enabled = true): PresenceState {
   const { camera } = useThree();
   const [others, setOthers] = useState<RemoteAgent[]>([]);
+  const [heard, setHeard] = useState<ChatLine[]>([]);
+  const sinceId = useRef(0);
   const stopped = useRef(false);
 
   useEffect(() => {
@@ -58,6 +81,7 @@ export function usePresence(room: string, enabled = true): RemoteAgent[] {
             x: Number(camera.position.x.toFixed(2)),
             z: Number(camera.position.z.toFixed(2)),
             yaw: Number(camera.rotation.y.toFixed(3)),
+            since: sinceId.current,
           }),
         });
         if (!res.ok) {
@@ -65,8 +89,19 @@ export function usePresence(room: string, enabled = true): RemoteAgent[] {
           if (!stopped.current) setOthers([]);
           return;
         }
-        const j = (await res.json()) as { others?: RemoteAgent[] };
-        if (!stopped.current) setOthers(j.others ?? []);
+        const j = (await res.json()) as { others?: RemoteAgent[]; messages?: ChatLine[] };
+        if (stopped.current) return;
+        setOthers(j.others ?? []);
+        const fresh = j.messages ?? [];
+        if (fresh.length) {
+          sinceId.current = Math.max(sinceId.current, ...fresh.map((m) => m.id));
+          const now = Date.now();
+          setHeard((prev) => [...prev, ...fresh].filter((m) => now - m.at < BUBBLE_MS).slice(-30));
+        } else {
+          // Expire old bubbles even on a quiet tick.
+          const now = Date.now();
+          setHeard((prev) => (prev.length ? prev.filter((m) => now - m.at < BUBBLE_MS) : prev));
+        }
       } catch {
         /* a dropped beat is not worth interrupting a walk for */
       }
@@ -82,11 +117,46 @@ export function usePresence(room: string, enabled = true): RemoteAgent[] {
     };
   }, [room, enabled, camera]);
 
-  return others;
+  const say = useCallback(async (text: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/chat/say", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          room,
+          text,
+          x: Number(camera.position.x.toFixed(2)),
+          z: Number(camera.position.z.toFixed(2)),
+        }),
+      });
+      if (res.ok) return null;
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      return j.error ?? `could not speak (${res.status})`;
+    } catch {
+      return "could not reach the city";
+    }
+  }, [room, camera]);
+
+  return { others, heard, say };
 }
 
 /** Draws the roster, easing each body toward its last reported position. */
-export function RemoteAgents({ agents, y = 0 }: { agents: RemoteAgent[]; y?: number }) {
+export function RemoteAgents({
+  agents,
+  heard = [],
+  y = 0,
+}: {
+  agents: RemoteAgent[];
+  heard?: ChatLine[];
+  y?: number;
+}) {
+  // Newest line per speaker — a bubble shows the last thing said, not a stack.
+  const bubbleFor = new Map<string, ChatLine>();
+  for (const l of heard) {
+    const cur = bubbleFor.get(l.principal);
+    if (!cur || l.at > cur.at) bubbleFor.set(l.principal, l);
+  }
   const smoothed = useRef(new Map<string, Smoothed>());
 
   // Reconcile the map with the latest roster: add newcomers at their reported
@@ -129,6 +199,7 @@ export function RemoteAgents({ agents, y = 0 }: { agents: RemoteAgent[]; y?: num
           {/* Cool cast so an agent never reads as street furniture */}
           <NpcFigure color="#5f86c8" seed={hashSeed(s.principal)} idle={!s.moving} />
           <NamePlate name={s.name} />
+          {bubbleFor.has(s.principal) && <SpeechBubble text={bubbleFor.get(s.principal)!.text} />}
         </group>
       ))}
     </group>
@@ -166,6 +237,56 @@ function NamePlate({ name }: { name: string }) {
   return (
     <sprite ref={ref} position={[0, 2.15, 0]} scale={[1.5, 0.375, 1]}>
       <spriteMaterial map={texture.current} transparent depthTest={false} />
+    </sprite>
+  );
+}
+
+/** What somebody just said, floating above them. */
+function SpeechBubble({ text }: { text: string }) {
+  const ref = useRef<THREE.Sprite>(null);
+  const tex = useRef<THREE.CanvasTexture | null>(null);
+  const drawn = useRef<string>("");
+
+  if (tex.current === null || drawn.current !== text) {
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      if ((cur + " " + w).trim().length > 26) { lines.push(cur.trim()); cur = w; }
+      else cur = (cur + " " + w).trim();
+      if (lines.length >= 3) break;
+    }
+    if (cur && lines.length < 3) lines.push(cur.trim());
+
+    const W = 512;
+    const H = 48 + lines.length * 40;
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const ctx = c.getContext("2d")!;
+    ctx.fillStyle = "rgba(14,20,28,0.86)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(160,200,240,0.5)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(2, 2, W - 4, H - 4);
+    ctx.font = "500 30px 'Courier New', monospace";
+    ctx.fillStyle = "#e6f0ff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    lines.forEach((l, i) => ctx.fillText(l, W / 2, 34 + i * 40));
+
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    tex.current = t;
+    drawn.current = text;
+  }
+
+  useFrame(({ camera }) => {
+    if (ref.current) ref.current.quaternion.copy(camera.quaternion);
+  });
+
+  return (
+    <sprite ref={ref} position={[0, 3.0, 0]} scale={[2.6, 0.85, 1]}>
+      <spriteMaterial map={tex.current} transparent depthTest={false} />
     </sprite>
   );
 }

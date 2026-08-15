@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { resolveActor, ActorError } from "../lib/actor";
 import { beat, roster, roomCounts, leave, PRESENCE_TTL_MS } from "../lib/presence";
+import { say, heard, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 
 const router: IRouter = Router();
 
@@ -57,12 +58,55 @@ router.post("/presence/beat", async (req, res) => {
     yaw: finiteOr(body.yaw, 0),
   });
 
+  // Speech rides along with the beat: the client already polls, so a second
+  // channel would only add latency and another thing to get out of sync.
+  const sinceId = Number((req.body as { since?: unknown })?.since ?? 0) || 0;
+  const x = Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0)));
+  const z = Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0)));
+  const lines = heard(room, { x, z }, sinceId);
+
   res.json({
     you: { principal: actor.principal, name },
     room,
     ttlMs: PRESENCE_TTL_MS,
     others: others.map((o) => ({ principal: o.principal, name: o.name, x: o.x, z: o.z, yaw: o.yaw })),
+    messages: lines.map((l) => ({ id: l.id, principal: l.principal, name: l.name, text: l.text, x: l.x, z: l.z, at: l.at })),
   });
+});
+
+/** Say something out loud, where you are standing. */
+router.post("/chat/say", async (req, res) => {
+  const body = (req.body ?? {}) as { room?: unknown; text?: unknown; x?: unknown; z?: unknown };
+  const room = typeof body.room === "string" ? body.room : "";
+  if (!ROOM_RE.test(room)) { res.status(400).json({ error: "room required" }); return; }
+  if (typeof body.text !== "string") { res.status(400).json({ error: "text required" }); return; }
+
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) { res.status(e.status).json({ error: e.message }); return; }
+    throw e;
+  }
+  if (!actor) {
+    res.status(401).json({ error: "speech must be attributable — sign in or send an agent identity token" });
+    return;
+  }
+
+  try {
+    const line = say({
+      principal: actor.principal,
+      name: actor.agent?.displayName ?? (actor.kind === "agent" ? "agent" : "visitor"),
+      room,
+      text: body.text,
+      x: Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0))),
+      z: Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0))),
+    });
+    res.status(201).json({ id: line.id, radius: CHAT_RADIUS, maxText: MAX_TEXT });
+  } catch (e) {
+    if (e instanceof ChatRefused) { res.status(e.status).json({ error: e.message }); return; }
+    throw e;
+  }
 });
 
 router.post("/presence/leave", async (req, res) => {
