@@ -15,4 +15,6 @@ export const ArtifactArtifactType = {
   text: "text",
   audio: "audio",
   furniture: "furniture",
+  video: "video",
+  app: "app",
 } as const;

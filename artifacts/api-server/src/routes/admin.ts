@@ -1,6 +1,13 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { db, runMigrations, listMigrationFiles, listAppliedMigrations, backfillJournal, unmarkJournal } from "@workspace/db";
-import { usersTable, agentsTable, artifactsTable, dropsTable } from "@workspace/db/schema";
+import {
+  usersTable,
+  agentsTable,
+  artifactsTable,
+  dropsTable,
+  commerceOrdersTable,
+  commerceProductsTable,
+} from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { ListAdminUsersResponse, UpdateAdminUserBody, UpdateAdminUserParams } from "@workspace/api-zod";
@@ -16,6 +23,14 @@ import {
 import { fetchPublicGallery } from "../lib/publicClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
 import { publish as publishConstellation } from "../lib/constellationBridge";
+import {
+  addressToFromSnapshot,
+  getUncachablePrintifyClient,
+  printifyEnabled,
+  PrintifyError,
+  PrintifyNotConfiguredError,
+  type PrintifyClient,
+} from "../lib/printifyClient";
 
 const router: IRouter = Router();
 
@@ -495,6 +510,317 @@ router.post("/admin/seed-music-drop", requireAdmin, async (req, res) => {
   }
 
   res.json({ dropId, title, attached: tracks.length, status: "published" });
+});
+
+// ---------------------------------------------------------------------------
+// Physical-commerce fulfilment (#287)
+//
+//   POST /admin/commerce-orders/:id/submit    — create the order at Printify
+//   POST /admin/commerce-orders/:id/release   — send it to production
+//
+// Two steps and not one, because the shop's order approval is manual and that
+// is a feature rather than an obstacle: between them sits the window in which a
+// human's eyeballs are simultaneously the address-validation backstop and the
+// fraud check, which is what makes shipping v0.1 without an address-validation
+// service a decision rather than an omission.
+//
+// CHARGE FIRST, THEN SUBMIT, ALWAYS. `submit` refuses anything whose `status`
+// is not `paid`, and the asymmetry is the reason: a Stripe refund is one API
+// call, and unwinding a submitted print order is not. Printify also charges the
+// merchant's own card at submission, so submitting ahead of capture means
+// paying for manufacturing on an order that may never be paid for.
+//
+// That gate is read under the row lock, so it judges the status as it is at the
+// moment of the press rather than as it was when the operator opened the page —
+// which is what makes `refunded` and `chargeback` protective rather than
+// decorative. `webhooks.ts` writes both off `charge.refunded` and
+// `charge.dispute.*`; before it did, an order whose money had already gone back
+// still read `paid` and was still submittable, and pressing submit meant paying
+// a manufacturer to ship a parcel against a refunded charge.
+//
+// Both steps are idempotent no-ops when they have already happened, decided
+// under `SELECT … FOR UPDATE` on the order row. `printify_order_id IS NOT NULL`
+// is the double-submit guard and `released_at IS NOT NULL` the double-release
+// guard; the lock is what makes two operators pressing the same button at the
+// same moment produce one parcel instead of two. The provider call happens
+// inside that lock deliberately — a second press waits for the first one's
+// answer rather than racing it — and `external_id` carries the order's
+// `client_reference` so that even a submission whose response was lost can be
+// found by name in Printify rather than guessed at.
+//
+// Nothing here returns or logs a `ship_to_*` column. The address leaves this
+// server exactly once, addressed to the printer, built by
+// `addressToFromSnapshot` from the order's own snapshot and never from a live
+// `users` or `user_shipping_addresses` join — an address edit after the fact
+// must not be able to rewrite where an already-shipped parcel went.
+// ---------------------------------------------------------------------------
+
+/**
+ * 404 with the flag off, exactly as if these routes were never mounted — the
+ * inert-until-configured idiom the whole commerce surface uses.
+ *
+ * It runs BEFORE `requireAdmin` on purpose. A 401 from an unconfigured
+ * deployment would still be an answer about a route that is supposed not to
+ * exist yet, and "not mounted" is what this is meant to look like from outside.
+ */
+function requirePrintifyEnabled(_req: Request, res: Response, next: NextFunction): void {
+  if (!printifyEnabled()) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  next();
+}
+
+/**
+ * The adapter for this request, or the reason there isn't one.
+ *
+ * 503 when the flag is on but the token or the shop id is missing: that is a
+ * fact about the deployment rather than about the order, and it must never be
+ * resolved by looking up "the first shop the account has".
+ */
+function printifyForRequest(res: Response): PrintifyClient | null {
+  try {
+    return getUncachablePrintifyClient();
+  } catch (err) {
+    if (err instanceof PrintifyNotConfiguredError) {
+      res.status(503).json({ error: err.message, reason: "printify_not_configured" });
+      return null;
+    }
+    throw err;
+  }
+}
+
+function parseCommerceOrderId(raw: unknown, res: Response): number | null {
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid commerce order id" });
+    return null;
+  }
+  return id;
+}
+
+/**
+ * Report a provider refusal, or say that this was not one.
+ *
+ * 502: the request was well-formed and our side is intact; the manufacturer
+ * said no. Only the status and Printify's numeric code cross the boundary —
+ * `printifyClient.ts` has already dropped the field-level detail, which on a
+ * rejected address is the buyer's street.
+ */
+function reportPrintifyFailure(res: Response, err: unknown): boolean {
+  if (!(err instanceof PrintifyError)) return false;
+  res.status(502).json({
+    error: err.message,
+    reason: "printify_refused",
+    printifyStatus: err.status,
+    printifyCode: err.code,
+  });
+  return true;
+}
+
+router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, requireAdmin, async (req, res) => {
+  const printify = printifyForRequest(res);
+  if (!printify) return;
+  const id = parseCommerceOrderId(req.params["id"], res);
+  if (id === null) return;
+
+  try {
+    const outcome = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(commerceOrdersTable)
+        .where(eq(commerceOrdersTable.id, id))
+        .limit(1)
+        .for("update");
+      if (!order) return { kind: "not_found" } as const;
+
+      // Already submitted: hand back the id we already have and call nothing.
+      // This is the branch that makes a double-click, a retried deploy script
+      // and a second operator all cost one print run.
+      if (order.printifyOrderId) {
+        return { kind: "already_submitted", order, printifyOrderId: order.printifyOrderId } as const;
+      }
+
+      if (order.status !== "paid") {
+        return { kind: "not_paid", order } as const;
+      }
+
+      // The product is looked up by the SKU the order recorded, because the
+      // order snapshots what was sold rather than pointing at a row that can be
+      // repriced or re-wired afterwards. Only the print identifiers come from
+      // here; no money does.
+      const [product] = await tx
+        .select({
+          printifyProductId: commerceProductsTable.printifyProductId,
+          printifyVariantId: commerceProductsTable.printifyVariantId,
+        })
+        .from(commerceProductsTable)
+        .where(eq(commerceProductsTable.sku, order.sku))
+        .limit(1);
+
+      // `printify_variant_id` is varchar so that an opaque foreign key never
+      // gets arithmetic done to it; Printify wants the number, so the
+      // conversion happens here at the boundary and a value that is not one is
+      // a product nobody can print rather than a `NaN` posted to a printer.
+      const variantId = Number(product?.printifyVariantId);
+      if (!product?.printifyProductId || !Number.isInteger(variantId) || variantId <= 0) {
+        return { kind: "not_printable", order } as const;
+      }
+
+      const submitted = await printify.submitOrder({
+        externalId: order.clientReference,
+        label: order.clientReference,
+        lineItems: [
+          { product_id: product.printifyProductId, variant_id: variantId, quantity: 1 },
+        ],
+        addressTo: addressToFromSnapshot(order),
+      });
+
+      const now = new Date();
+      await tx
+        .update(commerceOrdersTable)
+        .set({
+          printifyOrderId: submitted.id,
+          fulfillmentState: "submitted",
+          submittedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(commerceOrdersTable.id, order.id));
+
+      return { kind: "submitted", order, printifyOrderId: submitted.id, submittedAt: now } as const;
+    });
+
+    switch (outcome.kind) {
+      case "not_found":
+        res.status(404).json({ error: "No such commerce order", reason: "order_not_found" });
+        return;
+      case "not_paid":
+        res.status(409).json({
+          error: "That order has not been paid for",
+          reason: "not_paid",
+          orderStatus: outcome.order.status,
+        });
+        return;
+      case "not_printable":
+        res.status(409).json({
+          error: "That product has no Printify product and variant on file",
+          reason: "product_not_printable",
+          sku: outcome.order.sku,
+        });
+        return;
+      case "already_submitted":
+        res.json({
+          orderId: outcome.order.id,
+          orderRef: outcome.order.clientReference,
+          shopId: printify.shopId,
+          printifyOrderId: outcome.printifyOrderId,
+          fulfillmentState: outcome.order.fulfillmentState,
+          submittedAt: outcome.order.submittedAt,
+          alreadySubmitted: true,
+        });
+        return;
+      case "submitted":
+        res.json({
+          orderId: outcome.order.id,
+          orderRef: outcome.order.clientReference,
+          shopId: printify.shopId,
+          printifyOrderId: outcome.printifyOrderId,
+          fulfillmentState: "submitted",
+          submittedAt: outcome.submittedAt,
+          alreadySubmitted: false,
+        });
+        return;
+    }
+  } catch (err) {
+    // A provider refusal rolls the transaction back, so an order Printify
+    // rejected keeps its `unfulfilled` state and its null id and can simply be
+    // submitted again once the reason is fixed.
+    if (reportPrintifyFailure(res, err)) return;
+    throw err;
+  }
+});
+
+router.post("/admin/commerce-orders/:id/release", requirePrintifyEnabled, requireAdmin, async (req, res) => {
+  const printify = printifyForRequest(res);
+  if (!printify) return;
+  const id = parseCommerceOrderId(req.params["id"], res);
+  if (id === null) return;
+  const actor = req.user!.id;
+
+  try {
+    const outcome = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(commerceOrdersTable)
+        .where(eq(commerceOrdersTable.id, id))
+        .limit(1)
+        .for("update");
+      if (!order) return { kind: "not_found" } as const;
+
+      if (order.releasedAt) {
+        return { kind: "already_released", order } as const;
+      }
+      if (!order.printifyOrderId) {
+        // Release is the second half of a two-step, and the first half has not
+        // happened. Nothing to send to production, and inventing a submission
+        // here would be the single-step flow this endpoint exists to avoid.
+        return { kind: "not_submitted", order } as const;
+      }
+
+      const released = await printify.sendToProduction(order.printifyOrderId);
+
+      const now = new Date();
+      await tx
+        .update(commerceOrdersTable)
+        .set({
+          fulfillmentState: "in_production",
+          releasedAt: now,
+          releaseActor: actor,
+          updatedAt: now,
+        })
+        .where(eq(commerceOrdersTable.id, order.id));
+
+      return { kind: "released", order, releasedAt: now, providerStatus: released.status } as const;
+    });
+
+    switch (outcome.kind) {
+      case "not_found":
+        res.status(404).json({ error: "No such commerce order", reason: "order_not_found" });
+        return;
+      case "not_submitted":
+        res.status(409).json({
+          error: "That order has not been submitted to Printify yet",
+          reason: "not_submitted",
+        });
+        return;
+      case "already_released":
+        res.json({
+          orderId: outcome.order.id,
+          orderRef: outcome.order.clientReference,
+          printifyOrderId: outcome.order.printifyOrderId,
+          fulfillmentState: outcome.order.fulfillmentState,
+          releasedAt: outcome.order.releasedAt,
+          releaseActor: outcome.order.releaseActor,
+          alreadyReleased: true,
+        });
+        return;
+      case "released":
+        res.json({
+          orderId: outcome.order.id,
+          orderRef: outcome.order.clientReference,
+          printifyOrderId: outcome.order.printifyOrderId,
+          fulfillmentState: "in_production",
+          releasedAt: outcome.releasedAt,
+          releaseActor: actor,
+          providerStatus: outcome.providerStatus,
+          alreadyReleased: false,
+        });
+        return;
+    }
+  } catch (err) {
+    if (reportPrintifyFailure(res, err)) return;
+    throw err;
+  }
 });
 
 export default router;

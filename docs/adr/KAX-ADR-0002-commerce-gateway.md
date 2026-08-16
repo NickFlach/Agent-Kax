@@ -709,6 +709,49 @@ city is thrown out to a Stripe-hosted page and back. That is accepted for v0.1 b
 alternative — Stripe Embedded Checkout — is more integration surface on the critical path of
 a one-transaction proof. Embedded Checkout is a v0.2 polish item and is listed as such.
 
+### Superseded for the physical path (#286)
+
+The in-city checkout design pass replaces hosted Checkout **for physical goods only**. The
+buyer saves a card once through a SetupIntent in settings, and the purchase itself is a
+server-side confirming PaymentIntent — `confirm: true, use_stripe_sdk: true` — so no
+navigation occurs and an SCA challenge is completed inline. `off_session: true` and
+`error_on_requires_action` are forbidden on this path: the buyer is present, and either one
+converts a recoverable challenge into a decline they cannot clear. Hosted Checkout remains
+the digital-listing path in `routes/store-checkout.ts`, unchanged; the two are sibling
+routes against sibling tables and are never merged.
+
+**Fulfilment is a manual admin action, not a webhook side effect (#287).** Critical-path step
+6 and the sentence "Printify submission hangs off the paid webhook" under "Settlement is
+webhook-driven" are superseded with it. `POST /api/admin/commerce-orders/:id/submit` creates
+the order at Printify and `POST /api/admin/commerce-orders/:id/release` sends it to
+production; both are idempotent no-ops under `SELECT … FOR UPDATE`, and `submit` refuses
+anything whose `status` is not `paid` at the moment of that locked read. Two steps and not
+one, because the window between them is where a human's eyeballs are simultaneously the
+address-validation backstop and the fraud check — which is what makes shipping v0.1 without
+an address-validation service a decision rather than an omission. The webhook keeps settling
+`commerce_orders.status`, `refunded` and `chargeback` included, so an order whose money has
+gone back stops being submittable.
+
+**The purchase endpoints are deliberately off the OpenAPI contract, and the settings
+endpoints are deliberately on it.** This is a recorded split rather than an accident of
+which file was edited first.
+
+`POST /api/me/purchasing/*` (#284) are ordinary request/response settings writes that return
+the same derived object `GET /me` returns. They belong on `lib/api-spec/openapi.yaml`, they
+get orval-generated hooks, and the generated client is a net win.
+
+`POST /api/commerce/quote`, `POST /api/commerce/purchase` and `GET /api/commerce/orders/:ref`
+(#286) are not. They are one hand-rolled protocol: a five-minute signed quote, a
+`clientReference` the client mints **before** it calls and reuses across every retry, a
+retry that must return a prior charge's state rather than making a new one, and a poll target
+for the case where the client never learned whether its own request succeeded. orval's
+generated mutation hooks model a call as a fresh attempt each time; every property above is
+about a call that is *not* fresh. Generating them would produce a client that has to be
+fought at each step, and a contract that describes the shape of the request while saying
+nothing about the only part that matters. So this trio stays off the contract until the
+protocol stops being hand-rolled — and if it is ever put on, the `clientReference` semantics
+go in the description, not just the schema.
+
 Environment names. The first three are **shipped and read by `lib/stripeClient.ts`**; the
 Printify pair is still to be introduced. Use exactly these:
 
@@ -719,6 +762,8 @@ Printify pair is still to be introduced. Use exactly these:
 | `KAX_COMMERCE_ENABLED` | feature flag, **default off** | **shipped** — `stripeClient.ts:10-13`, accepts `"1"` or `"true"` | required to write |
 | `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | **credential exists and is verified** against the live API (subject 28170669, expires 2027-08-16, scopes sufficient); the code that reads it is to build | required |
 | `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | **value known and verified: `28604869`** ("KAX", `sales_channel: "custom_integration"`, created 2026-08-16, order approval set to manual). The code that reads it is to build. **Never hard-code the Shopify shop 28599902, and never default to the first shop listed** | required |
+| `KAX_COMMERCE_QUOTE_SECRET` | HMAC key for the five-minute quote token (#286) | shipped — `routes/commerce.ts` | **required on more than one instance.** Unset, each process signs with a per-process random key: roughly half of all Buy presses then land on an instance that did not mint the quote, `readQuote` returns null, and a legitimate purchase dies at `quote_invalid`. The fallback logs one warning naming this variable; provision it rather than discovering it |
+| `KAX_COMMERCE_DAILY_ORDER_CAP` | purchases per rolling 24 h before `cap_reached` (#286) | shipped — `lib/purchasingState.ts` | optional, defaults to 5. Anything that is not a positive integer falls back to the default rather than disabling the cap — a typo in a limit must not become "no limit" |
 
 **Credential resolution is the shipped one and is not re-specified here.** The precedence —
 an explicit `STRIPE_SECRET_KEY` short-circuits the connector entirely, so the webhook secret
@@ -777,6 +822,16 @@ a buyer who closes the tab after paying must still get a fulfilled order, so no 
 transition may depend on the browser coming back. The corollary for fulfilment is in the
 critical path below — **Printify submission hangs off the paid webhook, never off the success
 page.**
+
+> **Superseded for the physical path (#286, #287).** The sentence immediately above is the
+> digital rule and no longer describes physical fulfilment. Printify submission is a **manual
+> admin action** — `POST /api/admin/commerce-orders/:id/submit`, gated on `status = 'paid'`
+> read under `SELECT … FOR UPDATE` — and not a webhook side effect. The manual window IS the
+> fraud and address-validation backstop, which is what makes shipping v0.1 without an
+> address-validation service a decision rather than an omission. See "Superseded for the
+> physical path (#286)" above. The webhook still settles `commerce_orders.status` — including
+> `refunded` and `chargeback` off `charge.refunded` / `charge.dispute.*`, which is what stops
+> an order whose money has gone back from staying submittable — it just submits nothing.
 
 One thing the shipped webhook does *not* do, and physical commerce must: its settlement block
 is wrapped in a `try/catch` that logs and swallows (`webhooks.ts:165-167`), then returns 200.
@@ -1878,13 +1933,25 @@ it and should be done first for that reason as well as for the safety one.
    `native_pass`. The recommendation and its runner-up, with ids, are under "The v0.1 product
    spec"; the final pick is the operator's.
 4. Merchant approval row carrying an **approver id** and the **`approved_content_hash`**.
-5. `commerce_orders` row written **first**, then the Stripe **hosted Checkout Session**
-   created under an idempotency key derived from that row (see Stage 3, reuse item 2). This
-   reuses `getUncachableStripeClient()` and the shipped session-creation call; what is new is
-   the row-first ordering and the leg-set columns, not the Stripe integration.
-6. Printify **order submit** on the `checkout.session.completed` / paid webhook — extending the
-   shipped handler at `webhooks.ts:156-163`, and returning non-2xx on failure so Stripe
-   redelivers rather than swallowing the error as the digital path does.
+5. ~~`commerce_orders` row written **first**, then the Stripe **hosted Checkout Session**
+   created under an idempotency key derived from that row (see Stage 3, reuse item 2).~~
+   **SUPERSEDED for the physical path (#286)** — see "Superseded for the physical path
+   (#286)". The row-first ordering stands and is load-bearing; what replaces hosted Checkout
+   is a server-side **confirming PaymentIntent** against a card saved earlier through a
+   SetupIntent (`confirm: true, use_stripe_sdk: true`, never `off_session`), so the buyer
+   never leaves the tab. The idempotency key is derived from the row's `client_reference` — a
+   UUID — rather than from its `serial` id, which is unique per database and not per Stripe
+   account.
+6. ~~Printify **order submit** on the `checkout.session.completed` / paid webhook — extending
+   the shipped handler at `webhooks.ts:156-163`.~~ **SUPERSEDED for the physical path
+   (#287)** — see "Superseded for the physical path (#286)". Submission is a **manual
+   two-step admin action**, `submit` then `release`, each idempotent under
+   `SELECT … FOR UPDATE` and `submit` gated on `status = 'paid'`. The manual window between
+   them is the fraud and address-validation backstop and is the whole rationale; making it a
+   webhook side effect removes it. The webhook keeps settling `commerce_orders.status` —
+   `paid` / `payment_failed` off `payment_intent.*`, `refunded` / `chargeback` off
+   `charge.refunded` and `charge.dispute.*` — and still returns non-2xx on a failed write so
+   Stripe redelivers, rather than swallowing the error as the digital path does.
 7. Tracking webhook **writes back** to the order row.
 
 ### Deliberately cut from v0.1, with the reason for each

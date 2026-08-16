@@ -67,7 +67,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthUserEnvelope'
+                $ref: '#/components/schemas/CurrentUserEnvelope'
   /auth/wallet/nonce:
     post:
       tags: [Auth]
@@ -405,7 +405,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthUserEnvelope'
+                $ref: '#/components/schemas/CurrentUserEnvelope'
   /me/notification-prefs:
     patch:
       tags: [Auth]
@@ -2290,6 +2290,89 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AuthUser'
             - type: 'null'
+    PurchasingStateCode:
+      type: string
+      description: |
+        Whether an account may buy a physical good, and if not, why not.
+        Derived on every read from the rows on file plus the clock — never
+        stored, because a stored flag is wrong the moment a card expires.
+        Listed in rank order: when several apply, the first is reported as
+        `state` and all of them appear in `reasons`.
+      enum:
+        - disabled
+        - anonymous
+        - not_configured
+        - unsupported_destination
+        - needs_address
+        - needs_payment_method
+        - pm_detached
+        - card_expired
+        - consent_stale
+        - cap_reached
+        - card_expiring
+        - ready
+    PurchasingCard:
+      type: object
+      description: Display metadata for the saved card. Outside PCI scope; there is nothing else about a card this API knows.
+      required: [brand, last4, expMonth, expYear]
+      properties:
+        brand:
+          type: [string, 'null']
+        last4:
+          type: [string, 'null']
+        expMonth:
+          type: [integer, 'null']
+        expYear:
+          type: [integer, 'null']
+    PurchasingShipsTo:
+      type: object
+      description: |
+        Country and postal code of the live shipping address, and nothing else.
+        The recipient name, street lines and city are never returned.
+      required: [country, postalCode]
+      properties:
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2
+        postalCode:
+          type: string
+    PurchasingSnapshot:
+      type: object
+      required: [state, reasons, card, shipsTo, consentVersion]
+      properties:
+        state:
+          $ref: '#/components/schemas/PurchasingStateCode'
+        reasons:
+          type: array
+          description: Everything true about the account, most blocking first. Empty when ready.
+          items:
+            $ref: '#/components/schemas/PurchasingStateCode'
+        card:
+          oneOf:
+            - $ref: '#/components/schemas/PurchasingCard'
+            - type: 'null'
+        shipsTo:
+          oneOf:
+            - $ref: '#/components/schemas/PurchasingShipsTo'
+            - type: 'null'
+        consentVersion:
+          type: [string, 'null']
+          description: Stored-card terms version this account accepted, or null.
+    CurrentUserEnvelope:
+      type: object
+      description: |
+        The current-session read. Separate from AuthUserEnvelope because the
+        sign-in responses share that one and do not compute purchasing state;
+        making `purchasing` optional there would reintroduce exactly the
+        silently-stripped-field trap this field was added under.
+      required: [user, purchasing]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+        purchasing:
+          $ref: '#/components/schemas/PurchasingSnapshot'
     LogoutSuccess:
       type: object
       required: [success]

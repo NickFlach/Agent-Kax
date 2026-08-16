@@ -15,4 +15,6 @@ export const ListArtifactsArtifactType = {
   music: "music",
   text: "text",
   furniture: "furniture",
+  video: "video",
+  app: "app",
 } as const;

@@ -93,6 +93,15 @@ jobs:
       - name: Apply database migrations
         run: pnpm --filter @workspace/db run migrate
 
+      # #282 asks for idempotency PROVEN, not asserted. A second plain `migrate`
+      # would prove nothing: the runner skips anything already journaled, so it
+      # would report "up to date" without executing a statement of the file
+      # under test. This unmarks 0026 and re-executes it for real, then checks
+      # that the ON CONFLICT DO NOTHING seed and every existing commerce_orders
+      # row survived — the two things the IF NOT EXISTS guards are there for.
+      - name: Prove the physical-commerce migration re-runs cleanly
+        run: pnpm --filter @workspace/db run migrate:prove-idempotent
+
       # No KAX_SCHEMA_FROM_PUSH: the schema now comes from the migrations, so
       # the trigger-dependent suites (ledger) run too.
       - name: Test

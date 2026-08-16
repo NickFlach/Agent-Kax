@@ -292,6 +292,209 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS listing_orders_listing_idx
                   ON listing_orders (listing_id)`),
   },
+  {
+    /**
+     * The physical-commerce schema (migration 0026), registered here on the day
+     * it was written rather than after the first deploy eats it.
+     *
+     * The precedent is no longer in doubt: residence_units went, city_residents
+     * went, and both were brand-new tables the built schema view did not know
+     * about. What these tables hold makes waiting for the evidence a third time
+     * unacceptable in a way the furniture was not — commerce_orders records a
+     * real card charge against a real person's address, and the ship_to_*
+     * snapshot on it is the only place that address survives once the buyer
+     * edits theirs. Losing the table loses the evidence for a dispute along
+     * with the order.
+     *
+     * The users column goes FIRST, and separately, for the reason the
+     * store_listings block above is first: the loop stops at the first
+     * statement that raises, and a repair that needs nothing but the table it
+     * alters should not be stranded behind a CREATE that depends on artifacts
+     * still existing.
+     */
+    label: "users stripe customer column",
+    sql: sql.raw(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id text`),
+  },
+  {
+    label: "users stripe customer unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS users_stripe_customer_id_unique
+                  ON users (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL`),
+  },
+  {
+    /**
+     * The shape below is copied from 0026 verbatim, foreign keys and defaults
+     * included, so a rebuilt table is the same table and not a lookalike that
+     * accepts rows the real one would have refused.
+     */
+    label: "user_shipping_addresses table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS user_shipping_addresses (
+        id                 varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id            varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name               varchar NOT NULL,
+        line1              varchar NOT NULL,
+        line2              varchar,
+        city               varchar NOT NULL,
+        region             varchar NOT NULL,
+        postal_code        varchar NOT NULL,
+        country            varchar NOT NULL,
+        phone              varchar,
+        validated_at       timestamptz,
+        validation_method  varchar,
+        archived_at        timestamptz,
+        created_at         timestamptz NOT NULL DEFAULT now(),
+        updated_at         timestamptz NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "user_shipping_addresses user index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS user_shipping_addresses_user_idx
+                  ON user_shipping_addresses (user_id)`),
+  },
+  {
+    // Partial, and that is the whole constraint: one LIVE address per user,
+    // with the archived history unconstrained. A plain unique index would make
+    // moving house require destroying the address a past order shipped to.
+    label: "user_shipping_addresses live unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS user_shipping_addresses_live_unique
+                  ON user_shipping_addresses (user_id) WHERE archived_at IS NULL`),
+  },
+  {
+    label: "user_payment_methods table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS user_payment_methods (
+        id                        varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id                   varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        stripe_payment_method_id  varchar NOT NULL UNIQUE,
+        brand                     varchar,
+        last4                     varchar,
+        exp_month                 integer,
+        exp_year                  integer,
+        is_default                boolean NOT NULL DEFAULT false,
+        detached_at               timestamptz,
+        created_at                timestamptz NOT NULL DEFAULT now(),
+        updated_at                timestamptz NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "user_payment_methods user index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS user_payment_methods_user_idx
+                  ON user_payment_methods (user_id)`),
+  },
+  {
+    label: "user_purchasing_consents table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS user_purchasing_consents (
+        id             varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id        varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        terms_version  varchar NOT NULL,
+        terms_sha256   varchar NOT NULL,
+        accepted_at    timestamptz NOT NULL DEFAULT now(),
+        ip             varchar,
+        user_agent     text
+      )`),
+  },
+  {
+    label: "user_purchasing_consents user index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS user_purchasing_consents_user_idx
+                  ON user_purchasing_consents (user_id, accepted_at)`),
+  },
+  {
+    label: "commerce_products table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS commerce_products (
+        id                   serial PRIMARY KEY,
+        sku                  varchar NOT NULL UNIQUE,
+        title                varchar NOT NULL,
+        artifact_id          integer REFERENCES artifacts(id) ON DELETE SET NULL,
+        printify_product_id  varchar,
+        printify_variant_id  varchar,
+        item_cents           integer NOT NULL,
+        shipping_cents       integer NOT NULL DEFAULT 0,
+        currency             varchar NOT NULL DEFAULT 'usd',
+        published            boolean NOT NULL DEFAULT false,
+        ship_to_countries    text[]  NOT NULL DEFAULT '{US}',
+        created_at           timestamptz NOT NULL DEFAULT now(),
+        updated_at           timestamptz NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "commerce_products published index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_products_published_idx
+                  ON commerce_products (published)`),
+  },
+  {
+    /**
+     * No foreign key to store_listings or listing_orders, and none to
+     * user_shipping_addresses either — the ship_to_* columns are a snapshot,
+     * not a reference, and that is what stops a later address edit from
+     * rewriting where an already-shipped order went.
+     */
+    label: "commerce_orders table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS commerce_orders (
+        id                        serial PRIMARY KEY,
+        client_reference          varchar NOT NULL UNIQUE,
+        buyer_user_id             varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        sku                       varchar NOT NULL,
+        currency                  varchar NOT NULL DEFAULT 'usd',
+        item_cents                integer NOT NULL,
+        shipping_cents            integer NOT NULL DEFAULT 0,
+        tax_cents                 integer NOT NULL DEFAULT 0,
+        total_cents               integer NOT NULL,
+        ship_to_name              varchar NOT NULL,
+        ship_to_line1             varchar NOT NULL,
+        ship_to_line2             varchar,
+        ship_to_city              varchar NOT NULL,
+        ship_to_region            varchar NOT NULL,
+        ship_to_postal_code       varchar NOT NULL,
+        ship_to_country           varchar NOT NULL,
+        ship_to_phone             varchar,
+        stripe_payment_intent_id  varchar,
+        status                    varchar NOT NULL DEFAULT 'pending_payment',
+        fulfillment_state         varchar NOT NULL DEFAULT 'unfulfilled',
+        printify_order_id         varchar,
+        submitted_at              timestamptz,
+        released_at               timestamptz,
+        release_actor             varchar,
+        created_at                timestamptz NOT NULL DEFAULT now(),
+        updated_at                timestamptz NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "commerce_orders buyer index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_buyer_idx
+                  ON commerce_orders (buyer_user_id)`),
+  },
+  {
+    label: "commerce_orders payment intent index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
+                  ON commerce_orders (stripe_payment_intent_id)`),
+  },
+  {
+    label: "commerce_orders status index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_status_idx
+                  ON commerce_orders (status, created_at)`),
+  },
+  {
+    /**
+     * The v0.1 product, seeded here as well as in 0026 so the two paths agree:
+     * a rebuilt commerce_products must not come back empty, or the quote path
+     * has nothing to read and the shop is simply shut with no error to say why.
+     *
+     * DO NOTHING on the sku, so a rebuild never overwrites an operator's price,
+     * artifact or published state — and in particular never re-publishes a
+     * product somebody deliberately took down.
+     */
+    label: "commerce_products sticker seed",
+    sql: sql.raw(`
+      INSERT INTO commerce_products
+        (sku, title, item_cents, shipping_cents, published, printify_product_id, ship_to_countries)
+      VALUES
+        ('kax-sticker-3.5in', 'KAX Sticker · 3.5in vinyl', 1564, 509, false,
+         '6a81f8c84b2b4c5db504b97f', '{US}')
+      ON CONFLICT (sku) DO NOTHING`),
+  },
 ];
 
 export interface EnsureResult {

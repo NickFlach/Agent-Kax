@@ -15,5 +15,7 @@ export const HarvesterRunBodyType = {
   text: "text",
   music: "music",
   furniture: "furniture",
+  video: "video",
+  app: "app",
   all: "all",
 } as const;

@@ -46,6 +46,7 @@ import type {
   ConstellationStatusResponse,
   CreateAgentBody,
   CreateDropBody,
+  CurrentUserEnvelope,
   DashboardSummary,
   DetachUserBotResponse,
   Dm,
@@ -216,8 +217,8 @@ export const getGetCurrentAuthUserUrl = () => {
 
 export const getCurrentAuthUser = async (
   options?: RequestInit,
-): Promise<AuthUserEnvelope> => {
-  return customFetch<AuthUserEnvelope>(getGetCurrentAuthUserUrl(), {
+): Promise<CurrentUserEnvelope> => {
+  return customFetch<CurrentUserEnvelope>(getGetCurrentAuthUserUrl(), {
     ...options,
     method: "GET",
   });
@@ -1432,8 +1433,8 @@ export const getGetMeUrl = () => {
 
 export const getMe = async (
   options?: RequestInit,
-): Promise<AuthUserEnvelope> => {
-  return customFetch<AuthUserEnvelope>(getGetMeUrl(), {
+): Promise<CurrentUserEnvelope> => {
+  return customFetch<CurrentUserEnvelope>(getGetMeUrl(), {
     ...options,
     method: "GET",
   });

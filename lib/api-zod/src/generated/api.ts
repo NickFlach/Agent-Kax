@@ -25,42 +25,118 @@ export const GetCurrentAuthUserHeader = zod.object({
     .describe("Opaque session token — `Bearer <sid>`."),
 });
 
-export const GetCurrentAuthUserResponse = zod.object({
-  user: zod.union([
-    zod.object({
-      id: zod.string(),
-      email: zod.string().email().nullable(),
-      firstName: zod.string().nullable(),
-      lastName: zod.string().nullable(),
-      profileImageUrl: zod.string().nullable(),
-      displayName: zod.string().nullish(),
-      role: zod.enum(["user", "admin"]).optional(),
-      notificationPrefs: zod
-        .object({
-          emailOnProposal: zod.boolean(),
-          emailOnDm: zod.boolean(),
-        })
-        .optional(),
-      walletAddress: zod
-        .string()
-        .nullish()
-        .describe("Lowercased EVM address if user signed in via wallet"),
-      provider: zod
-        .string()
-        .nullish()
+export const GetCurrentAuthUserResponse = zod
+  .object({
+    user: zod.union([
+      zod.object({
+        id: zod.string(),
+        email: zod.string().email().nullable(),
+        firstName: zod.string().nullable(),
+        lastName: zod.string().nullable(),
+        profileImageUrl: zod.string().nullable(),
+        displayName: zod.string().nullish(),
+        role: zod.enum(["user", "admin"]).optional(),
+        notificationPrefs: zod
+          .object({
+            emailOnProposal: zod.boolean(),
+            emailOnDm: zod.boolean(),
+          })
+          .optional(),
+        walletAddress: zod
+          .string()
+          .nullish()
+          .describe("Lowercased EVM address if user signed in via wallet"),
+        provider: zod
+          .string()
+          .nullish()
+          .describe(
+            "Auth provider for the active session (wallet, obc_agent, email)",
+          ),
+        hasPassword: zod
+          .boolean()
+          .optional()
+          .describe(
+            "True if the account has an email password set (email door usable)",
+          ),
+      }),
+      zod.null(),
+    ]),
+    purchasing: zod.object({
+      state: zod
+        .enum([
+          "disabled",
+          "anonymous",
+          "not_configured",
+          "unsupported_destination",
+          "needs_address",
+          "needs_payment_method",
+          "pm_detached",
+          "card_expired",
+          "consent_stale",
+          "cap_reached",
+          "card_expiring",
+          "ready",
+        ])
         .describe(
-          "Auth provider for the active session (wallet, obc_agent, email)",
+          "Whether an account may buy a physical good, and if not, why not.\nDerived on every read from the rows on file plus the clock — never\nstored, because a stored flag is wrong the moment a card expires.\nListed in rank order: when several apply, the first is reported as\n`state` and all of them appear in `reasons`.\n",
         ),
-      hasPassword: zod
-        .boolean()
-        .optional()
+      reasons: zod
+        .array(
+          zod
+            .enum([
+              "disabled",
+              "anonymous",
+              "not_configured",
+              "unsupported_destination",
+              "needs_address",
+              "needs_payment_method",
+              "pm_detached",
+              "card_expired",
+              "consent_stale",
+              "cap_reached",
+              "card_expiring",
+              "ready",
+            ])
+            .describe(
+              "Whether an account may buy a physical good, and if not, why not.\nDerived on every read from the rows on file plus the clock — never\nstored, because a stored flag is wrong the moment a card expires.\nListed in rank order: when several apply, the first is reported as\n`state` and all of them appear in `reasons`.\n",
+            ),
+        )
         .describe(
-          "True if the account has an email password set (email door usable)",
+          "Everything true about the account, most blocking first. Empty when ready.",
         ),
+      card: zod.union([
+        zod
+          .object({
+            brand: zod.string().nullable(),
+            last4: zod.string().nullable(),
+            expMonth: zod.number().nullable(),
+            expYear: zod.number().nullable(),
+          })
+          .describe(
+            "Display metadata for the saved card. Outside PCI scope; there is nothing else about a card this API knows.",
+          ),
+        zod.null(),
+      ]),
+      shipsTo: zod.union([
+        zod
+          .object({
+            country: zod.string().describe("ISO 3166-1 alpha-2"),
+            postalCode: zod.string(),
+          })
+          .describe(
+            "Country and postal code of the live shipping address, and nothing else.\nThe recipient name, street lines and city are never returned.\n",
+          ),
+        zod.null(),
+      ]),
+      consentVersion: zod
+        .string()
+        .nullable()
+        .describe("Stored-card terms version this account accepted, or null."),
     }),
-    zod.null(),
-  ]),
-});
+  })
+  .describe(
+    "The current-session read. Separate from AuthUserEnvelope because the\nsign-in responses share that one and do not compute purchasing state;\nmaking `purchasing` optional there would reintroduce exactly the\nsilently-stripped-field trap this field was added under.\n",
+  );
 
 /**
  * @summary Mint a single-use SIWE-style nonce for wallet sign-in
@@ -449,42 +525,118 @@ export const GetMeHeader = zod.object({
     .describe("Opaque session token — `Bearer <sid>`."),
 });
 
-export const GetMeResponse = zod.object({
-  user: zod.union([
-    zod.object({
-      id: zod.string(),
-      email: zod.string().email().nullable(),
-      firstName: zod.string().nullable(),
-      lastName: zod.string().nullable(),
-      profileImageUrl: zod.string().nullable(),
-      displayName: zod.string().nullish(),
-      role: zod.enum(["user", "admin"]).optional(),
-      notificationPrefs: zod
-        .object({
-          emailOnProposal: zod.boolean(),
-          emailOnDm: zod.boolean(),
-        })
-        .optional(),
-      walletAddress: zod
-        .string()
-        .nullish()
-        .describe("Lowercased EVM address if user signed in via wallet"),
-      provider: zod
-        .string()
-        .nullish()
+export const GetMeResponse = zod
+  .object({
+    user: zod.union([
+      zod.object({
+        id: zod.string(),
+        email: zod.string().email().nullable(),
+        firstName: zod.string().nullable(),
+        lastName: zod.string().nullable(),
+        profileImageUrl: zod.string().nullable(),
+        displayName: zod.string().nullish(),
+        role: zod.enum(["user", "admin"]).optional(),
+        notificationPrefs: zod
+          .object({
+            emailOnProposal: zod.boolean(),
+            emailOnDm: zod.boolean(),
+          })
+          .optional(),
+        walletAddress: zod
+          .string()
+          .nullish()
+          .describe("Lowercased EVM address if user signed in via wallet"),
+        provider: zod
+          .string()
+          .nullish()
+          .describe(
+            "Auth provider for the active session (wallet, obc_agent, email)",
+          ),
+        hasPassword: zod
+          .boolean()
+          .optional()
+          .describe(
+            "True if the account has an email password set (email door usable)",
+          ),
+      }),
+      zod.null(),
+    ]),
+    purchasing: zod.object({
+      state: zod
+        .enum([
+          "disabled",
+          "anonymous",
+          "not_configured",
+          "unsupported_destination",
+          "needs_address",
+          "needs_payment_method",
+          "pm_detached",
+          "card_expired",
+          "consent_stale",
+          "cap_reached",
+          "card_expiring",
+          "ready",
+        ])
         .describe(
-          "Auth provider for the active session (wallet, obc_agent, email)",
+          "Whether an account may buy a physical good, and if not, why not.\nDerived on every read from the rows on file plus the clock — never\nstored, because a stored flag is wrong the moment a card expires.\nListed in rank order: when several apply, the first is reported as\n`state` and all of them appear in `reasons`.\n",
         ),
-      hasPassword: zod
-        .boolean()
-        .optional()
+      reasons: zod
+        .array(
+          zod
+            .enum([
+              "disabled",
+              "anonymous",
+              "not_configured",
+              "unsupported_destination",
+              "needs_address",
+              "needs_payment_method",
+              "pm_detached",
+              "card_expired",
+              "consent_stale",
+              "cap_reached",
+              "card_expiring",
+              "ready",
+            ])
+            .describe(
+              "Whether an account may buy a physical good, and if not, why not.\nDerived on every read from the rows on file plus the clock — never\nstored, because a stored flag is wrong the moment a card expires.\nListed in rank order: when several apply, the first is reported as\n`state` and all of them appear in `reasons`.\n",
+            ),
+        )
         .describe(
-          "True if the account has an email password set (email door usable)",
+          "Everything true about the account, most blocking first. Empty when ready.",
         ),
+      card: zod.union([
+        zod
+          .object({
+            brand: zod.string().nullable(),
+            last4: zod.string().nullable(),
+            expMonth: zod.number().nullable(),
+            expYear: zod.number().nullable(),
+          })
+          .describe(
+            "Display metadata for the saved card. Outside PCI scope; there is nothing else about a card this API knows.",
+          ),
+        zod.null(),
+      ]),
+      shipsTo: zod.union([
+        zod
+          .object({
+            country: zod.string().describe("ISO 3166-1 alpha-2"),
+            postalCode: zod.string(),
+          })
+          .describe(
+            "Country and postal code of the live shipping address, and nothing else.\nThe recipient name, street lines and city are never returned.\n",
+          ),
+        zod.null(),
+      ]),
+      consentVersion: zod
+        .string()
+        .nullable()
+        .describe("Stored-card terms version this account accepted, or null."),
     }),
-    zod.null(),
-  ]),
-});
+  })
+  .describe(
+    "The current-session read. Separate from AuthUserEnvelope because the\nsign-in responses share that one and do not compute purchasing state;\nmaking `purchasing` optional there would reintroduce exactly the\nsilently-stripped-field trap this field was added under.\n",
+  );
 
 /**
  * @summary Update the current user's notification preferences
@@ -772,7 +924,15 @@ export const GetAgentResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -819,7 +979,16 @@ export const harvestAgentBodyLimitDefault = 25;
 
 export const HarvestAgentBody = zod.object({
   type: zod
-    .enum(["image", "audio", "text", "music", "furniture", "video", "app", "all"])
+    .enum([
+      "image",
+      "audio",
+      "text",
+      "music",
+      "furniture",
+      "video",
+      "app",
+      "all",
+    ])
     .optional(),
   limit: zod.number().default(harvestAgentBodyLimitDefault),
 });
@@ -878,7 +1047,15 @@ export const ListArtifactsResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -930,7 +1107,15 @@ export const GetArtifactResponse = zod.object({
   publicUrl: zod.string(),
   thumbnailUrl: zod.string().nullish(),
   reactionCount: zod.number(),
-  artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+  artifactType: zod.enum([
+    "image",
+    "music",
+    "text",
+    "audio",
+    "furniture",
+    "video",
+    "app",
+  ]),
   status: zod.enum(["raw", "scored", "narrated", "dropped"]),
   kannakaScore: zod.number().nullish(),
   rarityScore: zod.number().nullish(),
@@ -979,7 +1164,15 @@ export const ScoreArtifactResponse = zod.object({
   publicUrl: zod.string(),
   thumbnailUrl: zod.string().nullish(),
   reactionCount: zod.number(),
-  artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+  artifactType: zod.enum([
+    "image",
+    "music",
+    "text",
+    "audio",
+    "furniture",
+    "video",
+    "app",
+  ]),
   status: zod.enum(["raw", "scored", "narrated", "dropped"]),
   kannakaScore: zod.number().nullish(),
   rarityScore: zod.number().nullish(),
@@ -1028,7 +1221,15 @@ export const NarrateArtifactResponse = zod.object({
   publicUrl: zod.string(),
   thumbnailUrl: zod.string().nullish(),
   reactionCount: zod.number(),
-  artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+  artifactType: zod.enum([
+    "image",
+    "music",
+    "text",
+    "audio",
+    "furniture",
+    "video",
+    "app",
+  ]),
   status: zod.enum(["raw", "scored", "narrated", "dropped"]),
   kannakaScore: zod.number().nullish(),
   rarityScore: zod.number().nullish(),
@@ -1106,6 +1307,8 @@ export const ListDropsResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -1184,7 +1387,15 @@ export const GetDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1255,7 +1466,15 @@ export const UpdateDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1325,7 +1544,15 @@ export const PublishDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1388,6 +1615,8 @@ export const GetDropSuggestionsResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -1456,7 +1685,15 @@ export const AddArtifactToDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1511,7 +1748,16 @@ export const runHarvesterBodyMinReactionsDefault = 0;
 
 export const RunHarvesterBody = zod.object({
   type: zod
-    .enum(["image", "audio", "text", "music", "furniture", "video", "app", "all"])
+    .enum([
+      "image",
+      "audio",
+      "text",
+      "music",
+      "furniture",
+      "video",
+      "app",
+      "all",
+    ])
     .default(runHarvesterBodyTypeDefault),
   limit: zod.number().default(runHarvesterBodyLimitDefault),
   minReactions: zod.number().default(runHarvesterBodyMinReactionsDefault),
@@ -1581,6 +1827,8 @@ export const GetStorefrontDropsResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -1647,7 +1895,15 @@ export const GetStorefrontDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1698,7 +1954,15 @@ export const GetStorefrontFeaturedResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1757,6 +2021,8 @@ export const GetStorefrontFeaturedResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -1905,7 +2171,15 @@ export const GetAgentStorefrontResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -1970,6 +2244,8 @@ export const GetAgentStorefrontResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -2053,6 +2329,8 @@ export const GetAgentStorefrontDropsResponse = zod.object({
             "text",
             "audio",
             "furniture",
+            "video",
+            "app",
           ]),
           status: zod.enum(["raw", "scored", "narrated", "dropped"]),
           kannakaScore: zod.number().nullish(),
@@ -2174,7 +2452,15 @@ export const GetAgentStorefrontWorksResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -2226,7 +2512,15 @@ export const GetAgentStorefrontHotResponse = zod.object({
       creatorName: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       publicUrl: zod.string(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       heat: zod.number(),
       previousHeat: zod.number().nullable(),
       lastHeatDecayAt: zod.coerce.date().nullable(),
@@ -2398,6 +2692,8 @@ export const GetAgentStorefrontListingsResponse = zod.object({
           "text",
           "audio",
           "furniture",
+          "video",
+          "app",
         ]),
         status: zod.enum(["raw", "scored", "narrated", "dropped"]),
         kannakaScore: zod.number().nullish(),
@@ -2769,7 +3065,15 @@ export const GetAgentStorefrontArtifactResponse = zod.object({
   publicUrl: zod.string(),
   thumbnailUrl: zod.string().nullish(),
   reactionCount: zod.number(),
-  artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+  artifactType: zod.enum([
+    "image",
+    "music",
+    "text",
+    "audio",
+    "furniture",
+    "video",
+    "app",
+  ]),
   status: zod.enum(["raw", "scored", "narrated", "dropped"]),
   kannakaScore: zod.number().nullish(),
   rarityScore: zod.number().nullish(),
@@ -2829,7 +3133,15 @@ export const GetAgentStorefrontDropResponse = zod.object({
       publicUrl: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       reactionCount: zod.number(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       status: zod.enum(["raw", "scored", "narrated", "dropped"]),
       kannakaScore: zod.number().nullish(),
       rarityScore: zod.number().nullish(),
@@ -2952,7 +3264,15 @@ export const GetHotArtifactsResponse = zod.object({
       creatorName: zod.string(),
       thumbnailUrl: zod.string().nullish(),
       publicUrl: zod.string(),
-      artifactType: zod.enum(["image", "music", "text", "audio", "furniture", "video", "app"]),
+      artifactType: zod.enum([
+        "image",
+        "music",
+        "text",
+        "audio",
+        "furniture",
+        "video",
+        "app",
+      ]),
       heat: zod.number(),
       previousHeat: zod.number().nullable(),
       lastHeatDecayAt: zod.coerce.date().nullable(),

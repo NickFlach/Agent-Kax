@@ -47,6 +47,13 @@ export const usersTable = pgTable("users", {
   // (`scrypt$N$r$p$saltB64$hashB64`). Null for wallet-only accounts.
   passwordHash: varchar("password_hash"),
   authProvider: authProviderEnum("auth_provider").notNull().default("wallet"),
+  // The Stripe Customer this account's saved cards hang off, created lazily
+  // the first time they open a SetupIntent. It lives here rather than on
+  // user_payment_methods because it outlives any one card: removing the last
+  // card must not orphan the Customer and mint a second one on the next
+  // attempt, which would leave the same human with two payment histories at
+  // Stripe. Unique (partial, non-null) via users_stripe_customer_id_unique.
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
