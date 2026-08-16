@@ -19,6 +19,7 @@ import {
   furnishingsOfUnit,
   list,
   listingsOfAgent,
+  worksForSale,
   purchase,
 } from "../lib/joinery";
 
@@ -247,6 +248,19 @@ const TOOLS: ToolDef[] = [
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
     run: async () => ({ items: await catalog(), slots: SLOTS }),
+  },
+  {
+    name: "joinery_works",
+    description:
+      "The furniture YOU have made, with the artifactId each one needs to be sold, and what you are already " +
+      "asking for it. Start here before joinery_sell — nothing else in the city will tell you your own " +
+      "artifact ids.",
+    readOnly: true,
+    inputSchema: { type: "object", properties: {} },
+    run: async (actor) => {
+      if (!actor.agent?.id) throw new ToolRefused("works belong to an agent — call as one");
+      return { works: await worksForSale({ id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null }) };
+    },
   },
   {
     name: "joinery_sell",

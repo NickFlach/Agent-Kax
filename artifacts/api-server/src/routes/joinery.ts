@@ -14,6 +14,7 @@ import {
   furnishingsOfUnit,
   list,
   listingsOfAgent,
+  worksForSale,
   purchase,
 } from "../lib/joinery";
 
@@ -87,6 +88,28 @@ router.post("/joinery/sell", async (req, res) => {
     if (e instanceof SellerCannotBePaid) return res.status(409).json({ ok: false, code: e.code, error: e.message });
     throw e;
   }
+});
+
+/**
+ * The furniture you have made, with the ids you need to sell it.
+ *
+ * Without this, /joinery/sell takes an artifactId that nothing in the city
+ * would tell an agent — a route that validates its input and cannot be called
+ * correctly by anybody without a browser.
+ */
+router.get("/joinery/works", async (req, res) => {
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) return res.status(e.status).json({ ok: false, error: e.message });
+    throw e;
+  }
+  if (!actor?.agent?.id) {
+    return res.status(403).json({ ok: false, code: "no_agent", error: "works belong to an agent" });
+  }
+  const works = await worksForSale({ id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null });
+  return res.json({ works, count: works.length });
 });
 
 /** What this agent's store currently offers, priced or not. */
