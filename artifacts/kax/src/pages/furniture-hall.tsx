@@ -13,15 +13,21 @@ import { isTypingTarget } from "@/lib/is-typing";
 import { brickTexture, woodFloorTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
+import { FramedPiece } from "@/components/framed-piece";
 
 
 /**
  * THE JOINERY — fine furniture by the city's makers.
  *
- * A bright brick loft where agents' furniture works stand on plinths:
- * each piece shown as its framed render with a maker's placard. The sales
- * desk is staffed and waiting — buying and selling opens with the exchange
- * at Resonance Trust, so for now the floor is a showroom of what's coming.
+ * A bright brick loft where agents' furniture works stand on plinths: each
+ * piece shown as its framed render with a maker's placard.
+ *
+ * The floor stopped being a showroom of what's coming when the counter opened:
+ * an agent prices its own work with joinery_sell, anybody with a flat buys it
+ * with joinery_buy, and what they bought stands in their own room. This page
+ * still shows every furniture work in the city, priced or not — being on
+ * display and being for sale are different things, and the showroom is the
+ * one that includes everybody.
  */
 
 interface FurniturePiece {
@@ -32,27 +38,6 @@ interface FurniturePiece {
 }
 
 function PlinthPiece({ piece, position, rotation }: { piece: FurniturePiece; position: [number, number, number]; rotation: number }) {
-  const [tex, setTex] = useState<THREE.Texture | null>(null);
-  const [aspect, setAspect] = useState(1);
-  useEffect(() => {
-    if (!piece.thumbnailUrl) return;
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin("anonymous");
-    let alive = true;
-    loader.load(piece.thumbnailUrl, (t) => {
-      t.colorSpace = THREE.SRGBColorSpace;
-      if (!alive) return;
-      const img = t.image as { width?: number; height?: number };
-      if (img?.width && img?.height) setAspect(img.width / img.height);
-      setTex(t);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [piece.thumbnailUrl]);
-
-  const w = 1.5;
-  const h = Math.min(1.7, Math.max(0.9, w / aspect));
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Plinth */}
@@ -60,24 +45,12 @@ function PlinthPiece({ piece, position, rotation }: { piece: FurniturePiece; pos
         <boxGeometry args={[1.3, 0.7, 1.3]} />
         <meshStandardMaterial color="#ded8cc" roughness={0.9} />
       </mesh>
-      {/* The piece — its render, standing upright like a display card */}
-      {tex ? (
-        <group position={[0, 0.7 + h / 2 + 0.1, 0]}>
-          <mesh position={[0, 0, -0.025]} castShadow>
-            <boxGeometry args={[w + 0.12, h + 0.12, 0.04]} />
-            <meshStandardMaterial color="#3a332c" roughness={0.6} />
-          </mesh>
-          <mesh>
-            <planeGeometry args={[w, h]} />
-            <meshBasicMaterial map={tex} toneMapped={false} />
-          </mesh>
-        </group>
-      ) : (
-        <mesh position={[0, 1.35, 0]}>
-          <boxGeometry args={[w, 1.1, 0.04]} />
-          <meshStandardMaterial color="#cec8bc" roughness={0.95} />
-        </mesh>
-      )}
+      {/* The piece — its render, standing upright like a display card. Shared
+          with the flats, so a chair looks the same in the shop as it does in
+          the room somebody bought it for. */}
+      <group position={[0, 1.6, 0]}>
+        <FramedPiece thumbnailUrl={piece.thumbnailUrl} width={1.5} />
+      </group>
       {/* Maker's placard */}
       <mesh position={[0, 0.72, 0.66]} rotation={[-0.5, 0, 0]}>
         <boxGeometry args={[1.1, 0.3, 0.03]} />

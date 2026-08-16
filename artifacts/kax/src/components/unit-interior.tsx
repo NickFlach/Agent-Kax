@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { useDayPhase } from "@/lib/time-of-day";
 import { Horizon } from "@/components/horizon";
+import { FramedPiece } from "@/components/framed-piece";
 
 /**
  * A flat, behind a door that already had a nameplate on it.
@@ -37,6 +38,89 @@ function hash01(seed: string, salt: number): number {
   return ((h >>> 0) % 10000) / 10000;
 }
 
+const W = 6.4; // width
+const D = 5.2; // depth
+const H = 2.9; // ceiling
+
+/**
+ * A piece somebody bought, as the flat sees it.
+ *
+ * The Joinery sells furniture and the sale records where in the room it goes;
+ * this is the other end of that. Without it a purchase is a row in a table and
+ * a debit in the ledger, and the room it was bought for looks exactly as it
+ * did before — which is the failure that would be hardest to notice, because
+ * every part of it works.
+ */
+export interface Furnishing {
+  id: number;
+  slot: string;
+  title: string;
+  thumbnailUrl: string | null;
+  makerName: string | null;
+}
+
+/**
+ * Where each slot puts a piece.
+ *
+ * Five places, chosen so nothing lands inside the bed, the desk or the door,
+ * and so a flat with all five filled still has a floor you can walk across.
+ * The two wall slots hang; the three others stand on a low plinth, the same
+ * way the showroom presents a piece.
+ *
+ * `facing` is a yaw, and figures here face +Z at yaw 0 — a piece on the left
+ * wall turns to look INTO the room, not out through the wall.
+ */
+const SLOT_PLACEMENT: Record<
+  string,
+  { position: [number, number, number]; facing: number; onFloor: boolean; width: number }
+> = {
+  wall_left: { position: [-W / 2 + 0.08, 1.75, 1.05], facing: Math.PI / 2, onFloor: false, width: 1.25 },
+  wall_right: { position: [W / 2 - 0.08, 1.75, -1.15], facing: -Math.PI / 2, onFloor: false, width: 1.25 },
+  corner: { position: [W / 2 - 0.85, 0, -D / 2 + 0.85], facing: -Math.PI / 4, onFloor: true, width: 1.1 },
+  bedside: { position: [-W / 2 + 0.75, 0, 1.35], facing: 0, onFloor: true, width: 0.85 },
+  window: { position: [-0.9, 0, 0], facing: Math.PI, onFloor: true, width: 1.0 },
+};
+
+/** One bought piece, standing where its slot says. */
+function PlacedPiece({ furnishing }: { furnishing: Furnishing }) {
+  const place = SLOT_PLACEMENT[furnishing.slot];
+  // A slot the room does not know is not a crash — it is a piece bought
+  // before this flat learned where to put it. Better absent than through a
+  // wall.
+  if (!place) return null;
+
+  return (
+    <group position={place.position} rotation={[0, place.facing, 0]}>
+      {place.onFloor && (
+        <mesh position={[0, 0.22, 0]} castShadow receiveShadow>
+          <boxGeometry args={[place.width + 0.1, 0.44, 0.7]} />
+          <meshStandardMaterial color="#ded8cc" roughness={0.9} />
+        </mesh>
+      )}
+      <group position={[0, place.onFloor ? 1.15 : 0, place.onFloor ? 0 : 0.03]}>
+        <FramedPiece
+          thumbnailUrl={furnishing.thumbnailUrl}
+          width={place.width}
+          maxHeight={place.onFloor ? 1.25 : 1.15}
+          minHeight={0.7}
+        />
+      </group>
+      <Text
+        position={[0, place.onFloor ? 0.5 : -0.72, place.onFloor ? 0.37 : 0.05]}
+        fontSize={0.062}
+        color="#8a8272"
+        font={DISPLAY_FONT}
+        anchorX="center"
+        anchorY="middle"
+        maxWidth={place.width}
+        textAlign="center"
+      >
+        {`${furnishing.title.slice(0, 30)}${furnishing.makerName ? ` · ${furnishing.makerName.slice(0, 20)}` : ""}`}
+      </Text>
+    </group>
+  );
+}
+
 export interface UnitInteriorProps {
   /** "A".."H" — which door on the landing. */
   letter: string;
@@ -48,12 +132,36 @@ export interface UnitInteriorProps {
   north: boolean;
 }
 
-const W = 6.4; // width
-const D = 5.2; // depth
-const H = 2.9; // ceiling
+/**
+ * What has been bought for this flat.
+ *
+ * Public on purpose: a room is seen by whoever is standing in it, and a
+ * visitor has to see the same furniture the resident does or the two of them
+ * are in different rooms. Failure is silent by design — a flat with no
+ * furniture and a flat whose furniture could not be fetched look the same,
+ * which is correct, because an empty flat is the honest default here.
+ */
+function useFurnishings(floor: number, letter: string): Furnishing[] {
+  const [items, setItems] = useState<Furnishing[]>([]);
+  useEffect(() => {
+    let alive = true;
+    setItems([]);
+    fetch(`/api/joinery/unit/${floor}/${letter}`)
+      .then((r) => (r.ok ? r.json() : { furnishings: [] }))
+      .then((j: { furnishings?: Furnishing[] }) => {
+        if (alive) setItems(j.furnishings ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [floor, letter]);
+  return items;
+}
 
 export function UnitInterior({ letter, floor, residentName, north }: UnitInteriorProps) {
   const phase = useDayPhase();
+  const furnishings = useFurnishings(floor, letter);
   const seed = `${floor}${letter}`;
   const j = useMemo(
     () => ({
@@ -210,6 +318,12 @@ export function UnitInterior({ letter, floor, residentName, north }: UnitInterio
         <planeGeometry args={[2.6, 1.8]} />
         <meshStandardMaterial color={`hsl(18, 30%, ${34 * j.warm}%)`} roughness={1} />
       </mesh>
+
+      {/* What the resident has bought from the Joinery. An empty flat is the
+          building's honest default — nothing is drawn to fill the gap. */}
+      {furnishings.map((f) => (
+        <PlacedPiece key={f.id} furnishing={f} />
+      ))}
 
       {/* Whose flat this is. Vacant says so plainly rather than staying blank —
           an empty nameplate reads as unfinished, and this floor is not. */}
