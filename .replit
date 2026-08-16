@@ -32,6 +32,7 @@ channel = "stable-25_05"
 
 [userenv.shared]
 KANNAKA_OWNER_EMAIL = "nikolaiflaukowski@gmail.com"
+KAX_COMMERCE_ENABLED = "0"
 
 [userenv.development]
 # Keep the DEV database at the same schema as production.

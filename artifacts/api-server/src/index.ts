@@ -238,6 +238,33 @@ async function warmUpInBackground(): Promise<void> {
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
   await runStartupStep("startKannakaArtworkResponseScheduler", startKannakaArtworkResponseScheduler);
   await runStartupStep("startConstellationBridge", startConstellationBridge);
+  // Stripe: create the stripe-replit-sync schema, register the managed
+  // webhook, and backfill existing Stripe data. Non-fatal like every other
+  // step — a connector hiccup must not take the rest of KAX down; checkout
+  // routes will surface their own errors if Stripe is unreachable.
+  await runStartupStep("initStripe", async () => {
+    const { commerceEnabled, getStripeSync } = await import("./lib/stripeClient");
+    if (!commerceEnabled()) {
+      logger.info("initStripe: KAX_COMMERCE_ENABLED not set — commerce surface stays dark");
+      return;
+    }
+    const databaseUrl = process.env["DATABASE_URL"];
+    if (!databaseUrl) throw new Error("DATABASE_URL required for Stripe integration");
+    const { runMigrations: runStripeMigrations } = await import("stripe-replit-sync");
+    await runStripeMigrations({ databaseUrl });
+    const stripeSync = await getStripeSync();
+    if (process.env["STRIPE_WEBHOOK_SECRET"]) {
+      // A dashboard-created webhook endpoint is in charge; its whsec_ is the
+      // verifying secret. Don't create a managed one alongside it.
+      logger.info("initStripe: using dashboard webhook (STRIPE_WEBHOOK_SECRET set)");
+    } else {
+      // At runtime REPLIT_DOMAINS is the right base: prod domain in a
+      // deployment, dev domain in the workspace (registers a dev webhook).
+      const webhookBaseUrl = `https://${process.env["REPLIT_DOMAINS"]?.split(",")[0]}`;
+      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/webhooks/stripe`);
+    }
+    await stripeSync.syncBackfill();
+  });
 }
 
 async function boot(): Promise<void> {

@@ -23,6 +23,10 @@ export const storeListingsTable = pgTable(
     addedByUserId: text("added_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
     price: real("price"),
     note: text("note"),
+    // Lazily-created Stripe catalog ids (one product+price per priced
+    // listing, created at first checkout). Stripe owns the catalog data.
+    stripeProductId: text("stripe_product_id"),
+    stripePriceId: text("stripe_price_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [

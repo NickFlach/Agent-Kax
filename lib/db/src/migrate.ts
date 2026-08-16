@@ -213,6 +213,7 @@ export const UNMARK_SAFE_MIGRATIONS: ReadonlySet<string> = new Set([
   "0014_credit_ledger_txids.sql",
   "0015_agent_npub.sql",
   "0016_partner_event_cursors.sql",
+  "0025_stripe_listing_orders.sql",
 ]);
 
 export async function unmarkJournal(filenames: string[]): Promise<{ unmarked: string[]; notJournaled: string[] }> {

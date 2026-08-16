@@ -124,4 +124,31 @@ router.post(
   },
 );
 
+// ── Stripe webhook ──────────────────────────────────────────────────────
+// Raw body required for signature verification; the app-level JSON parser
+// already skips every /api/webhooks/* path (see skipForWebhooks in app.ts).
+// Handler stays minimal by design: stripe-replit-sync verifies the signature
+// and syncs the event into the `stripe.*` schema.
+router.post("/webhooks/stripe", raw({ type: "application/json" }), async (req, res) => {
+  const { commerceEnabled } = await import("../lib/stripeClient");
+  if (!commerceEnabled()) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const signature = req.headers["stripe-signature"];
+  if (!signature) {
+    res.status(400).json({ error: "Missing stripe-signature" });
+    return;
+  }
+  const sig = Array.isArray(signature) ? signature[0] : signature;
+  try {
+    const { WebhookHandlers } = await import("../lib/webhookHandlers");
+    await WebhookHandlers.processWebhook(req.body as Buffer, sig as string);
+    res.status(200).json({ received: true });
+  } catch (err) {
+    req.log.error({ err }, "Stripe webhook processing error");
+    res.status(400).json({ error: "Webhook processing error" });
+  }
+});
+
 export default router;

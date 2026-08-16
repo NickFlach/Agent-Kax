@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter, Link, Redirect, useLocation, useParams } from "wouter";
+import { CheckoutSuccessPage, CheckoutCancelPage } from "@/pages/checkout-result";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useGetInboxCounts, getGetInboxCountsQueryKey } from "@workspace/api-client-react";
@@ -456,6 +457,12 @@ function Router() {
       </Route>
       <Route path="/marketplace">
         <Marketplace />
+      </Route>
+      <Route path="/checkout/success">
+        <CheckoutSuccessPage />
+      </Route>
+      <Route path="/checkout/cancel">
+        <CheckoutCancelPage />
       </Route>
       <Route path="/floor">
         <FloorPage />
