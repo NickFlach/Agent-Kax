@@ -10,9 +10,24 @@ const router: IRouter = Router();
 
 // Inert-until-configured: with KAX_COMMERCE_ENABLED unset/0 the commerce
 // surface doesn't exist — every route below 404s as if never registered.
-router.use("/store", (_req, res, next) => {
+// When the flag IS on, fail closed (503) until migration 0025's tables are
+// confirmed present, so a flag flip on a drifted DB can't 500 mid-checkout.
+let schemaReady: boolean | null = null;
+router.use("/store", async (_req, res, next) => {
   if (!commerceEnabled()) {
     res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (schemaReady === null) {
+    try {
+      await db.select({ id: listingOrdersTable.id }).from(listingOrdersTable).limit(1);
+      schemaReady = true;
+    } catch {
+      schemaReady = false;
+    }
+  }
+  if (!schemaReady) {
+    res.status(503).json({ error: "Commerce enabled but schema not migrated (0025)" });
     return;
   }
   next();
@@ -64,17 +79,28 @@ router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
     return;
   }
 
+  // Listing prices are floats; only accept clean two-decimal USD amounts at
+  // or above Stripe's $0.50 minimum, so stored/displayed/charged all agree.
   const amountCents = Math.round(listing.price * 100);
+  if (amountCents < 50 || Math.abs(listing.price * 100 - amountCents) > 0.01) {
+    res.status(400).json({ error: "Listing price must be a USD amount of at least $0.50 with at most 2 decimals" });
+    return;
+  }
   const stripe = await getUncachableStripeClient();
 
   // Lazily create (or refresh) the Stripe Product + Price for this listing.
+  // Deterministic idempotency keys make concurrent first purchases converge
+  // on the same Stripe objects instead of racing to create duplicates.
   let productId = listing.stripeProductId;
   if (!productId) {
-    const product = await stripe.products.create({
-      name: artifact.title,
-      description: listing.note ?? undefined,
-      metadata: { kaxListingId: String(listing.id), kaxArtifactId: String(artifact.id) },
-    });
+    const product = await stripe.products.create(
+      {
+        name: artifact.title,
+        description: listing.note ?? undefined,
+        metadata: { kaxListingId: String(listing.id), kaxArtifactId: String(artifact.id) },
+      },
+      { idempotencyKey: `kax-listing-product-${listing.id}` },
+    );
     productId = product.id;
   }
 
@@ -85,11 +111,10 @@ router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
     if (existing.unit_amount !== amountCents || !existing.active) priceId = null;
   }
   if (!priceId) {
-    const price = await stripe.prices.create({
-      product: productId,
-      unit_amount: amountCents,
-      currency: "usd",
-    });
+    const price = await stripe.prices.create(
+      { product: productId, unit_amount: amountCents, currency: "usd" },
+      { idempotencyKey: `kax-listing-price-${listing.id}-${amountCents}` },
+    );
     priceId = price.id;
   }
 

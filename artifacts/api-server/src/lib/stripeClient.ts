@@ -18,9 +18,13 @@ export function commerceEnabled(): boolean {
  * Not cached — tokens can rotate, so fetch fresh each time.
  */
 async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecret?: string }> {
+  // Each field resolves independently: an explicit env value always wins,
+  // and the connector only fills in what's missing (e.g. connector-supplied
+  // secret key + dashboard-created STRIPE_WEBHOOK_SECRET is a valid mix).
   const envKey = process.env["STRIPE_SECRET_KEY"];
+  const envWebhookSecret = process.env["STRIPE_WEBHOOK_SECRET"];
   if (envKey) {
-    return { secretKey: envKey, webhookSecret: process.env["STRIPE_WEBHOOK_SECRET"] };
+    return { secretKey: envKey, webhookSecret: envWebhookSecret };
   }
 
   const hostname = process.env["REPLIT_CONNECTORS_HOSTNAME"];
@@ -59,7 +63,10 @@ async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecre
     );
   }
 
-  return { secretKey: settings.secret_key, webhookSecret: settings.webhook_secret };
+  return {
+    secretKey: settings.secret_key,
+    webhookSecret: envWebhookSecret ?? settings.webhook_secret,
+  };
 }
 
 /**

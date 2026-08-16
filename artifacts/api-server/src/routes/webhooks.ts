@@ -144,6 +144,27 @@ router.post("/webhooks/stripe", raw({ type: "application/json" }), async (req, r
   try {
     const { WebhookHandlers } = await import("../lib/webhookHandlers");
     await WebhookHandlers.processWebhook(req.body as Buffer, sig as string);
+    // processWebhook verified the signature, so the payload is trusted now.
+    // Settle listing orders from the webhook (idempotent) — a buyer who
+    // never returns to the success page still gets a paid order.
+    try {
+      const event = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        type?: string;
+        data?: { object?: { id?: string; payment_status?: string } };
+      };
+      const session = event.data?.object;
+      if (event.type === "checkout.session.completed" && session?.id && session.payment_status === "paid") {
+        const { db } = await import("@workspace/db");
+        const { listingOrdersTable } = await import("@workspace/db/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(listingOrdersTable)
+          .set({ status: "paid", updatedAt: new Date() })
+          .where(eq(listingOrdersTable.stripeSessionId, session.id));
+      }
+    } catch (err) {
+      req.log.error({ err }, "Stripe webhook: order settlement failed (sync already succeeded)");
+    }
     res.status(200).json({ received: true });
   } catch (err) {
     req.log.error({ err }, "Stripe webhook processing error");

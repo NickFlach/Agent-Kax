@@ -1,11 +1,15 @@
 import { useParams, Link } from "wouter";
+import { useState } from "react";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontArtifact,
+  useGetAgentStorefrontListings,
   getGetAgentStorefrontQueryKey,
   getGetAgentStorefrontArtifactQueryKey,
+  getGetAgentStorefrontListingsQueryKey,
 } from "@workspace/api-client-react";
+import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AudioPlayer } from "@/components/audio-player";
 import { ArtifactCover } from "@/components/artifact-cover";
@@ -23,6 +27,42 @@ export default function AgentStorefrontArtifact() {
   const { data: artifact, isLoading, isError } = useGetAgentStorefrontArtifact(slug, id, {
     query: { enabled: !!id, retry: false, queryKey: getGetAgentStorefrontArtifactQueryKey(slug, id) },
   });
+
+  // If this store lists the piece at a price, offer Stripe Checkout. The
+  // commerce surface is inert until KAX_COMMERCE_ENABLED is on server-side —
+  // the checkout POST 404s then, and we tell the visitor it isn't open yet.
+  const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
+    query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug) },
+  });
+  const listing = listingsResp?.listings?.find(
+    (l) => l.artifact?.id === id && typeof l.price === "number" && l.price > 0,
+  );
+  const { toast } = useToast();
+  const [buying, setBuying] = useState(false);
+  const buy = async () => {
+    if (!listing || buying) return;
+    setBuying(true);
+    try {
+      const r = await fetch(`/api/store/listings/${listing.id}/checkout`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (r.status === 404) {
+        toast({ title: "Purchases aren't open yet", description: "Check back soon." });
+      } else if (r.status === 401) {
+        toast({ title: "Sign in to buy", description: "You need an account to purchase." });
+      } else if (!r.ok) {
+        toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
+      } else {
+        const j = (await r.json()) as { url?: string };
+        if (j.url) window.location.assign(j.url);
+      }
+    } catch {
+      toast({ title: "Checkout failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setBuying(false);
+    }
+  };
 
   const settings = landing?.settings ?? { themeVariant: "dark" as const };
   const title = landing?.settings.displayName || landing?.agent.displayName || "Storefront";
@@ -119,6 +159,16 @@ export default function AgentStorefrontArtifact() {
             <p className="text-sm leading-relaxed mt-6 italic text-foreground/70">
               "{artifact.narrative}"
             </p>
+          )}
+          {listing && (
+            <button
+              onClick={buy}
+              disabled={buying}
+              className="mt-6 w-full border border-primary bg-primary text-primary-foreground px-6 py-3 text-sm font-bold tracking-widest uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+              data-testid="button-buy"
+            >
+              {buying ? "Opening checkout…" : `Buy — $${listing.price!.toFixed(2)}`}
+            </button>
           )}
           <div className="mt-6">
             <ShareButtons
