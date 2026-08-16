@@ -72,10 +72,33 @@ export const ROOMS: RoomInfo[] = [
   })),
 ];
 
+/**
+ * A flat's own room: `residences:9:C`, `residences:PH:A`.
+ *
+ * Matched by PATTERN rather than enumerated, unlike everything else here.
+ * Eighty-one addresses in the directory would drown the five places anybody
+ * actually goes, and a private flat is not somewhere to advertise — it is
+ * somewhere you are invited. So a unit room is real, addressable and
+ * unlisted: the city will host you there, and will not suggest it.
+ */
+const UNIT_ROOM = /^residences:(?:(1[01]|[2-9])|PH):([A-H])$/;
+
+export function unitRoom(floor: number | string, letter: string): string {
+  const f = typeof floor === "number" ? (floor === 12 ? "PH" : String(floor)) : floor;
+  return `residences:${f}:${letter.toUpperCase()}`;
+}
+
+/** Is this a flat, and if so whose floor and door? */
+export function parseUnitRoom(id: string): { floor: string; letter: string } | null {
+  const m = UNIT_ROOM.exec(String(id ?? ""));
+  if (!m) return null;
+  return { floor: m[1] ?? "PH", letter: m[2]! };
+}
+
 const BY_ID = new Map(ROOMS.map((r) => [r.id, r]));
 
 export function isKnownRoom(id: string): boolean {
-  return BY_ID.has(id);
+  return BY_ID.has(id) || parseUnitRoom(id) !== null;
 }
 
 export function roomInfo(id: string): RoomInfo | undefined {
