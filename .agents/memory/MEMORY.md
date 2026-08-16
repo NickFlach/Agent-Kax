@@ -5,5 +5,6 @@
 - [OBC creator attribution (Model B)](obc-creator-attribution.md) — partner API IGNORES the creator filter; attribute each artifact by creator_bot_id, auto-create placeholder agents, harvest is one global pass (any user may trigger; guarded by budget/cooldown/single-flight).
 - [OBC partner `since` semantics](obc-partner-since-semantics.md) — /partner/artifacts is newest-first; `since=<id>` returns OLDER items (paginate-down, not "newer than"). Harvest must top-anchor each run, uncapped.
 - [OBC unsupported artifact types](obc-unsupported-artifact-types.md) — feed types missing from the DB enum (e.g. video) must be skipped with a warn, never abort the harvest pass.
+- [stripe-replit-sync bundling](stripe-sync-bundling.md) — must be external in esbuild or its migrations silently skip; empty `stripe` schema means bundling, not creds.
 - [KAX commerce gating & Stripe creds](kax-commerce-gating.md) — commerce is dark unless KAX_COMMERCE_ENABLED=1; env Stripe secrets beat the connector per-field; webhook settles orders.
 - [Kannaka artwork responder](kannaka-artwork-responder.md) — once-a-day reservoir pick, in-memory single-instance by design (no per-day DB lease); day rollover must stay monotonic to survive the midnight intake/flush race.
