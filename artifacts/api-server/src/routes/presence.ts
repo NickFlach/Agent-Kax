@@ -47,23 +47,23 @@ router.post("/presence/beat", async (req, res) => {
   }
 
   const name = actor.displayName;
+  // Positions are clamped to something sane rather than trusted outright: a
+  // bad client should not be able to park an avatar at infinity.
+  const x = Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0)));
+  const z = Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0)));
   const others = beat({
     principal: actor.principal,
     name,
     kind: actor.kind === "agent" ? "agent" : "human",
     room,
-    // Positions are clamped to something sane rather than trusted outright: a
-    // bad client should not be able to park an avatar at infinity.
-    x: Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0))),
-    z: Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0))),
+    x,
+    z,
     yaw: finiteOr(body.yaw, 0),
   });
 
   // Speech rides along with the beat: the client already polls, so a second
   // channel would only add latency and another thing to get out of sync.
   const sinceId = Number((req.body as { since?: unknown })?.since ?? 0) || 0;
-  const x = Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0)));
-  const z = Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0)));
   const lines = heard(room, { x, z }, sinceId);
 
   res.json({
