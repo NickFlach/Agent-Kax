@@ -135,7 +135,10 @@ async function applyOne(filename: string, log: (m: string) => void): Promise<voi
     await client.query("COMMIT");
     log(`  ✓ ${filename}`);
   } catch (err) {
-    await client.query("ROLLBACK");
+    // Guard the ROLLBACK against masking the real error: if the connection
+    // dropped mid-migration the ROLLBACK itself will throw, discarding the
+    // original failure and replacing it with a generic "connection terminated".
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
     throw new Error(`Migration ${filename} failed: ${(err as Error).message}`);
   } finally {
     client.release();
@@ -179,13 +182,26 @@ export async function backfillJournal(filenames: string[]): Promise<{ journaled:
   const applied = await listApplied();
   const journaled: string[] = [];
   const alreadyJournaled: string[] = [];
-  for (const f of filenames) {
-    if (applied.has(f)) {
-      alreadyJournaled.push(f);
-      continue;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const f of filenames) {
+      if (applied.has(f)) {
+        alreadyJournaled.push(f);
+        continue;
+      }
+      await client.query(
+        "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+        [f],
+      );
+      journaled.push(f);
     }
-    await journalWithoutApplying(f);
-    journaled.push(f);
+    await client.query("COMMIT");
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
   }
   return { journaled, alreadyJournaled };
 }
@@ -232,13 +248,23 @@ export async function unmarkJournal(filenames: string[]): Promise<{ unmarked: st
   const applied = await listApplied();
   const unmarked: string[] = [];
   const notJournaled: string[] = [];
-  for (const f of filenames) {
-    if (!applied.has(f)) {
-      notJournaled.push(f);
-      continue;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const f of filenames) {
+      if (!applied.has(f)) {
+        notJournaled.push(f);
+        continue;
+      }
+      await client.query("DELETE FROM schema_migrations WHERE filename = $1", [f]);
+      unmarked.push(f);
     }
-    await pool.query("DELETE FROM schema_migrations WHERE filename = $1", [f]);
-    unmarked.push(f);
+    await client.query("COMMIT");
+  } catch (err) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+    throw err;
+  } finally {
+    client.release();
   }
   return { unmarked, notJournaled };
 }
