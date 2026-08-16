@@ -28,6 +28,7 @@ import {
 } from "@/lib/city-textures";
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
+import { storefrontWindowCard } from "@/lib/storefront-window";
 
 
 type SceneAgent = {
@@ -95,6 +96,7 @@ function Storefront({
 }) {
   const isClaimed = agent.claimed;
   const isConstellation = agent.source === "constellation";
+  const windowCard = storefrontWindowCard(agent);
 
   const seed = hash01(agent.slug || agent.name, 1);
   const seed2 = hash01(agent.slug || agent.name, 7);
@@ -192,8 +194,15 @@ function Storefront({
         <boxGeometry args={[0.05, bodyW - 1.5, 0.03]} />
         <meshStandardMaterial color="#33302b" roughness={0.5} metalness={0.4} />
       </mesh>
-      {/* FOR LEASE card taped inside an available store's window */}
-      {!isClaimed && !isConstellation && (
+      {/* The card in an available store's window.
+
+          FOR LEASE used to appear whenever `!claimed`, but `claimed` means
+          "has a non-system owner" — not "empty". Live, every one of the 278
+          unclaimed storefronts holds work, so the street was advertising
+          bodies of work as vacant premises, `rex` and its 1534 artifacts
+          among them (#302). Both cards still say the store can be claimed;
+          only one of them claims there is nothing inside. */}
+      {windowCard === "for-lease" && (
         <group position={[-0.28, 1.45, 1.54]}>
           <mesh>
             <planeGeometry args={[0.72, 0.46]} />
@@ -209,7 +218,25 @@ function Storefront({
           </Suspense>
         </group>
       )}
-
+      {windowCard === "unclaimed-with-works" && (
+        <group position={[-0.28, 1.45, 1.54]}>
+          <mesh>
+            <planeGeometry args={[0.72, 0.46]} />
+            <meshStandardMaterial color="#efeadc" roughness={0.9} />
+          </mesh>
+          <Suspense fallback={null}>
+            <Text position={[0, 0.11, 0.01]} fontSize={0.075} color="#6a6252" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.12}>
+              UNCLAIMED
+            </Text>
+            <Text position={[0, -0.02, 0.01]} fontSize={0.055} color="#3f3a33" font={DISPLAY_FONT} anchorX="center" anchorY="middle" maxWidth={0.66} textAlign="center">
+              {`works by ${agent.name}`}
+            </Text>
+            <Text position={[0, -0.15, 0.01]} fontSize={0.05} color="#8a8272" font={DISPLAY_FONT} anchorX="center" anchorY="middle">
+              {`${agent.artifacts} pieces · inquire at kax`}
+            </Text>
+          </Suspense>
+        </group>
+      )}
       {/* Door (right side of the front) with frame, kick plate and handle */}
       <mesh position={[bodyW / 2 - 0.62, 1.05, 1.52]}>
         <boxGeometry args={[0.86, 2.1, 0.06]} />
