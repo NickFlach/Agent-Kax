@@ -644,11 +644,47 @@ export async function findOrCreateAgentByBotUuid(
   const MAX_ATTEMPTS = 8;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const [slugClash] = await db
-      .select({ id: agentsTable.id })
+      .select({
+        id: agentsTable.id,
+        ownerId: agentsTable.ownerId,
+        displayName: agentsTable.displayName,
+        obcBotId: agentsTable.obcBotId,
+      })
       .from(agentsTable)
       .where(eq(agentsTable.slug, slug))
       .limit(1);
     if (slugClash) {
+      // ADOPT, don't duplicate.
+      //
+      // A row sitting on this slug with the same display name and NO bot id is
+      // not a namesake — it is this same agent, from before KAX recorded bot
+      // ids, meeting its own identifier for the first time. Minting
+      // `name-<uuid6>` beside it splits one agent across two rows: everything
+      // that looks her up by name finds the empty one and everything that
+      // looks her up by bot finds the full one, and nothing errors. Kannaka
+      // and Rex were both split this way — 1909 and 1534 works stranded on
+      // suffixed slugs while `kannaka` and `rex` sat empty.
+      //
+      // The name check is what keeps this safe: a clash whose occupant is
+      // called something else, or already carries a bot id, is a genuine
+      // collision and still gets the suffix. Adopting one of those would hand
+      // an agent somebody else's work, which is worse than the split and
+      // cannot be undone.
+      const adoptable =
+        !slugClash.obcBotId &&
+        slugClash.displayName.trim().toLowerCase() === displayName.trim().toLowerCase();
+      if (adoptable) {
+        const claimed = await db
+          .update(agentsTable)
+          .set({ obcBotId: botId, avatarUrl: avatarUrl ?? undefined })
+          .where(and(eq(agentsTable.id, slugClash.id), isNull(agentsTable.obcBotId)))
+          .returning();
+        if (claimed[0]) {
+          agent = claimed[0];
+          break;
+        }
+        // Somebody else claimed it in the gap. Fall through to the suffix.
+      }
       slug = `${baseSlug}-${botId.slice(0, 6 + attempt)}`;
       continue;
     }
