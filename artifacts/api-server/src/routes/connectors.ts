@@ -20,10 +20,11 @@ import { ALL_CONNECTORS, findConnector, statusSnapshot } from "../connectors/reg
 const router: IRouter = Router();
 
 router.get("/connectors", (_req, res) => {
+  const snapshot = statusSnapshot();
   res.json({
     count: ALL_CONNECTORS.length,
-    available: statusSnapshot().filter((s) => s.available).length,
-    connectors: statusSnapshot(),
+    available: snapshot.filter((s) => s.available).length,
+    connectors: snapshot,
   });
 });
 
