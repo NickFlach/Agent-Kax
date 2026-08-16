@@ -1615,7 +1615,15 @@ describe("physical commerce purchase (#286)", () => {
       for (const source of [ADMIN_SOURCE, PRINTIFY_SOURCE]) {
         const code = stripComments(await readFile(source, "utf8"));
         const specifiers = [...code.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]!);
-        expect(specifiers.length, `${source} scan found no imports`).toBeGreaterThan(5);
+        // Anti-vacuity: prove the file was actually read and parsed, so a bad
+        // path or an empty read cannot pass this by finding nothing to object
+        // to. Keyed on file size and on at least one specifier rather than on
+        // an import COUNT — `printifyClient.ts` deliberately imports almost
+        // nothing, which is the property that keeps it out of reach of the
+        // ledger, so a threshold would fail the very file whose leanness is
+        // the point.
+        expect(code.length, `${source} scan read no source`).toBeGreaterThan(1000);
+        expect(specifiers.length, `${source} scan parsed no imports`).toBeGreaterThan(0);
         expect(specifiers.filter((s) => /joinery|ledger/i.test(s)), String(source)).toEqual([]);
       }
     });
