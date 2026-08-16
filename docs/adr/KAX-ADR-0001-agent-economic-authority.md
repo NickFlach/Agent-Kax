@@ -842,7 +842,7 @@ same place as a policy refusal.
 ### Phase 1a — what Commerce Gateway v0.1 actually needs
 
 **Commerce Gateway v0.1 does not require the Authority service.** Putting a greenfield
-policy engine on the critical path of a one-poster proof is the largest sequencing error
+policy engine on the critical path of a one-sticker proof is the largest sequencing error
 available here, and the claim `scopes` would build on is decoration.
 
 Phase 1a answers exactly one question — *may this actor commercialise this artifact* —

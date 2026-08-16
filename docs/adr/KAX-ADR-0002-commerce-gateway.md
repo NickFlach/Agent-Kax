@@ -113,7 +113,7 @@ suppresses creation of a managed one (`index.ts:256-259`).
 and every item is an absence in the code, not an oversight in the description:
 
 - **No physical product.** It sells the artifact behind a `store_listings` row. There is no
-  product spec, no size, no variant, no SKU, no `minimum_ppi`, no print area.
+  product spec, no size, no variant, no SKU, no `required_px`, no print area.
 - **No fulfilment.** Nothing is submitted anywhere. There is no Printify adapter, no
   `submitOrder`, no shipping address collected, and no tracking write-back. `paid` is the
   terminal state of `listing_orders`; its status vocabulary is three values —
@@ -208,6 +208,110 @@ The reason is in the ADR's own warning about `lib/publicRouteGating.test.ts`: a 
 greps a route file passes on a rename and on a predicate that is constructed but never
 applied.
 
+## What the assets actually measure
+
+Every earlier draft of this ADR had to reason about printability in the abstract, because
+nothing in the repository has ever read a KAX asset's bytes. That question is now answered by
+measurement rather than by argument, and the answer changes what v0.1 sells.
+
+Six artifacts were fetched from `GET /api/storefront/featured` on `kax.ninja-portal.com` and
+their image headers read directly.
+
+**Every one of them is exactly 1024 × 1024.**
+
+There is no larger original to reach for, and this is the part that closes the question rather
+than merely narrowing it. `publicUrl` and `thumbnailUrl` on those rows are the **same URL**,
+byte-identical — the one checked returned a content-length of 333,111 on both — and the
+Supabase bucket in the path is literally named **`artifacts-small`**. Substituting `artifacts`
+for that path segment returns **HTTP 400**: there is no large bucket, and no
+higher-resolution original anywhere. The bytes live on OpenBotCity's Supabase
+(`kfzxdetopeikrvschdwc.supabase.co`), not on KAX storage, so KAX cannot regenerate them at
+source either. Six artifacts is a sample; the absent bucket is not. The six establish that
+1024 × 1024 is what KAX actually gets, and `artifacts-small` establishes that there is nothing
+better to get — for any artifact, checked or unchecked. That is the ceiling, and it is the
+claim the product decision below rests on.
+
+Against that, the print specification — read from Printify's own catalogue rather than
+assumed. Blueprint **282** with print provider **99**, the poster line, is 300 PPI at every
+variant:
+
+| Poster size | Required print file |
+|---|---|
+| 9 × 11 in | 2700 × 3300 |
+| 11 × 14 in | 3300 × 4200 |
+| 12 × 18 in | 3600 × 5400 |
+| 16 × 20 in | 4800 × 6000 |
+| 18 × 24 in | 5400 × 7200 |
+| 20 × 30 in | 6000 × 9000 |
+| 24 × 36 in | 7200 × 10800 |
+
+The **smallest poster Printify sells** needs 2700 × 3300. A 1024 × 1024 source is **2.6×
+short on width and 3.2× short on height**. Every other size is worse. The conclusion is forced
+by this ADR's own rule, not chosen against it:
+
+> **v0.1 accepts only `native_pass` products, and no poster can be `native_pass` from a
+> 1024 × 1024 source.** A 12 × 12 poster was never a hard v0.1 product; it was an unreachable
+> one, and the earlier draft could not know that because nobody had measured.
+
+So v0.1 sells a **sticker** — the largest physical object the measured corpus can fill at the
+provider's own stated print area, with no upscaler, no derived asset and no quality review in
+the path.
+
+One further thing the byte read turned up, recorded here as a **pre-upload check rather than a
+blocker**: the bytes parse as **JPEG** while the filenames end `.png` and Supabase serves them
+with `content-type: image/png`. Nothing in the v0.1 path breaks on that — Printify is handed a
+URL and decodes it itself — but it is precisely why `artifact_print_assets.format` is specified
+under Stage 2 as *decoded from the bytes*, never taken from the extension or the
+`Content-Type`. A divergence between the declared container and the actual one is worth
+surfacing to the merchant before an upload, not discovering as a provider rejection after a
+card has been charged.
+
+### The v0.1 product spec — measured, with real ids
+
+Sticker print areas were read the same way, per `(blueprint, print_provider, variant)`:
+
+| Blueprint | Provider | Size → required print file |
+|---|---|---|
+| **384** "Square Stickers" | 1 | 2×2 in → 559 × 559 · 3×3 in → 832 × 832 · 4×4 in → 1113 × 1113 · 6×6 in → 1664 × 1664 |
+| **400** "Kiss-Cut Stickers" | 99 (Printify Choice) | 2×2 in → 559 × 559 · 3×3 in → 832 × 832 · 4×4 in → 1113 × 1113 · 6×6 in → 1664 × 1664 |
+| **476** "Square Vinyl Stickers" | 73 | 2×2 in → 600 × 600 · 3.5×3.5 in → 900 × 900 · 5×5 in → 1500 × 1500 · 8×8 in → 2400 × 2400 · 15×15 in → 4500 × 4500 |
+
+**The PPI is not uniform, and that is the most useful fact in the table.** 559 px across 2 in
+is ~280 PPI; 832 px across 3 in is ~277 PPI; 900 px across 3.5 in is ~257 PPI; 600 px across
+2 in is exactly 300 PPI. Four densities across three blueprints, on sizes that look
+interchangeable from the outside. This vindicates the rule Stage 2 already carries and is the
+reason it is restated there: required pixels are read from `placeholders[].width` and
+`placeholders[].height` for the specific triple, and never derived from inches × an assumed
+DPI.
+
+What a 1024 × 1024 source clears natively: **2×2 in and 3×3 in** on blueprints 384 and 400;
+**2×2 in and 3.5×3.5 in** on blueprint 476.
+
+What it does not clear, said out loud so no reader has to wonder why the obvious size is
+missing: **4×4 in needs 1113 px and the source has 1024 — 8% short.** That is out of reach,
+and only just. Eight percent is exactly the kind of gap a hurried implementer rounds away;
+this ADR does not round, because the rounding would be invisible in the product spec and
+visible only on the printed object.
+
+- **Recommended — the largest native fit.** 3.5 × 3.5 in **Square Vinyl Sticker**, blueprint
+  **476**, print provider **73**, variant **65212**: 900 × 900 required against 1024 × 1024
+  available, **~14% linear headroom**. It is the biggest physical object a native-pass v0.1
+  can put in the post.
+- **Runner-up.** 3 × 3 in **Kiss-Cut Sticker**, blueprint **400**, print provider **99**
+  (Printify Choice), variant **45750**: 832 × 832 required, **~23% linear headroom**. Smaller
+  object, more margin against the spec, and a print provider Printify itself routes.
+
+**The choice between them is the operator's**, not this ADR's — it turns on unit cost, provider
+performance and what a buyer would rather own, all of which are inputs the Provider and Product
+Selection Governance section already assigns to the merchant rather than to the machine. What
+this ADR fixes is the *shape* of the answer: exactly one spec, native pass only.
+
+And whichever is picked, **the print-area pixels are read from the provider API for that exact
+`(blueprint, print_provider, variant)` and stored on the product spec** — at build time, and
+re-checked before the first submission. Not copied from the table above on faith, and not
+computed from inches. The table above is evidence that the numbers were once measured, not a
+substitute for measuring them.
+
 ## Decision
 
 KAX will build the **Commerce Gateway**: a provider-neutral extension of the canonical
@@ -217,13 +321,18 @@ are adapters, never the canonical commerce model.
 
 v0.1 will prove exactly one thesis end to end and nothing more:
 
-> One authorized agent causes one verified artifact to become one real physical poster,
+> One authorized agent causes one verified artifact to become one real physical sticker,
 > bought by one real human with a card, manufactured and shipped by one real production
 > provider, and recorded in one reconciled order row.
 
+The object is a sticker rather than a poster because the section above measured the corpus and
+found no poster reachable; the shape of the criterion is unchanged, and deliberately so. One
+agent, one verified artifact, one real physical object, one human purchase, one shipment, one
+reconciled record — the thesis was never about the object being large.
+
 A demo listing without fulfilment does not count. **Neither does the shipped digital-listing
 checkout**, which takes a card for a row in KAX and stops there — the thesis is about matter,
-and every clause after "physical poster" is still to be built.
+and every clause after "physical sticker" is still to be built.
 
 ## Units, and the names money goes by
 
@@ -608,8 +717,8 @@ Printify pair is still to be introduced. Use exactly these:
 | `STRIPE_SECRET_KEY` | server-side Stripe API | **shipped** — `stripeClient.ts:24` | required |
 | `STRIPE_WEBHOOK_SECRET` | verify `/api/webhooks/stripe` | **shipped** — `stripeClient.ts:25` | required only on the dashboard-webhook path; the connector-managed webhook supplies its own — see "v0.1 deployment and feature-flag posture". Required whenever `STRIPE_SECRET_KEY` is set in env |
 | `KAX_COMMERCE_ENABLED` | feature flag, **default off** | **shipped** — `stripeClient.ts:10-13`, accepts `"1"` or `"true"` | required to write |
-| `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | to build | required |
-| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | to build | required |
+| `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | **credential exists and is verified** against the live API (subject 28170669, expires 2027-08-16, scopes sufficient); the code that reads it is to build | required |
+| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | to build — **and the value is not yet known.** The only existing shop is Shopify-channel; a dedicated store is being created. **Never hard-code 28599902, and never default to the first shop listed** | required |
 
 **Credential resolution is the shipped one and is not re-specified here.** The precedence —
 an explicit `STRIPE_SECRET_KEY` short-circuits the connector entirely, so the webhook secret
@@ -679,8 +788,15 @@ work made idempotent under the order's deterministic key.
 
 ## Cash flow and custody timeline
 
-One $39 poster, traced end to end, with every point money is held, by whom, and for how
+One $8 sticker, traced end to end, with every point money is held, by whom, and for how
 long. This is the section that decides whether KAX is holding third-party money.
+
+The object is the v0.1 product and the figure is a plausible retail price for it, not a
+decision: **this ADR does not set the price**, for the same reason it does not set the
+platform-fee rate — that is an operator call, to be made and recorded before the first charge.
+What the arithmetic has to do is hang together, so every amount below is the same $8.00 charge
+followed through the whole flow rather than a mechanism illustrated with a number from a
+different product.
 
 **Each merchant connects their own POD account and is billed directly by the provider.**
 KAX never fronts manufacturing cost and never carries a merchant receivable. In v0.1 this is
@@ -698,7 +814,7 @@ would describe a Connect topology that is not being provisioned.
 
 ```
   buyer's card
-      │  $39.00 + tax, authorized and captured at checkout
+      │  $8.00 + shipping + tax, authorized and captured at checkout
       ▼
   STRIPE                                    holds full charge    0–2 business days
       │  processor fee deducted at settlement                    immediate
@@ -714,8 +830,9 @@ would describe a Connect topology that is not being provisioned.
       └────────────────────────────► state remittance            up to ~50 days
 
   POD COST
-      the operating entity's own stored payment method,
-      charged by Printify at order submission                    consumed at T+0
+      the operating entity's own stored payment method, charged
+      by Printify at order submission — billing trigger STILL
+      UNVERIFIED, see dependency 2                              consumed at T+0
 
   CHARGEBACK EXPOSURE on the full charge                         ~120 days
       lands on the operating entity — it is merchant of record
@@ -730,7 +847,7 @@ them — but nothing external corroborates them until Connect exists.
 
 ```
   buyer's card
-      │  $39.00 + tax, authorized and captured at checkout
+      │  $8.00 + shipping + tax, authorized and captured at checkout
       ▼
   STRIPE                                    holds full charge    0–2 business days
       │
@@ -746,7 +863,8 @@ them — but nothing external corroborates them until Connect exists.
 
   POD COST
       merchant's own stored payment method, charged by Printify
-      at order submission                                        consumed at T+0
+      at order submission — billing trigger STILL UNVERIFIED,
+      see dependency 2                                           consumed at T+0
 
   CHARGEBACK EXPOSURE on the full charge                         ~120 days
       lands on the connected account — it is merchant of record
@@ -783,7 +901,7 @@ about the ledger as built, not preferences:
 - `CREATE UNIQUE INDEX credit_ledger_prev_hash_uq` (migration 0013) makes the chain
   **strictly linear**. A `usd` asset would interleave its entries into the play_credit
   chain. It could not then be audited, frozen, or migrated independently of play credits.
-- `LEDGER_ADVISORY_KEY = 0x1ed6e401` serializes **every** append process-wide. Every poster
+- `LEDGER_ADVISORY_KEY = 0x1ed6e401` serializes **every** append process-wide. Every physical
   sale would queue behind every prediction trade, and vice versa.
 - `verifyChain` is **asset-blind**: it walks every row in sequence and recomputes hashes.
   There is no way to verify the dollar chain without verifying the credit chain.
@@ -813,7 +931,7 @@ The justification is in what `listing_orders` actually stores. It has nine colum
 - **`listing_id INTEGER NOT NULL REFERENCES store_listings(id) ON DELETE CASCADE`**
   (migration 0025 `:17`). A physical order must not be keyed on `store_listings` at all. It is
   keyed on `(artifact_id, product_spec_id, merchant_id)` — the commerce product row — because
-  the same artifact is a different product as a 12×12 poster than as a sticker, and
+  the same artifact is a different product as a 12 × 18 poster than as a sticker, and
   `store_listings` has no notion of a product spec. And the cascade is disqualifying on its
   own: this ADR's rule, argued at length under Stage 3, is **no FK to a table the deploy diff
   can drop**, because the Replit publish step has already eaten `residence_units` and
@@ -849,7 +967,7 @@ What **is** copied from `listing_orders`, because the shipping session got it ri
 
 The two tables are **never joined and never unioned**. "All my purchases" across both is a
 question for a view or an application-level merge, not for a shared table — and that question
-does not arise in v0.1, which sells one poster.
+does not arise in v0.1, which sells one sticker.
 
 **One registration gap to close, in the shipped table.** This ADR's deployment rule 1 requires
 every commerce table in three places. `listing_orders` is in the migration and in the drizzle
@@ -897,10 +1015,11 @@ table above has no `trader -> house` redemption shape to grant.
 
 ## The commerce event: a signed, balanced leg set
 
-`{"gross": {"amount": 39, "currency": "USD"}}` is not a record of anything. Thirty-nine is
-neither the amount charged (tax and shipping are on top) nor the amount kept (fees and
-manufacturing come off), so it reconciles to no external report and margin cannot be derived
-from it.
+`{"gross": {"amount": 8, "currency": "USD"}}` is not a record of anything. Eight is neither
+the amount charged (tax and shipping are on top) nor the amount kept (fees and manufacturing
+come off), so it reconciles to no external report and margin cannot be derived from it. On a
+small object the gap is proportionally larger, not smaller: shipping and the fixed part of the
+processor fee do not shrink with the sticker.
 
 `commerce.order.paid` therefore carries a **signed, balanced leg set**. Every amount is
 `{ entity, amount (integer USD cents), currency }`, and where an amount is a rate, it also
@@ -951,9 +1070,12 @@ holds and the fields are still recorded, because they are what v0.2 migrates and
 is computed from.
 
 **(c) POD cash flow — recorded, and explicitly OUTSIDE the sum-to-zero invariant.** Printify
-charges the merchant's stored payment method at order submit; that money never passes
-through the Stripe charge, so it cannot be a leg of a set that balances against
-`customer_charge`. It is a separate cash flow, on its own clock.
+charges the merchant's stored payment method directly — believed to be at order submit, though
+that trigger is **still unverified** and is dependency 2 in the register. The exclusion does
+not rest on the timing: whenever the charge lands, that money never passes through the Stripe
+charge, so it cannot be a leg of a set that balances against `customer_charge`. It is a
+separate cash flow, on its own clock — and `paid_at` below is recorded as observed rather than
+assumed, which is what will settle the trigger once a real order runs.
 
 | Amount | Carries |
 |---|---|
@@ -980,9 +1102,11 @@ visible does not imply it is ready for commerce, and the two predicates are sepa
 design.
 
 State is keyed on **`(artifact_id, product_spec_id, channel)`**. Eligibility is inherently
-per-product: the same artifact can be a native pass as a sticker, need upscaling as a 12×12
-poster, and be flatly unsuitable as a 24×24 canvas. A single per-artifact commerce status
-would be a lie about two of those three.
+per-product: the same artifact can be a native pass as a sticker, need upscaling as a 12 × 18
+poster, and be flatly unsuitable as a 24 × 24 canvas. A single per-artifact commerce status
+would be a lie about two of those three. That is no longer a hypothetical — it is the measured
+state of every artifact checked, and the `artifacts-small`-only bucket makes 1024 px a ceiling
+for the rest. It is why v0.1's product is the first of the three and not the second.
 
 | From | Event | To |
 |---|---|---|
@@ -991,7 +1115,7 @@ would be a lie about two of those three.
 | `not_evaluated` | rights preflight inconclusive | `review_required` |
 | `rights_checked` | asset measured, meets spec | `asset_checked` |
 | `rights_checked` | fetch / decode / sentinel / too small | `asset_insufficient` |
-| `asset_checked` | product spec satisfied at `minimum_ppi` | `product_eligible` |
+| `asset_checked` | product spec satisfied at its `required_px` | `product_eligible` |
 | `asset_checked` | product spec not satisfied | `asset_insufficient` |
 | `product_eligible` | **human merchant approves** (no automated edge) | `merchant_approved` |
 | `merchant_approved` | live re-check passes, content hash matches | `channel_ready` |
@@ -1022,9 +1146,10 @@ state transitions back to `product_eligible` and requires fresh human approval.*
 not warn and continue.
 
 The reason for pinning to content rather than to a timestamp is that **KAX does not control
-the asset host.** `public_url` points at OBC's Supabase bucket. Those bytes can be replaced
-with no KAX-side write, no `updated_at` change, and nothing at all to notice — the merchant
-approved a photograph and the poster prints something else.
+the asset host.** `public_url` points at OBC's Supabase bucket — measured, and confirmed to be
+`kfzxdetopeikrvschdwc.supabase.co`, a host with no KAX credential on it. Those bytes can be
+replaced with no KAX-side write, no `updated_at` change, and nothing at all to notice — the
+merchant approved a photograph and the sticker prints something else.
 
 One implementation hazard to name, and it is narrower than the original draft claimed. The
 revocation gate is `isRevoked` (`lib/revocation.ts:33`), and it is reached from **exactly one
@@ -1315,8 +1440,25 @@ deliberate choice, not a side effect noticed later.
 ## Stage 2 — printability preflight
 
 Printability is load-bearing. A 1024×1024 image supports 3.41 inches at 300 PPI; a 24-inch
-print at 300 PPI needs 7200 pixels. Assuming otherwise ships a blurry poster to a paying
-customer.
+print at 300 PPI needs 7200 pixels. Assuming otherwise ships a blurry print to a paying
+customer. That is the lesson, and it is why the gate exists at all.
+
+But notice what the arithmetic quietly assumed: **300 PPI everywhere.** The measured catalogue
+says that is false. Across the sticker blueprints read under "What the assets actually
+measure", the implied density runs from **~257 PPI** (900 px across 3.5 in, blueprint 476)
+through ~277 PPI (832 px across 3 in, blueprint 400) and ~280 PPI (559 px across 2 in) to
+**exactly 300 PPI** (600 px across 2 in, blueprint 476) — four densities inside three
+blueprints, on sizes that look interchangeable from the outside. Posters happen to be a
+uniform 300 PPI at every variant; stickers are not, and nothing tells an implementer which case
+they are in except asking the provider.
+
+So the arithmetic above is an explanation of *why* the gate exists and never a way to compute
+it. **The required pixels come from `placeholders[].width` and `placeholders[].height` for the
+specific `(blueprint, print_provider, variant)`, read from the provider API and stored on the
+product spec — never from inches × an assumed DPI.** A spec derived at 300 PPI would demand
+1050 px for a 3.5-inch sticker that actually needs 900, and would refuse, as
+`asset_insufficient`, the one native pass KAX can serve today. A rule that rejects work KAX
+can do is as expensive as one that approves work it cannot.
 
 ### The metadata does not exist
 
@@ -1338,7 +1480,7 @@ Minimum v0.1 field set:
 | Field | Source | Note |
 |---|---|---|
 | `width_px`, `height_px` | decoded from bytes | the actual gate |
-| `format` | decoded from bytes | |
+| `format` | decoded from bytes | never from the extension or `Content-Type` — measured OBC assets parse as **JPEG** while named `.png` and served as `image/png` |
 | `has_alpha` | decoded from bytes | |
 | `byte_size` | fetch | custody record |
 | `sha256` | fetch | **required for approval pinning** |
@@ -1356,7 +1498,10 @@ eventually justify a bad print.
 **(a) The printability engine MUST measure `public_url`, never `thumbnail_url`.**
 `lib/harvesterJob.ts:88` writes `thumbnailUrl: pa.thumbnail_url ?? pa.public_url` — so for
 many rows the thumbnail *is* the full asset, and for the rest, measuring the thumbnail would
-approve a print the source cannot support.
+approve a print the source cannot support. The measurement confirms the first half literally:
+on all six artifacts checked, `publicUrl` and `thumbnailUrl` were the same URL and the same
+bytes. The rule still stands as written, because it costs nothing when the two agree and it is
+the only thing standing between a future divergence and an approved print.
 
 **(b) `public_url` and `thumbnail_url` are not always URLs.** OBC uses `inline:` sentinels
 (see `routes/showcase.ts:67`, which skips them). Validate against `/^https?:\/\//i` **before**
@@ -1382,9 +1527,20 @@ commercialized. There is **no bulk backfill** of the harvested corpus. Three rea
 
 ## Print masters, upscaling, and what KAX actually holds
 
-**v0.1 accepts only `native_pass` products.** Pick a poster size the source artifact already
-satisfies at the product's `minimum_ppi`, and refuse everything else with
-`asset_insufficient`. No upscaling, no quality review, no derived asset.
+**v0.1 accepts only `native_pass` products.** The spec is the one named under "The v0.1
+product spec" — a sticker size the source artifact already satisfies at the print area the
+provider API reports — and everything else is refused with `asset_insufficient`. No upscaling,
+no quality review, no derived asset.
+
+**With a sticker as the v0.1 product, no upscaler is needed at all**, and that is worth stating
+as a consequence rather than leaving as an inference. The measurement did not merely rule a
+poster out; it removed the only reason v0.1 would have had to build or buy an upscaler in the
+first place. Nothing on the v0.1 path depends on a derived print master: the file handed to
+Printify is the artifact's own `public_url`, byte for byte, `print_master_id` in the
+`approved_content_hash` tuple is null for a native pass, and the sha256 that pins merchant
+approval is a hash of the source bytes rather than of anything KAX produced. If any v0.1 step
+ever needs a derived asset, it has stopped being a native pass and the answer is to refuse the
+product, not to generate the file.
 
 The fact that collapses the rest of this problem: **Printify's `POST /v1/uploads/images.json`
 accepts an image by URL** and stores the file in the merchant's media library. So v0.1 hands
@@ -1410,10 +1566,23 @@ pattern already proven in `routes/arcade.ts` (`hostAllowed()` + `FRAME_SIZE_CAP`
 **pure-JS header parse**. Not `sharp`: it appears only in `build.mjs`'s esbuild externals and
 would be a native dependency inside a bundled CJS deploy.
 
-Upscaling, print masters, quality review and object storage move **wholesale to v0.2**. And
-the thing to record for that day: **KAX custody of source bytes becomes required the moment a
-derived print master exists**, because a derived asset cannot be regenerated from a URL that
-has rotated.
+Upscaling, print masters, quality review and object storage move **wholesale to v0.2** — where
+every earlier draft of this ADR wanted them anyway, but now for a stated reason rather than as
+a scope preference. **Upscaling is the v0.2 capability that unlocks the formats the measurement
+rules out today.** Posters start at 2700 × 3300 and the corpus tops out at 1024 × 1024; the
+4 × 4 in sticker misses by 8%. Every one of those becomes reachable the day a derived print
+master exists and not one day earlier, which makes upscaling the single highest-leverage item
+in v0.2 rather than a polish task — it is the difference between one sellable format and a
+catalogue.
+
+Two obligations come with it on the day it lands, both recordable now. **KAX custody of source
+bytes becomes required the moment a derived print master exists**, because a derived asset
+cannot be regenerated from a URL that has rotated — and the measurement makes that sharper than
+it reads: the source host is OBC's, `artifacts-small` is the only bucket, and there is no
+larger original to re-derive from if those bytes change. And an upscaled master is a **new
+asset with its own provenance**, so it takes its own row, its own sha256, its own
+`source_artifact_id` edge under "Derivative lineage", and a fresh merchant approval — an
+approval pinned to the source bytes does not carry to a file KAX generated afterwards.
 
 ## Stage 3 — product factory
 
@@ -1481,6 +1650,31 @@ is the same class of external-approval dependency that is the first reason this 
 for deferring Etsy. Choosing multi-merchant OAuth for a one-merchant v0.1 would import that
 dependency for no benefit.
 
+### What is verified about the Printify account, and what is not
+
+The token half of this is done and was exercised against the live API, so it is recorded as
+fact rather than as a step to take. `Authorization: Bearer <token>` against
+`https://api.printify.com/v1/` authenticates as subject **28170669**, expiring **2027-08-16**,
+and the granted scopes cover `shops.manage`, `catalog.read`, `orders.read` / `orders.write`,
+`products.read` / `products.write`, `webhooks.read` / `webhooks.write`, `uploads.read` /
+`uploads.write` and `print_providers.read` — every scope the adapter contract below needs,
+including the `uploads.*` pair that upload-by-URL depends on and the `webhooks.*` pair the
+tracking write-back depends on. Nothing in the v0.1 path is blocked on a missing permission.
+
+**The shop is the open half.** `GET /v1/shops.json` returns exactly **one** shop — id
+28599902, "My Shopify Store", `sales_channel: "shopify"` — and that is the wrong shape for
+this integration. A Shopify-channel shop exists to push products into a Shopify storefront;
+v0.1 sells through KAX's own hosted Checkout and submits orders by API, which wants a shop
+whose channel is the API rather than someone else's storefront. The operator has decided to
+**create a dedicated store for KAX** rather than repurpose that one.
+
+The consequence for the implementer is small and easy to get wrong: **`KAX_PRINTIFY_SHOP_ID`
+is not yet known, and must not be hard-coded to 28599902.** It is an open operator dependency,
+registered below, and it is the one credential in the v0.1 set that cannot be filled in from
+anything measured so far. Resolve it from configuration, refuse to start the fulfilment path
+without it, and never fall back to "the first shop the list returns" — a silent fallback there
+publishes KAX's product into a Shopify store the operator never intended to sell from.
+
 Rate limits belong in the adapter contract so retry and backoff are designed in rather than
 discovered:
 
@@ -1489,10 +1683,14 @@ discovered:
 - 200 product publishes per 30 minutes
 - **an error rate above 5% of total requests is itself a violation**
 
-**MUST VERIFY before build:** whether Printify charges the merchant's stored payment method
-**at order-submit time**, and therefore requires a card on file before any order can be
-placed at all. This determines whether the payment method is a hard blocker in the dependency
-register (it is listed as one, pending verification).
+**STILL UNVERIFIED:** whether Printify charges the merchant's stored payment method **at
+order-submit time**, and therefore requires a card on file before any order can be placed at
+all. The token session above did not settle it and could not: no API response states the
+billing trigger, and reading it off a live submission would mean submitting a real order. It
+needs **one manual order placed through Printify's own UI** to observe when the charge lands.
+Until that happens the payment method stays listed as a hard blocker in the dependency
+register, because the failure mode of guessing wrong is a paid customer order that cannot be
+manufactured.
 
 ```
 KAX product ──► Fulfilment adapter ──► POD provider ──► manufacture ──► ship
@@ -1601,8 +1799,9 @@ compressed.
 | 0 | **Issue #269 closed** — `store_listings.price` no longer readable as both credits and USD | engineering | **HARD — gates the flag, not just the pilot.** Blocks `KAX_COMMERCE_ENABLED=1` in any environment sharing a database with the Joinery | days; a migration plus a behavioural CI test |
 | 0b | **`webBaseUrl()` no longer derived from request headers** (`store-checkout.ts:54-60`) | engineering | **HARD — gates the flag.** Post-charge open redirect | hours |
 | 0c | **`listing_orders` + the two `store_listings.stripe_*` columns added to `ensureCriticalSchema`** | engineering | **HARD — gates the flag.** Two-of-three registration is how `residence_units` was lost | hours |
-| 1 | Printify merchant account + **Personal Access Token** | operator | **HARD** for fulfilment | minutes — self-serve, *My Profile > Connections*; 1-year expiry |
-| 2 | Printify **payment method on file** so orders can be manufactured | operator | **HARD** — *must verify whether Printify charges at order-submit time* | minutes, once #1 exists |
+| 1 | Printify merchant account + **Personal Access Token** | operator | **SATISFIED** — token verified live against `api.printify.com/v1/`: subject 28170669, expires 2027-08-16, scopes cover `shops.manage`, `catalog.read`, `orders.*`, `products.*`, `webhooks.*`, `uploads.*`, `print_providers.read` | done |
+| 1b | **A dedicated Printify store for KAX**, and therefore a value for `KAX_PRINTIFY_SHOP_ID` | operator | **HARD** for fulfilment. The account's only shop today is id 28599902, "My Shopify Store", `sales_channel: "shopify"` — wrong shape for an API-driven integration. The shop id **must not be hard-coded to 28599902** and must not be defaulted to the first shop listed | minutes — self-serve, once the operator creates the store |
+| 2 | Printify **payment method on file** so orders can be manufactured | operator | **HARD** — *still unverified whether Printify charges at order-submit time*; needs one manual order through Printify's own UI to observe | minutes, once #1b exists |
 | 3 | **Stripe account activated for live charges** — requires a legal entity, business identity and a linked bank account | operator | **HARD** blocker for "one real human purchase" | **in progress** — the operator is provisioning Stripe now, which is what makes items 0/0b/0c urgent rather than merely open |
 | 4 | A **legal merchant entity** that owns the Stripe account and is merchant of record | operator | **HARD** — a legal decision, not an engineering task | operator-determined |
 | 5 | **Sales-tax registration** wherever the merchant entity has nexus | operator | SOFT for one test transaction; **HARD before public launch** | unbounded |
@@ -1611,8 +1810,10 @@ compressed.
 | 8 | Printify **OAuth app approval** | operator | **not needed for v0.1** | up to ~1 week, when needed in v0.2 |
 | 9 | Stripe API credentials reaching the server | operator | **satisfied by shipped code** — `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` or the Replit Stripe connector, resolved by `lib/stripeClient.ts`. **An env secret key short-circuits the connector, so the webhook secret must be set in env alongside it** or every delivery fails verification | — |
 
-**Items 1–4 are strictly serial with all engineering work and should be started on day one.
-The code cannot be proven until they exist.**
+**Items 1b–4 are strictly serial with all engineering work and should be started on day one.
+The code cannot be proven until they exist.** Item 1 is now off that list — the token is real
+and works — which moves the Printify critical path from "get access" to "get a shop worth
+publishing into", a shorter task with a different owner's calendar on it.
 
 **Items 0, 0b and 0c are serial with the operator work in a way the original register did not
 anticipate**, because the flag they gate is the same flag item 3's provisioning is heading
@@ -1632,7 +1833,7 @@ drafted, because the digital-listing checkout shipped:
 |---|---|---|
 | OBC/KAX agent identity (`lib/actor.ts` `resolveActor`, `routes/auth-agent.ts` challenge flow) | source width/height inspection | verified merchant relationship |
 | one image artifact | printability evaluation (a pure function comparing px to `required_px`) | rights preflight |
-| **Stripe client + credential resolution** (`lib/stripeClient.ts`) | one poster product definition (a constant: Printify blueprint id + variant id + print-area px) | POD adapter |
+| **Stripe client + credential resolution** (`lib/stripeClient.ts`) | one sticker product definition (a constant: Printify blueprint id + print-provider id + variant id + the print-area px read from `placeholders[]` for that triple) | POD adapter |
 | **hosted Checkout Session creation** (`store-checkout.ts:129`) | shipment/tracking update (one webhook handler) | KAX-native **physical** product page |
 | **`/api/webhooks/stripe` with signature verification** (`webhooks.ts:132`) | audit trail (columns on the order row) | `commerce_orders` + the balanced leg set |
 | **webhook-driven settlement + confirm/repair path** | **redirect base URL** — replace the header-derived `webBaseUrl()` with the `resetLinkBase()` precedence | order creation + fulfilment submission |
@@ -1650,11 +1851,16 @@ it and should be done first for that reason as well as for the safety one.
 
 **The seven steps, in order:**
 
-1. Merchant row + Printify PAT stored **server-side** (`KAX_PRINTIFY_API_TOKEN`,
-   `KAX_PRINTIFY_SHOP_ID`); no agent ever sees a provider credential.
-2. Capture source `width_px`, `height_px` and `sha256` for **one** artifact, lazily, via the
-   allowlisted streaming fetch.
-3. Hard-code **one** poster spec and accept **only** `native_pass`.
+1. Merchant row + Printify PAT stored **server-side** (`KAX_PRINTIFY_API_TOKEN`, verified;
+   `KAX_PRINTIFY_SHOP_ID`, which does not exist yet — see dependency 1b, and refuse to start
+   the fulfilment path rather than defaulting it); no agent ever sees a provider credential.
+2. Capture source `width_px`, `height_px`, `format` and `sha256` for **one** artifact, lazily,
+   via the allowlisted streaming fetch. Expect 1024 × 1024 and JPEG bytes; assert rather than
+   assume, because the whole product choice below rests on those two numbers.
+3. Hard-code **one** sticker spec — blueprint, print provider, variant, and the print-area
+   pixels read from `placeholders[]` for that exact triple — and accept **only**
+   `native_pass`. The recommendation and its runner-up, with ids, are under "The v0.1 product
+   spec"; the final pick is the operator's.
 4. Merchant approval row carrying an **approver id** and the **`approved_content_hash`**.
 5. `commerce_orders` row written **first**, then the Stripe **hosted Checkout Session**
    created under an idempotency key derived from that row (see Stage 3, reuse item 2). This
@@ -1669,11 +1875,12 @@ it and should be done first for that reason as well as for the safety one.
 
 | Cut | Reason |
 |---|---|
-| derived print master | `native_pass` has no print master by definition |
+| derived print master | `native_pass` has no print master by definition — and both candidate v0.1 stickers are native passes (900 × 900 or 832 × 832 required against a measured 1024 × 1024), so whichever the operator picks, nothing on the path wants one |
 | `TaxProvider` interface | the ADR's own wording is "before public launch", and one transaction is not a public launch — Stripe Tax as configuration |
 | normalized commerce event | the `commerce_orders` row **is** the event; the event is its projection |
 | reconciliation engine | one order needs poll-on-read, not a drift engine |
-| upscaling, object storage, multi-product | see print masters — upload-by-URL removes the need |
+| upscaling, object storage, multi-product | upload-by-URL removes the need, and a sticker needs no upscale at all; upscaling is what v0.2 buys the larger formats with |
+| **posters, and every format above the source's 1024 px** | not deferred by preference — **unreachable**. The smallest poster needs 2700 × 3300 and there is no larger original; 4 × 4 in stickers need 1113 px and miss by 8%. They return with upscaling in v0.2 |
 | trademark / likeness review | no producer exists; replaced by merchant indemnity + takedown |
 | multi-merchant Connect | v0.2, committed above, not built now |
 | the full Agent Economic Authority policy engine | v0.1 needs one hard-coded decision, not a policy subsystem — see KAX-ADR-0001's Phase 1a/1b split; the `scopes` claim it would have built on is decoration, minted in `lib/identity.ts:209` and copied forward on refresh (`routes/identity.ts:407`) but enforced by no code path anywhere |
@@ -1860,7 +2067,7 @@ reconcilable.
 Failures become **explicit state**, not silence:
 
 ```
-Poster
+Sticker
   RIGHTS       PASS
   ASSET        PASS
   PRODUCT      CREATED
@@ -1888,17 +2095,20 @@ never unrestricted agent auto-publishing.
 ## Scope and roadmap
 
 **v0.1 out of scope:** Etsy; Shopify; multiple POD providers; multi-channel publishing;
-apparel; many product types; autonomous advertising; automatic refunds; **autonomous USDC
-withdrawal** (structurally absent, not deferred); mass listing generation; fully autonomous
-publishing; NFC provenance; physical certificates; advanced analytics; price optimization;
-cross-platform inventory optimization; **trademark review**; **likeness review**; multi-merchant
-Stripe Connect; embedded checkout; object storage; upscaling.
+apparel; many product types; **posters and every other format the source's 1024 px cannot
+fill** (unreachable, not deferred — see "What the assets actually measure"); autonomous
+advertising; automatic refunds; **autonomous USDC withdrawal** (structurally absent, not
+deferred); mass listing generation; fully autonomous publishing; NFC provenance; physical
+certificates; advanced analytics; price optimization; cross-platform inventory optimization;
+**trademark review**; **likeness review**; multi-merchant Stripe Connect; embedded checkout;
+object storage; upscaling.
 
 **v0.2:** Stripe Connect with direct charges (committed above); multi-merchant Printify OAuth;
-upscaling options and derived print masters (which makes KAX byte custody required); object
-storage; canvas, stickers, apparel; product recommendation; **richer rights evidence including
-trademark and likeness review**; returns and reprints; embedded checkout; margin optimization;
-the creator-payout policy decision.
+**upscaling options and derived print masters — the capability that unlocks posters, canvas
+and the sticker sizes above 1024 px** (and which makes KAX byte custody required); object
+storage; posters, canvas, apparel; larger sticker variants; product recommendation; **richer
+rights evidence including trademark and likeness review**; returns and reprints; embedded
+checkout; margin optimization; the creator-payout policy decision.
 
 **v0.3:** Etsy; commercial API approval; channel-policy engine; draft publishing;
 reconciliation as a real drift engine.
@@ -1915,9 +2125,9 @@ price, prepare, request approval, publish, fulfil, reconcile, learn.
 ```
 canonical artifact
   → verified creator control (live, re-checked at fulfilment)
-  → measured, native-pass printable asset
+  → measured, native-pass printable asset (1024×1024 source, no derived print master)
   → merchant-approved product, pinned by content hash
-  → physical product
+  → one physical sticker
   → one human card purchase through Stripe hosted Checkout
   → manufacturing at Printify
   → shipment with tracking written back
@@ -1933,9 +2143,16 @@ hands, with named units, one merchant, one instrument, one ledger boundary, and 
 which KAX holds money belonging to a third party.
 
 **What it costs.** The v0.1 eligible set is tiny — realistically one operator-owned bot's
-work. Two of the five rights assertions ship as merchant attestations rather than checks, and
-two more do not ship at all. Checkout throws the buyer out of the 3D city and back. And four
-external accounts must be provisioned before a single line of the proof can be executed.
+work. The product is small: a 3-to-3.5-inch sticker, because that is the largest object the
+measured corpus can fill without an upscaler, and the poster this ADR originally committed to
+turns out to be unreachable: the smallest poster Printify sells needs a print file 2.6× wider
+than the source, and the 12 × 12 the earlier draft illustrated is not a variant in the
+catalogue at all. Two of the five rights assertions ship as merchant attestations rather than
+checks, and two more do not ship at all. Checkout throws the buyer out of the 3D city and back.
+And the external accounts must be provisioned before a single line of the proof can be
+executed — **four operator dependencies remain**, register items 1b–4: the dedicated Printify
+store, a Printify payment method on file whose billing trigger is still unverified, the Stripe
+activation, and the legal merchant entity. Only item 1, the Printify token, is off that list.
 
 **What it inherits.** A working Stripe integration — client, credential resolution, hosted
 Checkout, signature-verified webhook, webhook-driven settlement, feature flag, fail-closed
@@ -1950,9 +2167,14 @@ kept; the flag must stay off until the unit is named.
 share (operator: house-minted credits at the peg, or Connect sub-merchant — different
 regulatory weight). Whether KAX or the merchant is tax collector of record under
 marketplace-facilitator statutes once v0.2 merchants exist (operator, with advice). Whether
-Printify charges at order-submit time (must verify — it changes the dependency register).
-Whether the signup grant is inside or outside the purchase caps (operator, with a named
-reason recorded in code either way).
+Printify charges at order-submit time (**still unverified** — it needs one manual order through
+Printify's own UI, and it changes the dependency register). Which Printify shop KAX publishes
+into (operator — a dedicated store is being created; the existing Shopify-channel shop 28599902
+is not it, and nothing may default to it). Which of the two measured sticker specs v0.1 ships —
+3.5 in vinyl on blueprint 476/73/65212, or 3 in kiss-cut on 400/99/45750 (operator; both are
+native passes, so this is a product judgement rather than an engineering constraint). Whether
+the signup grant is inside or outside the purchase caps (operator, with a named reason recorded
+in code either way).
 
 Each of those is named here rather than defaulted, because a defaulted answer to any of them
 would read, later, exactly like a decision.
