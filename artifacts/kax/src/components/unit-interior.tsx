@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Text } from "@react-three/drei";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { useDayPhase } from "@/lib/time-of-day";
@@ -105,7 +105,8 @@ function PlacedPiece({ furnishing }: { furnishing: Furnishing }) {
           minHeight={0.7}
         />
       </group>
-      <Text
+      <Suspense fallback={null}>
+        <Text
         position={[0, place.onFloor ? 0.5 : -0.72, place.onFloor ? 0.37 : 0.05]}
         fontSize={0.062}
         color="#8a8272"
@@ -114,9 +115,10 @@ function PlacedPiece({ furnishing }: { furnishing: Furnishing }) {
         anchorY="middle"
         maxWidth={place.width}
         textAlign="center"
-      >
+        >
         {`${furnishing.title.slice(0, 30)}${furnishing.makerName ? ` · ${furnishing.makerName.slice(0, 20)}` : ""}`}
-      </Text>
+        </Text>
+      </Suspense>
     </group>
   );
 }
@@ -223,7 +225,8 @@ export function UnitInterior({ letter, floor, residentName, north }: UnitInterio
           <boxGeometry args={[1.1, 2.1, 0.1]} />
           <meshStandardMaterial color="#5c4530" roughness={0.6} />
         </mesh>
-        <Text
+        <Suspense fallback={null}>
+          <Text
           position={[0, 2.35, 0.06]}
           rotation={[0, north ? Math.PI : 0, 0]}
           fontSize={0.12}
@@ -232,9 +235,10 @@ export function UnitInterior({ letter, floor, residentName, north }: UnitInterio
           anchorX="center"
           anchorY="middle"
           letterSpacing={0.2}
-        >
+          >
           {`${floor === 12 ? "PH" : floor}${letter}`}
-        </Text>
+          </Text>
+        </Suspense>
       </group>
 
       {/* Window wall: glass, frame, and the city beyond it */}
@@ -327,7 +331,8 @@ export function UnitInterior({ letter, floor, residentName, north }: UnitInterio
 
       {/* Whose flat this is. Vacant says so plainly rather than staying blank —
           an empty nameplate reads as unfinished, and this floor is not. */}
-      <Text
+      <Suspense fallback={null}>
+        <Text
         position={[0, 2.45, windowZ + (north ? 0.06 : -0.06)]}
         rotation={[0, windowFacing, 0]}
         fontSize={0.11}
@@ -336,9 +341,10 @@ export function UnitInterior({ letter, floor, residentName, north }: UnitInterio
         anchorX="center"
         anchorY="middle"
         letterSpacing={0.18}
-      >
+        >
         {residentName ? residentName.toUpperCase() : "UNOCCUPIED"}
-      </Text>
+        </Text>
+      </Suspense>
     </group>
   );
 }

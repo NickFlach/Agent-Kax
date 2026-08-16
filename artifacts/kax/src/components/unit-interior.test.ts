@@ -80,4 +80,22 @@ describe("unit interior", () => {
       expect(y, `${p[1]} is through the ceiling`).toBeLessThan(H);
     }
   });
+  it("wraps every label in a Suspense boundary", () => {
+    // drei's <Text> suspends while the display font loads. With no boundary in
+    // this file the nearest one is the route's, so a cold fetch can hold back
+    // more than one label — the failure the store interior already had, fixed
+    // the same way in nineteen other places. Typecheck and build both pass
+    // either way; it shows only on a cold cache, in a browser.
+    //
+    // The guard is written over the SOURCE rather than a render, so it covers
+    // the <Text> somebody adds next month, not just the three that were here.
+    const offenders: string[] = [];
+    for (const m of INTERIOR.matchAll(/<Text[\s>]/g)) {
+      const before = INTERIOR.slice(0, m.index!);
+      const opened = (before.match(/<Suspense/g) ?? []).length;
+      const closed = (before.match(/<\/Suspense>/g) ?? []).length;
+      if (opened <= closed) offenders.push(`line ${before.split(/\r?\n/).length}`);
+    }
+    expect(offenders, "<Text> rendered with no Suspense above it").toEqual([]);
+  });
 });
