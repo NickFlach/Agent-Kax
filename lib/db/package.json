@@ -8,7 +8,8 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "migrate:prove-idempotent": "tsx src/proveIdempotent.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

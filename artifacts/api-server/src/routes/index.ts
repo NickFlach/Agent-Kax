@@ -33,6 +33,8 @@ import presenceRouter from "./presence";
 import cityRouter from "./city";
 import mcpRouter from "./mcp";
 import storeCheckoutRouter from "./store-checkout";
+import purchasingRouter from "./purchasing";
+import commerceRouter from "./commerce";
 
 const router: IRouter = Router();
 
@@ -60,6 +62,8 @@ router.use(agentStorefrontRouter);
 router.use(harvesterRouter);
 router.use(storefrontRouter);
 router.use(storeCheckoutRouter);
+router.use(purchasingRouter);
+router.use(commerceRouter);
 router.use(dashboardRouter);
 router.use(shareRouter);
 router.use(webhooksRouter);

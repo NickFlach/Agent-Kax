@@ -124,6 +124,39 @@ router.post(
   },
 );
 
+/**
+ * The fields this handler reads off a verified Stripe event, and no more.
+ *
+ * Written out rather than imported from `stripe` because the two settlement
+ * branches below want the same envelope for two different object types — a
+ * Checkout Session and a PaymentIntent — and each one checks the fields it
+ * needs before using them.
+ */
+interface StripeEventBody {
+  type?: string;
+  data?: {
+    object?: {
+      id?: string;
+      payment_status?: string;
+      metadata?: Record<string, string> | null;
+      /**
+       * On a Charge and on a Dispute alike, the intent the money moved under.
+       * It is the only name for our order that a `charge.*` event carries —
+       * `metadata.kaxCommerceOrderId` lives on the PaymentIntent, not here.
+       */
+      payment_intent?: string | { id?: string } | null;
+      /** On a Dispute: `won`, `lost`, `warning_closed`, … */
+      status?: string;
+    };
+  };
+}
+
+/** Stripe writes a linked object as a bare id or as the expanded object. */
+function intentIdOf(value: string | { id?: string } | null | undefined): string | null {
+  if (typeof value === "string") return value;
+  return typeof value?.id === "string" ? value.id : null;
+}
+
 // ── Stripe webhook ──────────────────────────────────────────────────────
 // Raw body required for signature verification; the app-level JSON parser
 // already skips every /api/webhooks/* path (see skipForWebhooks in app.ts).
@@ -145,15 +178,24 @@ router.post("/webhooks/stripe", raw({ type: "application/json" }), async (req, r
     const { WebhookHandlers } = await import("../lib/webhookHandlers");
     await WebhookHandlers.processWebhook(req.body as Buffer, sig as string);
     // processWebhook verified the signature, so the payload is trusted now.
+    // Parsed once here for both settlement branches below. processWebhook has
+    // already parsed and verified this exact buffer, so a failure is not a
+    // malformed delivery — it is returned as null, both branches are skipped,
+    // and the delivery is still acknowledged, because redelivering a body that
+    // cannot be parsed will not parse on the next attempt either.
+    let event: StripeEventBody | null = null;
+    try {
+      event = JSON.parse((req.body as Buffer).toString("utf8")) as StripeEventBody;
+    } catch (err) {
+      req.log.error({ err }, "Stripe webhook: verified body did not parse");
+    }
+
+    // ── Digital settlement (store_listings → listing_orders) ──────────────
     // Settle listing orders from the webhook (idempotent) — a buyer who
     // never returns to the success page still gets a paid order.
     try {
-      const event = JSON.parse((req.body as Buffer).toString("utf8")) as {
-        type?: string;
-        data?: { object?: { id?: string; payment_status?: string } };
-      };
-      const session = event.data?.object;
-      if (event.type === "checkout.session.completed" && session?.id && session.payment_status === "paid") {
+      const session = event?.data?.object;
+      if (event?.type === "checkout.session.completed" && session?.id && session.payment_status === "paid") {
         const { db } = await import("@workspace/db");
         const { listingOrdersTable } = await import("@workspace/db/schema");
         const { eq } = await import("drizzle-orm");
@@ -165,6 +207,108 @@ router.post("/webhooks/stripe", raw({ type: "application/json" }), async (req, r
     } catch (err) {
       req.log.error({ err }, "Stripe webhook: order settlement failed (sync already succeeded)");
     }
+
+    // ── Physical settlement (commerce_orders) ────────────────────────────
+    //
+    // The seam. The branch above swallows its failure and still answers 200;
+    // this one answers 500 and lets Stripe redeliver. That difference is
+    // deliberate, and it is not an inconsistency between two copies of the same
+    // idea.
+    //
+    // The digital path has a second settler: the buyer is redirected to a
+    // success page which calls `/store/orders/confirm`, so a lost webhook
+    // settlement is recovered by the next thing that happens anyway, and
+    // failing the delivery would only make Stripe re-run a `processWebhook`
+    // that already succeeded.
+    //
+    // The physical path has no redirect. The buyer stays in the tab, the charge
+    // is a card payment already taken, and this write is what turns it into a
+    // paid order that can be fulfilled. A swallowed failure here leaves money
+    // moved and an order stuck at `pending_payment` with nothing scheduled to
+    // look at it again. So the delivery is failed on purpose: Stripe's
+    // redelivery is the retry, and the settlement statement is idempotent
+    // precisely so that being run again is free.
+    const intent = event?.data?.object;
+    const isCommerceIntent =
+      (event?.type === "payment_intent.succeeded" || event?.type === "payment_intent.payment_failed") &&
+      typeof intent?.id === "string";
+    if (isCommerceIntent && intent) {
+      const orderId = Number(intent.metadata?.["kaxCommerceOrderId"]);
+      // No order id in the metadata means this intent is not ours — the same
+      // Stripe account can carry payments this table knows nothing about.
+      if (Number.isInteger(orderId) && orderId > 0) {
+        const status = event?.type === "payment_intent.succeeded" ? "paid" : "payment_failed";
+        try {
+          const { settleCommerceOrderByIntent, settleCommerceOrderById } = await import("./commerce");
+          const settled = await settleCommerceOrderByIntent(intent.id!, status);
+          // Nothing moved: either the order is already settled, or its row
+          // never received the intent id — the window between Stripe creating
+          // the intent and us writing it down. The id in the metadata is the
+          // second name for that row, so the charge reconciles either way.
+          if (settled === 0) await settleCommerceOrderById(orderId, intent.id!, status);
+        } catch (err) {
+          req.log.error(
+            { err, paymentIntentId: intent.id, orderId },
+            "Stripe webhook: commerce order settlement failed — asking Stripe to redeliver",
+          );
+          res.status(500).json({ error: "Commerce order settlement failed" });
+          return;
+        }
+      }
+    }
+
+    // ── Physical reversal (commerce_orders) ──────────────────────────────
+    //
+    // The money coming BACK. Without these branches an order refunded in the
+    // Stripe dashboard, or one lost to a dispute, keeps `status = 'paid'`
+    // forever — and `POST /admin/commerce-orders/:id/submit` gates on exactly
+    // that literal, so the desk would press submit, Printify would print and
+    // ship, and KAX would pay a manufacturer for a parcel against money that has
+    // already gone back to the buyer. The two-step submit/release is the fraud
+    // backstop, and a human staring at the row has nothing to go on unless the
+    // row says the charge was reversed.
+    //
+    // These writes carry no terminal-status guard, deliberately: that guard
+    // exists to stop a late failure demoting a success and it would block
+    // precisely these transitions. They key on the payment intent instead —
+    // the only name for our order a `charge.*` object carries.
+    //
+    // Same posture as the settlement above: a failed write answers non-2xx so
+    // Stripe redelivers, because an order still reading `paid` after a
+    // chargeback is a parcel about to be printed.
+    const reversalType = event?.type;
+    const chargeObject = event?.data?.object;
+    const reversalIntentId = intentIdOf(chargeObject?.payment_intent);
+    if (
+      reversalIntentId &&
+      (reversalType === "charge.refunded" ||
+        reversalType === "charge.dispute.created" ||
+        reversalType === "charge.dispute.closed")
+    ) {
+      try {
+        const { reverseCommerceOrderByIntent, clearCommerceOrderChargeback } = await import("./commerce");
+        if (reversalType === "charge.refunded") {
+          await reverseCommerceOrderByIntent(reversalIntentId, "refunded");
+        } else if (reversalType === "charge.dispute.created") {
+          await reverseCommerceOrderByIntent(reversalIntentId, "chargeback");
+        } else if (chargeObject?.status === "won") {
+          // The dispute closed in our favour, so the funds are ours again and
+          // the order is fulfillable. Narrowed to rows still at `chargeback` by
+          // the statement itself, so a refunded order is not resurrected.
+          await clearCommerceOrderChargeback(reversalIntentId);
+        } else {
+          await reverseCommerceOrderByIntent(reversalIntentId, "chargeback");
+        }
+      } catch (err) {
+        req.log.error(
+          { err, paymentIntentId: reversalIntentId, eventType: reversalType },
+          "Stripe webhook: commerce order reversal failed — asking Stripe to redeliver",
+        );
+        res.status(500).json({ error: "Commerce order reversal failed" });
+        return;
+      }
+    }
+
     res.status(200).json({ received: true });
   } catch (err) {
     req.log.error({ err }, "Stripe webhook processing error");

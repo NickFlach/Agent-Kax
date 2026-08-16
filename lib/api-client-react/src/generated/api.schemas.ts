@@ -250,6 +250,82 @@ export interface AuthUserEnvelope {
   user: AuthUser | null;
 }
 
+/**
+ * Whether an account may buy a physical good, and if not, why not.
+Derived on every read from the rows on file plus the clock — never
+stored, because a stored flag is wrong the moment a card expires.
+Listed in rank order: when several apply, the first is reported as
+`state` and all of them appear in `reasons`.
+
+ */
+export type PurchasingStateCode =
+  (typeof PurchasingStateCode)[keyof typeof PurchasingStateCode];
+
+export const PurchasingStateCode = {
+  disabled: "disabled",
+  anonymous: "anonymous",
+  not_configured: "not_configured",
+  unsupported_destination: "unsupported_destination",
+  needs_address: "needs_address",
+  needs_payment_method: "needs_payment_method",
+  pm_detached: "pm_detached",
+  card_expired: "card_expired",
+  consent_stale: "consent_stale",
+  cap_reached: "cap_reached",
+  card_expiring: "card_expiring",
+  ready: "ready",
+} as const;
+
+/**
+ * Display metadata for the saved card. Outside PCI scope; there is nothing else about a card this API knows.
+ */
+export interface PurchasingCard {
+  /** @nullable */
+  brand: string | null;
+  /** @nullable */
+  last4: string | null;
+  /** @nullable */
+  expMonth: number | null;
+  /** @nullable */
+  expYear: number | null;
+}
+
+/**
+ * Country and postal code of the live shipping address, and nothing else.
+The recipient name, street lines and city are never returned.
+
+ */
+export interface PurchasingShipsTo {
+  /** ISO 3166-1 alpha-2 */
+  country: string;
+  postalCode: string;
+}
+
+export interface PurchasingSnapshot {
+  state: PurchasingStateCode;
+  /** Everything true about the account, most blocking first. Empty when ready. */
+  reasons: PurchasingStateCode[];
+  card: PurchasingCard | null;
+  shipsTo: PurchasingShipsTo | null;
+  /**
+   * Stored-card terms version this account accepted, or null.
+   * @nullable
+   */
+  consentVersion: string | null;
+}
+
+/**
+ * The current-session read. Separate from AuthUserEnvelope because the
+sign-in responses share that one and do not compute purchasing state;
+making `purchasing` optional there would reintroduce exactly the
+silently-stripped-field trap this field was added under.
+
+ */
+export interface CurrentUserEnvelope {
+  user: AuthUser | null;
+  purchasing: PurchasingSnapshot;
+}
+
 export const LogoutSuccessValue = {
   success: true,
 } as const;
