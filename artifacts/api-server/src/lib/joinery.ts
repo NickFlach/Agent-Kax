@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   agentsTable,
@@ -223,6 +223,53 @@ export async function list(input: ListingInput): Promise<ListingResult> {
   };
 }
 
+/**
+ * The furniture this agent has made, with the ids needed to sell it.
+ *
+ * joinery_sell takes an artifactId and nothing in the city would tell an agent
+ * what its own artifact ids ARE. The tool validated its input, refused
+ * politely, and could not be called correctly by anybody without a browser —
+ * which is the one thing the MCP surface exists to prevent. This is the
+ * missing first step: what have I made, and what am I already asking for it.
+ *
+ * Attribution matches the storefront's own rule — the artifact's agent_id, or
+ * its creator_bot_id, which survives a rename in a way a display name does not.
+ */
+export async function worksForSale(agent: { id: number; obcBotId: string | null }): Promise<Array<{
+  artifactId: number;
+  title: string;
+  thumbnailUrl: string | null;
+  /** What you are currently asking, or null if it is on display only. */
+  price: number | null;
+  listingId: number | null;
+}>> {
+  const mine = agent.obcBotId
+    ? or(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.creatorBotId, agent.obcBotId))
+    : eq(artifactsTable.agentId, agent.id);
+
+  const rows = await db
+    .select({
+      artifactId: artifactsTable.id,
+      title: artifactsTable.title,
+      thumbnailUrl: artifactsTable.thumbnailUrl,
+      price: storeListingsTable.price,
+      listingId: storeListingsTable.id,
+    })
+    .from(artifactsTable)
+    .leftJoin(
+      storeListingsTable,
+      and(
+        eq(storeListingsTable.artifactId, artifactsTable.id),
+        eq(storeListingsTable.storeAgentId, agent.id),
+      ),
+    )
+    .where(and(mine, eq(artifactsTable.artifactType, "furniture")))
+    .orderBy(desc(artifactsTable.id))
+    .limit(100);
+
+  return rows.map((r) => ({ ...r, price: r.price === null ? null : Math.round(r.price) }));
+}
+
 /** What this store currently offers, priced or not, so a seller can see it. */
 export async function listingsOfAgent(agentId: number): Promise<Array<{
   listingId: number;
@@ -288,6 +335,7 @@ export async function purchase(input: PurchaseInput): Promise<PurchaseResult> {
       price: storeListingsTable.price,
       artifactType: artifactsTable.artifactType,
       makerName: artifactsTable.creatorName,
+      makerBotId: artifactsTable.creatorBotId,
       sellerAgentId: agentsTable.id,
       sellerName: agentsTable.displayName,
       sellerObcBotId: agentsTable.obcBotId,
@@ -335,15 +383,32 @@ export async function purchase(input: PurchaseInput): Promise<PurchaseResult> {
   // share. That is the same mistake refused below for the seller, so it is
   // refused here too — the royalty is paid only to a maker the city can
   // actually identify.
-  const makerAgent = listing.makerName
-    ? (
-        await db
-          .select({ id: agentsTable.id, obcBotId: agentsTable.obcBotId })
-          .from(agentsTable)
-          .where(sql`lower(${agentsTable.displayName}) = ${listing.makerName.trim().toLowerCase()}`)
-          .limit(1)
-      )[0] ?? null
-    : null;
+  //
+  // By BOT ID first. creator_bot_id is on the artifact and is the same
+  // identifier the storefront uses to decide whose work something is; matching
+  // display names was the fallback written before I noticed the column, and it
+  // is fragile exactly where it matters — "Mosi Ī˹" is a real maker in this
+  // city, and a royalty that depends on reproducing that string is a royalty
+  // that will one day quietly not be paid.
+  const makerAgent =
+    (listing.makerBotId
+      ? (
+          await db
+            .select({ id: agentsTable.id, obcBotId: agentsTable.obcBotId })
+            .from(agentsTable)
+            .where(eq(agentsTable.obcBotId, listing.makerBotId))
+            .limit(1)
+        )[0]
+      : undefined) ??
+    (listing.makerName
+      ? (
+          await db
+            .select({ id: agentsTable.id, obcBotId: agentsTable.obcBotId })
+            .from(agentsTable)
+            .where(sql`lower(${agentsTable.displayName}) = ${listing.makerName.trim().toLowerCase()}`)
+            .limit(1)
+        )[0] ?? null
+      : null);
 
   // Resolving by row id when we can beats comparing names: a store that
   // renamed itself would otherwise start paying itself a royalty.

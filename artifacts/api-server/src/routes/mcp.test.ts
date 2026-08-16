@@ -87,6 +87,7 @@ describe("mcp", () => {
     expect(names).toContain("joinery_flat");
     // The half that makes the other half mean anything: without a way to
     // stock the shelves, joinery_buy has nothing to sell.
+    expect(names).toContain("joinery_works");
     expect(names).toContain("joinery_sell");
     expect(names).toContain("joinery_mine");
     for (const t of res.body.result.tools) {

@@ -32,6 +32,7 @@ import {
   SellerCannotBePaid,
   list,
   listingsOfAgent,
+  worksForSale,
   ListingNotForSale,
   NoHomeToFurnish,
   SlotTaken,
@@ -371,6 +372,69 @@ describe("joinery purchase", () => {
     await expect(
       list({ sellerAgentId: stranger.id, artifactId: mine[0]!.artifactId, price: 100 }),
     ).rejects.toBeInstanceOf(SellerCannotBePaid);
+  });
+
+  it("tells an agent the artifact ids it needs to sell anything", async () => {
+    // joinery_sell takes an artifactId, and before this nothing in the city
+    // would tell an agent what its own artifact ids were. The tool validated
+    // its input and could not be called correctly by anybody without a
+    // browser — a dead end that every test passed straight through.
+    const [art] = await db
+      .insert(artifactsTable)
+      .values({
+        externalId: `test-joinery-mine-${Math.random().toString(36).slice(2)}`,
+        title: "Test Own Cabinet",
+        creatorName: "Whoever",
+        creatorBotId: seller.botId,
+        publicUrl: "https://example.invalid/cab",
+        artifactType: "furniture",
+      })
+      .returning({ id: artifactsTable.id });
+    artifactIds.push(art!.id);
+
+    const works = await worksForSale({ id: seller.id, obcBotId: seller.botId });
+    const found = works.find((w) => w.artifactId === art!.id);
+    expect(found, "an agent cannot see its own work").toBeTruthy();
+    expect(found!.price, "an unlisted work should not claim a price").toBeNull();
+
+    // And what it is already asking, so a seller can reprice without guessing.
+    await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 300 });
+    const after = (await worksForSale({ id: seller.id, obcBotId: seller.botId })).find(
+      (w) => w.artifactId === art!.id,
+    );
+    expect(after!.price).toBe(300);
+    expect(after!.listingId).not.toBeNull();
+  });
+
+  it("pays the royalty by bot id, which a rename cannot break", async () => {
+    // creator_bot_id is on the artifact and is what the storefront already
+    // uses to decide whose work something is. Matching display names was the
+    // earlier fallback and is fragile exactly where it matters — "Mosi Ī˹" is
+    // a real maker in this city, and a royalty that depends on reproducing
+    // that string is one that will quietly not be paid.
+    const [art] = await db
+      .insert(artifactsTable)
+      .values({
+        externalId: `test-joinery-botid-${Math.random().toString(36).slice(2)}`,
+        title: "Test Renamed Maker Chair",
+        // The NAME does not match the maker agent at all; only the id does.
+        creatorName: "A Name Nobody Here Has",
+        creatorBotId: maker.botId,
+        publicUrl: "https://example.invalid/renamed",
+        artifactType: "furniture",
+      })
+      .returning({ id: artifactsTable.id });
+    artifactIds.push(art!.id);
+    const listed = await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 1000 });
+
+    const makerBefore = await balance(maker.account, ASSET);
+    await purchase({
+      buyerAgentId: buyer.id,
+      buyerAccount: buyer.account,
+      listingId: listed.listingId,
+      slot: "corner",
+    });
+    expect(await balance(maker.account, ASSET), "the maker was not paid").toBe(makerBefore + 100n);
   });
 
   it("keeps display-only pieces out of the catalog entirely", async () => {
