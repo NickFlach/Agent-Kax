@@ -126,7 +126,11 @@ let repairJob: RepairJob | null = null;
  * Read is separated from write here rather than following the dryRun-query
  * convention of its neighbours, because this operation deletes an agent row
  * and a typo in a query parameter should not be what stands between a report
- * and a deletion.
+ * and a deletion. The write defaults to a dry run and needs ?apply=true said
+ * out loud — that guard, not the auth tier, is what makes the deletion
+ * deliberate. Auth matches the sibling repairs (repair-unknown-agents,
+ * repair-agent-names), which are also destructive-ish maintenance run from a
+ * shell rather than a browser.
  */
 router.get("/admin/split-identities", requireAdminOrServiceToken, async (_req, res) => {
   const { findSplitIdentities } = await import("../lib/agentIdentity");
@@ -134,7 +138,7 @@ router.get("/admin/split-identities", requireAdminOrServiceToken, async (_req, r
   res.json({ splits, count: splits.length });
 });
 
-router.post("/admin/merge-split-identities", requireAdmin, async (req, res) => {
+router.post("/admin/merge-split-identities", requireAdminOrServiceToken, async (req, res) => {
   const { mergeSplitIdentities } = await import("../lib/agentIdentity");
   // Default is dry run. Merging identities is irreversible and the caller has
   // to say so out loud.
