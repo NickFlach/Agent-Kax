@@ -5,16 +5,57 @@
  * migrations cannot help because an applied migration never re-runs. This step
  * is the thing standing between that and a dead endpoint, so the test drops the
  * table for real and requires it back, seeded, with its indexes.
+ *
+ * Every table this file protects gets the same treatment — dropped for real,
+ * then required back usable rather than merely present, because a rebuilt table
+ * that has lost its constraints or its defaults is a different table wearing
+ * the same name.
  */
 
 import { afterAll, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
+import { artifactsTable, storeListingsTable } from "@workspace/db/schema";
+import { cleanupTestData, createTestAgent, createTestUser, makeTestId } from "../test-helpers";
 import { ensureCriticalSchema } from "./ensureCriticalSchema";
 
 async function unitCount(): Promise<number> {
   const r = await db.execute(sql`SELECT count(*)::int AS n FROM residence_units`);
   return (r.rows[0] as { n: number }).n;
+}
+
+/**
+ * A listing with real parents behind it, so an order row can actually be
+ * inserted against it. A rebuilt `listing_orders` that merely EXISTS proves
+ * nothing — its foreign keys point at `store_listings` and `users`, and only a
+ * genuine row exercises them.
+ */
+async function seedListing(): Promise<{ listingId: number; buyerUserId: string; artifactId: number }> {
+  const owner = await createTestUser();
+  const seller = await createTestAgent(owner.id, "listing-orders-seller");
+  const [artifact] = await db
+    .insert(artifactsTable)
+    .values({
+      externalId: makeTestId("listing-orders-art"),
+      title: "Order Test Piece",
+      creatorName: "Selfheal",
+      publicUrl: "https://example.invalid/piece",
+      artifactType: "furniture",
+    })
+    .returning({ id: artifactsTable.id });
+  const [listing] = await db
+    .insert(storeListingsTable)
+    .values({ storeAgentId: seller.id, artifactId: artifact!.id, price: 4.2 })
+    .returning({ id: storeListingsTable.id });
+  return { listingId: listing!.id, buyerUserId: owner.id, artifactId: artifact!.id };
+}
+
+async function dropSeededListing(artifactId: number): Promise<void> {
+  // The artifact is the root of the chain: listings cascade from it and orders
+  // cascade from the listing, so one delete takes the whole fixture. Nothing
+  // here touches credit_ledger, which is append-only.
+  await db.delete(artifactsTable).where(eq(artifactsTable.id, artifactId));
+  await cleanupTestData();
 }
 
 describe("ensureCriticalSchema", () => {
@@ -134,5 +175,124 @@ describe("ensureCriticalSchema", () => {
     await expect(
       db.execute(sql`INSERT INTO residence_units (floor, letter, tier) VALUES (5, 'A', 2)`),
     ).rejects.toThrow();
+  });
+
+  it("puts listing_orders back when the deploy eats it", async () => {
+    // The newest table, in exactly the two-of-three state residence_units was
+    // in the day it first went: migration 0025 wrote it, the schema barrel
+    // exports it, and nothing rebuilt it at boot. `repaired` is not the
+    // assertion here — it reports on residence_units alone — so the probe and a
+    // real insert are what say the table came back.
+    await ensureCriticalSchema();
+    const seed = await seedListing();
+    try {
+      await db.execute(sql`DROP TABLE IF EXISTS listing_orders`);
+      const r = await ensureCriticalSchema();
+      expect(r.error).toBeUndefined();
+
+      const probe = await db.execute(sql`SELECT to_regclass('public.listing_orders') AS t`);
+      expect((probe.rows[0] as { t: string | null }).t).not.toBeNull();
+
+      // It has to come back usable, with 0025's defaults intact: checkout
+      // inserts an order without naming currency or status and reads the
+      // pending row back.
+      const sessionId = makeTestId("cs-rebuilt");
+      await db.execute(sql`
+        INSERT INTO listing_orders (listing_id, buyer_user_id, stripe_session_id, amount_cents)
+        VALUES (${seed.listingId}, ${seed.buyerUserId}, ${sessionId}, 420)`);
+      const row = await db.execute(sql`
+        SELECT currency, status FROM listing_orders WHERE stripe_session_id = ${sessionId}`);
+      const order = row.rows[0] as { currency: string; status: string } | undefined;
+      expect(order?.currency).toBe("usd");
+      expect(order?.status).toBe("pending");
+
+      // And a second pass must leave that order alone — a repair that dropped
+      // anything would destroy the record of a purchase Stripe already took
+      // money for.
+      await ensureCriticalSchema();
+      const survived = await db.execute(sql`
+        SELECT count(*)::int AS n FROM listing_orders WHERE stripe_session_id = ${sessionId}`);
+      expect((survived.rows[0] as { n: number }).n, "the repair dropped a paid order").toBe(1);
+    } finally {
+      await dropSeededListing(seed.artifactId);
+    }
+  });
+
+  it("rebuilds listing_orders with its constraints, not a lookalike", async () => {
+    // Copying the shape out of the drizzle schema instead of 0025 would give a
+    // table that exists and accepts rows the real one refuses — an order
+    // pointing at no listing, or two orders claiming the same Checkout Session,
+    // which is how the confirm path identifies a payment.
+    await db.execute(sql`DROP TABLE IF EXISTS listing_orders`);
+    await ensureCriticalSchema();
+    const seed = await seedListing();
+    try {
+      const sessionId = makeTestId("cs-constraints");
+      await db.execute(sql`
+        INSERT INTO listing_orders (listing_id, buyer_user_id, stripe_session_id, amount_cents)
+        VALUES (${seed.listingId}, ${seed.buyerUserId}, ${sessionId}, 100)`);
+
+      await expect(
+        db.execute(sql`
+          INSERT INTO listing_orders (listing_id, buyer_user_id, stripe_session_id, amount_cents)
+          VALUES (${seed.listingId}, ${seed.buyerUserId}, ${sessionId}, 100)`),
+        "a second order reused a Checkout Session id",
+      ).rejects.toThrow();
+
+      await expect(
+        db.execute(sql`
+          INSERT INTO listing_orders (listing_id, buyer_user_id, stripe_session_id, amount_cents)
+          VALUES (-1, ${seed.buyerUserId}, ${makeTestId("cs-orphan")}, 100)`),
+        "an order was accepted for a listing that does not exist",
+      ).rejects.toThrow();
+
+      // The second foreign key, which every other insert in this file only
+      // ever satisfies. A rebuilt table that has lost it still passes the two
+      // checks above while accepting a paid order attributed to nobody, and
+      // the confirm path has no way to hand that purchase to anyone.
+      await expect(
+        db.execute(sql`
+          INSERT INTO listing_orders (listing_id, buyer_user_id, stripe_session_id, amount_cents)
+          VALUES (${seed.listingId}, 'kax-test-no-such-user', ${makeTestId("cs-orphan-buyer")}, 100)`),
+        "an order was accepted for a buyer that does not exist",
+      ).rejects.toThrow();
+    } finally {
+      await dropSeededListing(seed.artifactId);
+    }
+  });
+
+  it("brings listing_orders' indexes back with it", async () => {
+    // Both lookups the store makes — a buyer's purchases, a listing's orders —
+    // are unindexed scans without these, and an index that only ever existed
+    // because a migration ran once does not survive the table being dropped.
+    await db.execute(sql`DROP TABLE IF EXISTS listing_orders`);
+    await ensureCriticalSchema();
+
+    const idx = await db.execute(sql`
+      SELECT indexname FROM pg_indexes WHERE tablename = 'listing_orders'`);
+    const names = idx.rows.map((r) => (r as { indexname: string }).indexname);
+    expect(names).toContain("listing_orders_buyer_idx");
+    expect(names).toContain("listing_orders_listing_idx");
+  });
+
+  it("puts back the store_listings columns 0025 added, not just its table", async () => {
+    // The diff eats columns as readily as tables (bsky_handle above is the
+    // proof), and these two are where a listing remembers the Stripe Product
+    // and Price it already created. Losing them mints a duplicate pair on every
+    // purchase rather than raising anything anyone would see.
+    await db.execute(sql`ALTER TABLE store_listings DROP COLUMN IF EXISTS stripe_product_id`);
+    await db.execute(sql`ALTER TABLE store_listings DROP COLUMN IF EXISTS stripe_price_id`);
+
+    await ensureCriticalSchema();
+
+    const cols = await db.execute(sql`
+      SELECT column_name, data_type FROM information_schema.columns
+      WHERE table_name = 'store_listings'
+        AND column_name IN ('stripe_product_id','stripe_price_id')`);
+    expect(cols.rows.map((r) => (r as { column_name: string }).column_name).sort())
+      .toEqual(["stripe_price_id", "stripe_product_id"]);
+    // TEXT in 0025 — a varchar with a length would truncate a Stripe id.
+    expect(cols.rows.map((r) => (r as { data_type: string }).data_type))
+      .toEqual(["text", "text"]);
   });
 });

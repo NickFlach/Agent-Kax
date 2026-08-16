@@ -411,6 +411,25 @@ router.post("/agents/:slug/listings", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Artifact not found" });
     return;
   }
+
+  // Defence in depth, and a separate concern from the checkout guard that
+  // actually closes the hole. A price written here lands in the same
+  // `store_listings.price` column the Joinery reads as play_credit minor
+  // units, but nothing on this path says which unit the caller meant — the
+  // body carries a bare number. Setting a furniture price from a curation
+  // endpoint therefore stores an amount whose currency depends on who reads
+  // it, so it is refused: POST /joinery/sell is where a furniture price is
+  // set, and it validates the number as minor units. Stocking furniture
+  // unpriced stays allowed, because a NULL price means "on display, not on
+  // sale" and carries no unit to get wrong. Only new writes are affected;
+  // rows already in the table are untouched.
+  if (artifact.artifactType === "furniture" && body.price != null) {
+    res.status(400).json({
+      error: "Furniture is priced through the Joinery (POST /joinery/sell), in play_credit minor units",
+    });
+    return;
+  }
+
   const [listing] = await db
     .insert(storeListingsTable)
     .values({

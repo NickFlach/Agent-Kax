@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { storeListingsTable, artifactsTable, listingOrdersTable } from "@workspace/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -50,17 +50,77 @@ router.use("/store", async (_req, res, next) => {
 const CheckoutParams = z.object({ id: z.coerce.number().int().positive() });
 const ConfirmQuery = z.object({ sessionId: z.string().min(1) });
 
-/** Absolute web-app base URL for redirect targets, derived at request time. */
-function webBaseUrl(req: Request): string {
-  const origin = req.get("origin");
-  if (origin && /^https?:\/\//.test(origin)) return origin;
-  const domain = process.env["REPLIT_DOMAINS"]?.split(",")[0];
-  if (domain) return `https://${domain}`;
-  return `${req.protocol}://${req.get("host") ?? "localhost"}`;
+/**
+ * Absolute web-app base URL for the Checkout redirect targets.
+ *
+ * Nothing the caller sends contributes to this. `success_url` is the page the
+ * buyer lands on immediately after a real card charge — the moment they are
+ * most primed to believe whatever it says about their order — and the shipped
+ * version picked it from the `Origin` header first and the `Host` header last,
+ * both of which the caller writes. Stripe honours whatever URL the session was
+ * created with, so that was an open redirect on the one request in the system
+ * where landing on the wrong host does the most damage (#272).
+ *
+ * The precedence is `resetLinkBase()`'s (routes/auth-email.ts:209) minus its
+ * final hardcoded default. `REPLIT_DEV_DOMAIN` / `REPLIT_DOMAINS` stay as the
+ * middle step deliberately: the platform hands those to the process rather than
+ * the caller to the request, so a Replit deployment needs no new variable
+ * provisioned to check out. It does not follow that both ends of the payment
+ * round trip agree — `index.ts` derives the managed Stripe webhook's URL from
+ * `REPLIT_DOMAINS` *alone*, consulting neither variable above it — so a
+ * deployment that satisfies this function by setting only `KAX_PUBLIC_URL`
+ * registers its webhook at `https://undefined/api/webhooks/stripe` and settles
+ * nothing. Set `REPLIT_DOMAINS` too, or set neither.
+ * `PUBLIC_APP_URL` is deliberately not consulted even though it exists — its
+ * only readers take it as `?? ""` (lib/eventHandlers/dmReceived.ts:167,
+ * proposalCreated.ts:101), so an unset value there yields a *relative*
+ * success_url, which Stripe rejects at session creation and which would surface
+ * as a broken checkout instead of as a named missing variable (KAX-ADR-0002).
+ *
+ * Null means nothing is configured and the caller refuses the sale. Commerce
+ * takes no last-resort default the way email links do: returning a buyer to the
+ * wrong host after a real charge is worse than never taking the charge, and a
+ * refusal is a deploy-time error where a fallback is a live vulnerability.
+ */
+function webBaseUrl(): string | null {
+  const override = (process.env["KAX_PUBLIC_URL"] || "").trim();
+  // A set-but-schemeless override is a misconfiguration, not an absence, and
+  // it is the likely one: the variable beneath it is a bare host, so
+  // `KAX_PUBLIC_URL=kax.example.com` is the natural mistake. Stripe rejects a
+  // relative `success_url` at session creation, which would mean a 500 raised
+  // AFTER a Product and a Price had been minted for the listing — exactly the
+  // stranding the early refusal below exists to avoid. Falling through to the
+  // platform domain would be no better: it hides the typo behind a checkout
+  // that quietly returns buyers somewhere the operator did not choose.
+  if (override && !/^https?:\/\//.test(override)) return null;
+  if (override) return override.replace(/\/+$/, "");
+
+  const replitDomain = (
+    process.env["REPLIT_DEV_DOMAIN"] || (process.env["REPLIT_DOMAINS"] || "").split(",")[0]
+  ).trim();
+  if (replitDomain) return `https://${replitDomain}`;
+
+  return null;
 }
 
 router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
   const { id } = CheckoutParams.parse(req.params);
+
+  // Resolved first because an unresolvable base is a fact about the deployment
+  // rather than about this listing, and because refusing before any Stripe
+  // object exists keeps a misconfigured server from stranding a Product and a
+  // Price behind every attempt it can never complete.
+  const base = webBaseUrl();
+  if (!base) {
+    res.status(503).json({
+      error:
+        "Checkout is unavailable: no canonical public URL is configured, so there is nowhere " +
+        "safe to return the buyer after payment. Set KAX_PUBLIC_URL to an absolute URL " +
+        "including its https:// scheme (or set REPLIT_DEV_DOMAIN / REPLIT_DOMAINS, which are " +
+        "bare hostnames).",
+    });
+    return;
+  }
 
   const [row] = await db
     .select({ listing: storeListingsTable, artifact: artifactsTable })
@@ -74,6 +134,35 @@ router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
     return;
   }
   const { listing, artifact } = row;
+
+  // Furniture is refused here because `store_listings.price` has two readers
+  // that disagree about what currency it holds. It is one `real` column with
+  // no unit in its name: lib/joinery.ts:406 reads it as play_credit MINOR
+  // UNITS — `splitSale(BigInt(price))`, whose postings debit that number
+  // verbatim — and this route reads the same column as USD DOLLARS via
+  // `Math.round(listing.price * 100)`. A chair the Joinery stores as 1000 is
+  // 0.001 credits on that side and $1,000.00 on this one, and only one of the
+  // two is real money. The `amountCents >= 50` floor below does not separate
+  // them: `list()` accepts only a positive whole number of minor units, so
+  // every price the Joinery can store clears the floor.
+  //
+  // Artifact type is already the discriminator, and the Joinery already
+  // enforces it on both of its own sides — `list()` throws NotFurniture and
+  // `purchase()` refuses a listing whose artifact is not furniture. This is
+  // the missing symmetric half on the fiat side. It belongs on the READ path
+  // rather than the write path because a priced furniture listing can also be
+  // created through POST /agents/:slug/listings, which validates neither the
+  // artifact type nor the unit; refusing at checkout closes both routes in.
+  if (artifact.artifactType === "furniture") {
+    res.status(409).json({
+      error:
+        "This listing is furniture: it is priced in play_credit minor units and sold by the Joinery, " +
+        "while this checkout charges USD. One price column cannot mean both, so furniture is not " +
+        "purchasable here — buy it through the Joinery.",
+    });
+    return;
+  }
+
   if (listing.price == null || listing.price <= 0) {
     res.status(400).json({ error: "This listing has no purchase price" });
     return;
@@ -125,7 +214,6 @@ router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
       .where(eq(storeListingsTable.id, listing.id));
   }
 
-  const base = webBaseUrl(req);
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: [{ price: priceId, quantity: 1 }],
