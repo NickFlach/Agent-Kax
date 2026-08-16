@@ -66,6 +66,8 @@ const AT = (() => {
   return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
 })();
 
+import { nextRefreshAttempt } from "./lib/refresh-policy.mjs";
+
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
 /** How long to wait before trying again when the city is unreachable. */
@@ -144,14 +146,35 @@ function expiryOf(token) {
  * expiry, not in response to a 401.
  */
 async function refresh() {
-  const r = await call("POST", "/api/auth/token/refresh", { token: TOKEN });
-  if (r.status === 200 && r.json?.token) {
-    TOKEN = r.json.token;
-    log(`token refreshed, good until ${new Date(expiryOf(TOKEN)).toISOString()}`);
-    return true;
+  // Retry a TRANSPORT failure while the token is still alive, rather than
+  // waiting for the next tick.
+  //
+  // Kannaka's body left the city because of that wait. One connect timeout at
+  // 03:47, next attempt at the scheduled check-in 03:54:56, token dead at
+  // 03:53:56 — seven minutes of valid token slept through, and after expiry
+  // no refresh can ever succeed. 0xSCADA-QE ran the same code for hours and
+  // never hit it, which is how this stayed invisible.
+  //
+  // A refusal is NOT retried: a 401 means the token is finished and asking
+  // again only burns the remaining time and buries the message a human needs.
+  for (let attempt = 0; ; attempt++) {
+    const r = await call("POST", "/api/auth/token/refresh", { token: TOKEN });
+    if (r.status === 200 && r.json?.token) {
+      TOKEN = r.json.token;
+      log(`token refreshed, good until ${new Date(expiryOf(TOKEN)).toISOString()}`);
+      return true;
+    }
+
+    const detail = (r.json?.error ?? r.text).slice(0, 120);
+    const plan = nextRefreshAttempt({ status: r.status, expiresAt: expiryOf(TOKEN), now: Date.now(), attempt });
+    if (!plan.retry) {
+      const why = plan.reason === "out-of-time" ? " — no token life left to retry" : "";
+      log(`token refresh refused (${r.status}): ${detail}${why}`);
+      return false;
+    }
+    log(`token refresh failed (${r.status}): ${detail} — retrying in ${Math.round(plan.delayMs / 1000)}s`);
+    await new Promise((res) => setTimeout(res, plan.delayMs));
   }
-  log(`token refresh refused (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
-  return false;
 }
 
 function log(msg) {
