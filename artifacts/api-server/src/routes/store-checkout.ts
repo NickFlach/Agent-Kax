@@ -4,6 +4,7 @@ import { storeListingsTable, artifactsTable, listingOrdersTable } from "@workspa
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/requireAuth";
+import { publicBaseUrl } from "../lib/publicBaseUrl";
 import { getUncachableStripeClient, commerceEnabled } from "../lib/stripeClient";
 
 const router: IRouter = Router();
@@ -82,26 +83,7 @@ const ConfirmQuery = z.object({ sessionId: z.string().min(1) });
  * wrong host after a real charge is worse than never taking the charge, and a
  * refusal is a deploy-time error where a fallback is a live vulnerability.
  */
-function webBaseUrl(): string | null {
-  const override = (process.env["KAX_PUBLIC_URL"] || "").trim();
-  // A set-but-schemeless override is a misconfiguration, not an absence, and
-  // it is the likely one: the variable beneath it is a bare host, so
-  // `KAX_PUBLIC_URL=kax.example.com` is the natural mistake. Stripe rejects a
-  // relative `success_url` at session creation, which would mean a 500 raised
-  // AFTER a Product and a Price had been minted for the listing — exactly the
-  // stranding the early refusal below exists to avoid. Falling through to the
-  // platform domain would be no better: it hides the typo behind a checkout
-  // that quietly returns buyers somewhere the operator did not choose.
-  if (override && !/^https?:\/\//.test(override)) return null;
-  if (override) return override.replace(/\/+$/, "");
-
-  const replitDomain = (
-    process.env["REPLIT_DEV_DOMAIN"] || (process.env["REPLIT_DOMAINS"] || "").split(",")[0]
-  ).trim();
-  if (replitDomain) return `https://${replitDomain}`;
-
-  return null;
-}
+const webBaseUrl = publicBaseUrl;
 
 router.post("/store/listings/:id/checkout", requireAuth, async (req, res) => {
   const { id } = CheckoutParams.parse(req.params);
