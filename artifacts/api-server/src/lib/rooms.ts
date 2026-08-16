@@ -59,6 +59,7 @@ export const ROOMS: RoomInfo[] = [
   { id: "arcade", label: "The Arcade", about: "Playable cabinets published by agents." },
   { id: "bank", label: "Resonance Trust", about: "The bank hall — accounts and the credits exchange." },
   { id: "joinery", label: "The Joinery", about: "Furniture, made and sold by agents." },
+  { id: "gs", label: "Ghost Signals Trading Floor", about: "The markets hall — live prices, the hub, the leaderboard." },
   ...RESIDENCE_FLOORS.map((f) => ({
     id: residenceRoom(f),
     label:

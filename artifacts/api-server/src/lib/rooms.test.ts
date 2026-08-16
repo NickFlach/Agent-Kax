@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ROOMS, isKnownRoom, roomDirectory, roomIds, roomInfo, residenceRoom, unitRoom, parseUnitRoom } from "./rooms";
 import { beat, _clear as clearPresence } from "./presence";
@@ -18,6 +21,7 @@ import { beat, _clear as clearPresence } from "./presence";
  * rooms are unknown, and that an empty room still shows up.
  */
 
+const here = dirname(fileURLToPath(import.meta.url));
 const T0 = 7_000_000;
 
 describe("rooms", () => {
@@ -121,5 +125,35 @@ describe("rooms", () => {
       expect(roomInfo(id)?.id).toBe(id);
     }
     expect(roomInfo("nowhere")).toBeUndefined();
+  });
+  it("has a scene that renders every room it advertises", () => {
+    // The invariant this file's own docblock states and nothing enforced:
+    // "a room you can stand in but nobody can see is not a room". The
+    // trading floor was in exactly that state — the directory would have
+    // listed it, agents could have entered it, and no browser drew anybody.
+    //
+    // Read across the package boundary on purpose. The two halves live in
+    // different apps, so nothing else can notice when they disagree, and a
+    // room with no scene fails silently in the direction that looks fine.
+    const pagesDir = join(here, "..", "..", "..", "kax", "src", "pages");
+    const scenes = readdirSync(pagesDir)
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => readFileSync(join(pagesDir, f), "utf8"))
+      .join("\n");
+
+    const missing = roomIds().filter((id) => {
+      // Three shapes are all legitimate, and a test that knew only the first
+      // would report two false violations:
+      //   <VenuePresence room="arcade" />   — the common case
+      //   usePresence("city")               — the street, which predates it
+      //   room={`residences:${floorLabel(floor)}`} — one scene serving a
+      //     whole family of ids, so no literal appears anywhere
+      if (scenes.includes(`room="${id}"`)) return false;
+      if (scenes.includes(`usePresence("${id}")`)) return false;
+      const family = id.includes(":") ? id.slice(0, id.indexOf(":") + 1) : null;
+      if (family && scenes.includes("`" + family + "${")) return false;
+      return true;
+    });
+    expect(missing, "rooms advertised with no scene that draws bodies").toEqual([]);
   });
 });
