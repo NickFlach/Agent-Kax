@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import { Switch, Route, Router as WouterRouter, Link, Redirect, useLocation, useParams } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,36 +12,13 @@ import { PersistentPlayer } from "@/components/persistent-player";
 import { ConstellationBackdrop } from "@/components/constellation-backdrop";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
-import Dashboard from "@/pages/dashboard";
-import ArtifactsList from "@/pages/artifacts-list";
-import ArtifactDetail from "@/pages/artifact-detail";
-import DropsList from "@/pages/drops-list";
-import DropDetail from "@/pages/drop-detail";
-import HarvesterPage from "@/pages/harvester";
-import Vault from "@/pages/vault";
-import AdminUsers from "@/pages/admin-users";
-import AdminIntegrations from "@/pages/admin-integrations";
-import AgentsList from "@/pages/agents-list";
-import AgentDetail from "@/pages/agent-detail";
-import StorefrontSettings from "@/pages/storefront-settings";
 import AgentStorefront from "@/pages/agent-storefront";
-import StoreInterior from "@/pages/store-interior";
-import GsTradingFloor from "@/pages/gs-trading-floor";
-import ArcadeHall from "@/pages/arcade-hall";
-import BankHall from "@/pages/bank-hall";
-import Residences from "@/pages/residences";
-import FurnitureHall from "@/pages/furniture-hall";
-import Cafe from "@/pages/cafe";
 import AgentStorefrontDrop from "@/pages/agent-storefront-drop";
 import AgentStorefrontArtifact from "@/pages/agent-storefront-artifact";
 import Marketplace from "@/pages/marketplace";
-import Marketplace3D from "@/pages/marketplace-3d";
 import ConstellationAgentPage from "@/pages/constellation-agent";
-import Inbox from "@/pages/inbox";
-import Proposals from "@/pages/proposals";
 import LoginPage from "@/pages/login";
 import ResetPasswordPage from "@/pages/reset-password";
-import BotsPage from "@/pages/bots";
 import FloorPage from "@/pages/floor";
 import PredictionsPage from "@/pages/predictions";
 import LandingPage from "@/pages/landing";
@@ -227,6 +204,31 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
   );
 }
 
+
+/**
+ * The signed-in pages, loaded when somebody signs in.
+ *
+ * Every one of these sits behind RequireAuth, so a logged-out visitor was
+ * downloading the whole admin application — including recharts, which only the
+ * dashboard uses — before being shown a Connect Wallet button. The nav chrome
+ * stays eager, so navigating between them still does not flash.
+ */
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const ArtifactsList = lazy(() => import("@/pages/artifacts-list"));
+const ArtifactDetail = lazy(() => import("@/pages/artifact-detail"));
+const DropsList = lazy(() => import("@/pages/drops-list"));
+const DropDetail = lazy(() => import("@/pages/drop-detail"));
+const HarvesterPage = lazy(() => import("@/pages/harvester"));
+const Vault = lazy(() => import("@/pages/vault"));
+const AdminUsers = lazy(() => import("@/pages/admin-users"));
+const AdminIntegrations = lazy(() => import("@/pages/admin-integrations"));
+const AgentsList = lazy(() => import("@/pages/agents-list"));
+const AgentDetail = lazy(() => import("@/pages/agent-detail"));
+const StorefrontSettings = lazy(() => import("@/pages/storefront-settings"));
+const Inbox = lazy(() => import("@/pages/inbox"));
+const Proposals = lazy(() => import("@/pages/proposals"));
+const BotsPage = lazy(() => import("@/pages/bots"));
+
 function RequireAuth({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { user, isLoading } = useAuth();
   const [location] = useLocation();
@@ -270,6 +272,13 @@ function RequireAuth({ children, adminOnly = false }: { children: React.ReactNod
 function AdminRoutes() {
   return (
     <AdminChrome>
+      <Suspense
+        fallback={
+          <div className="min-h-[60vh] flex items-center justify-center text-xs uppercase tracking-widest text-muted-foreground">
+            Loading…
+          </div>
+        }
+      >
       <Switch>
         <Route path="/bots">
           <RequireAuth><BotsPage /></RequireAuth>
@@ -317,6 +326,7 @@ function AdminRoutes() {
           <RequireAuth adminOnly><AdminIntegrations /></RequireAuth>
         </Route>
       </Switch>
+      </Suspense>
     </AdminChrome>
   );
 }
@@ -336,6 +346,53 @@ const ADMIN_PATHS = [
 
 function isAdminPath(location: string): boolean {
   return ADMIN_PATHS.some((p) => location === p || location.startsWith(`${p}/`));
+}
+
+
+/**
+ * The 3D venues, loaded when somebody walks into one.
+ *
+ * These eight pages are the only things in the app that import three.js,
+ * @react-three/fiber and drei, and together they were most of a single 2.25 MB
+ * bundle that every visitor downloaded before seeing anything — including
+ * somebody who only opened the landing page, and somebody on a phone who was
+ * never going to render a city block.
+ *
+ * Splitting them is invisible when it works and that is the point: the shared
+ * three.js chunk is fetched on the first navigation into a venue, and the
+ * fallback below covers the gap. Each venue is its own chunk beyond that, so
+ * walking into the arcade does not also fetch the bank.
+ */
+const GsTradingFloor = lazy(() => import("@/pages/gs-trading-floor"));
+const ArcadeHall = lazy(() => import("@/pages/arcade-hall"));
+const BankHall = lazy(() => import("@/pages/bank-hall"));
+const Residences = lazy(() => import("@/pages/residences"));
+const FurnitureHall = lazy(() => import("@/pages/furniture-hall"));
+const Cafe = lazy(() => import("@/pages/cafe"));
+const StoreInterior = lazy(() => import("@/pages/store-interior"));
+const Marketplace3D = lazy(() => import("@/pages/marketplace-3d"));
+
+/**
+ * What you see while a venue's code arrives.
+ *
+ * Deliberately the district's own dark ground rather than a spinner on white:
+ * a flash of the wrong background between the street and the room reads as a
+ * fault even when nothing is wrong.
+ */
+function VenueLoading() {
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center bg-background text-[10px] uppercase tracking-[0.3em] text-muted-foreground"
+      data-testid="venue-loading"
+    >
+      Entering…
+    </div>
+  );
+}
+
+/** A venue route: its own chunk, behind one boundary. */
+function Venue({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<VenueLoading />}>{children}</Suspense>;
 }
 
 function Marketplace3DSafe() {
@@ -368,7 +425,9 @@ function Marketplace3DSafe() {
         </div>
       )}
     >
-      <Marketplace3D />
+      <Suspense fallback={<VenueLoading />}>
+        <Marketplace3D />
+      </Suspense>
     </ErrorBoundary>
   );
 }
@@ -408,25 +467,25 @@ function Router() {
         <Marketplace />
       </Route>
       <Route path="/gs/floor">
-        <GsTradingFloor />
+        <Venue><GsTradingFloor /></Venue>
       </Route>
       <Route path="/arcade">
-        <ArcadeHall />
+        <Venue><ArcadeHall /></Venue>
       </Route>
       <Route path="/bank">
-        <BankHall />
+        <Venue><BankHall /></Venue>
       </Route>
       <Route path="/residences">
-        <Residences />
+        <Venue><Residences /></Venue>
       </Route>
       <Route path="/furniture">
-        <FurnitureHall />
+        <Venue><FurnitureHall /></Venue>
       </Route>
       <Route path="/cafe">
-        <Cafe />
+        <Venue><Cafe /></Venue>
       </Route>
       <Route path="/s/:slug/room">
-        <StoreInterior />
+        <Venue><StoreInterior /></Venue>
       </Route>
       <Route path="/s/:slug">
         <AgentStorefront />
