@@ -718,7 +718,7 @@ Printify pair is still to be introduced. Use exactly these:
 | `STRIPE_WEBHOOK_SECRET` | verify `/api/webhooks/stripe` | **shipped** — `stripeClient.ts:25` | required only on the dashboard-webhook path; the connector-managed webhook supplies its own — see "v0.1 deployment and feature-flag posture". Required whenever `STRIPE_SECRET_KEY` is set in env |
 | `KAX_COMMERCE_ENABLED` | feature flag, **default off** | **shipped** — `stripeClient.ts:10-13`, accepts `"1"` or `"true"` | required to write |
 | `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | **credential exists and is verified** against the live API (subject 28170669, expires 2027-08-16, scopes sufficient); the code that reads it is to build | required |
-| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | to build — **and the value is not yet known.** The only existing shop is Shopify-channel; a dedicated store is being created. **Never hard-code 28599902, and never default to the first shop listed** | required |
+| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | **value known and verified: `28604869`** ("KAX", `sales_channel: "custom_integration"`, created 2026-08-16, order approval set to manual). The code that reads it is to build. **Never hard-code the Shopify shop 28599902, and never default to the first shop listed** | required |
 
 **Credential resolution is the shipped one and is not re-specified here.** The precedence —
 an explicit `STRIPE_SECRET_KEY` short-circuits the connector entirely, so the webhook secret
@@ -1661,19 +1661,33 @@ and the granted scopes cover `shops.manage`, `catalog.read`, `orders.read` / `or
 including the `uploads.*` pair that upload-by-URL depends on and the `webhooks.*` pair the
 tracking write-back depends on. Nothing in the v0.1 path is blocked on a missing permission.
 
-**The shop is the open half.** `GET /v1/shops.json` returns exactly **one** shop — id
-28599902, "My Shopify Store", `sales_channel: "shopify"` — and that is the wrong shape for
-this integration. A Shopify-channel shop exists to push products into a Shopify storefront;
-v0.1 sells through KAX's own hosted Checkout and submits orders by API, which wants a shop
-whose channel is the API rather than someone else's storefront. The operator has decided to
-**create a dedicated store for KAX** rather than repurpose that one.
+**The shop is resolved.** It was not, when this section was first written: the account held
+exactly one shop — id 28599902, "My Shopify Store", `sales_channel: "shopify"` — and that is
+the wrong shape for this integration. A Shopify-channel shop exists to push products into a
+Shopify storefront; v0.1 sells through KAX's own hosted Checkout and submits orders by API,
+which wants a shop whose channel is the API rather than someone else's storefront.
 
-The consequence for the implementer is small and easy to get wrong: **`KAX_PRINTIFY_SHOP_ID`
-is not yet known, and must not be hard-coded to 28599902.** It is an open operator dependency,
-registered below, and it is the one credential in the v0.1 set that cannot be filled in from
-anything measured so far. Resolve it from configuration, refuse to start the fulfilment path
-without it, and never fall back to "the first shop the list returns" — a silent fallback there
-publishes KAX's product into a Shopify store the operator never intended to sell from.
+The operator created a dedicated store on 2026-08-16. `GET /v1/shops.json` now returns two,
+and the Shopify shop is untouched:
+
+```json
+[{"id":28599902,"title":"My Shopify Store","sales_channel":"shopify"},
+ {"id":28604869,"title":"KAX","sales_channel":"custom_integration"}]
+```
+
+**`KAX_PRINTIFY_SHOP_ID` = `28604869`.** The channel slug `custom_integration` was predicted
+from third-party corroboration only — Printify documents the field as read-only and enumerates
+no values — and is now observed, so it can be asserted on rather than merely expected. The shop
+was confirmed API-addressable in the same session: `products.json`, `orders.json` and
+`webhooks.json` each return 200 with an empty collection, so the token operates it and nothing
+is registered against it yet. Order approval is set to **manual**, which is the setting the
+Stripe sequencing below depends on.
+
+The consequence for the implementer is unchanged and still easy to get wrong: resolve the id
+from configuration, refuse to start the fulfilment path without it, and never fall back to
+"the first shop the list returns". A silent fallback there publishes KAX's product into a
+Shopify store the operator never intended to sell from — and that shop is still in the list,
+so the fallback would find it.
 
 Rate limits belong in the adapter contract so retry and backoff are designed in rather than
 discovered:
@@ -1800,7 +1814,7 @@ compressed.
 | 0b | **`webBaseUrl()` no longer derived from request headers** (`store-checkout.ts:54-60`) | engineering | **HARD — gates the flag.** Post-charge open redirect | hours |
 | 0c | **`listing_orders` + the two `store_listings.stripe_*` columns added to `ensureCriticalSchema`** | engineering | **HARD — gates the flag.** Two-of-three registration is how `residence_units` was lost | hours |
 | 1 | Printify merchant account + **Personal Access Token** | operator | **SATISFIED** — token verified live against `api.printify.com/v1/`: subject 28170669, expires 2027-08-16, scopes cover `shops.manage`, `catalog.read`, `orders.*`, `products.*`, `webhooks.*`, `uploads.*`, `print_providers.read` | done |
-| 1b | **A dedicated Printify store for KAX**, and therefore a value for `KAX_PRINTIFY_SHOP_ID` | operator | **HARD** for fulfilment. The account's only shop today is id 28599902, "My Shopify Store", `sales_channel: "shopify"` — wrong shape for an API-driven integration. The shop id **must not be hard-coded to 28599902** and must not be defaulted to the first shop listed | minutes — self-serve, once the operator creates the store |
+| 1b | **A dedicated Printify store for KAX**, and therefore a value for `KAX_PRINTIFY_SHOP_ID` | operator | **SATISFIED 2026-08-16.** Shop `28604869`, "KAX", `sales_channel: "custom_integration"`, order approval set to manual; verified API-addressable (products/orders/webhooks all 200, all empty). Creation was self-serve as predicted. The Shopify shop 28599902 remains in the list untouched, so the id still **must not be defaulted to the first shop listed** | — |
 | 2 | Printify **payment method on file** so orders can be manufactured | operator | **HARD** — *still unverified whether Printify charges at order-submit time*; needs one manual order through Printify's own UI to observe | minutes, once #1b exists |
 | 3 | **Stripe account activated for live charges** — requires a legal entity, business identity and a linked bank account | operator | **HARD** blocker for "one real human purchase" | **in progress** — the operator is provisioning Stripe now, which is what makes items 0/0b/0c urgent rather than merely open |
 | 4 | A **legal merchant entity** that owns the Stripe account and is merchant of record | operator | **HARD** — a legal decision, not an engineering task | operator-determined |
@@ -1810,10 +1824,11 @@ compressed.
 | 8 | Printify **OAuth app approval** | operator | **not needed for v0.1** | up to ~1 week, when needed in v0.2 |
 | 9 | Stripe API credentials reaching the server | operator | **satisfied by shipped code** — `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` or the Replit Stripe connector, resolved by `lib/stripeClient.ts`. **An env secret key short-circuits the connector, so the webhook secret must be set in env alongside it** or every delivery fails verification | — |
 
-**Items 1b–4 are strictly serial with all engineering work and should be started on day one.
-The code cannot be proven until they exist.** Item 1 is now off that list — the token is real
-and works — which moves the Printify critical path from "get access" to "get a shop worth
-publishing into", a shorter task with a different owner's calendar on it.
+**Items 2–4 are strictly serial with all engineering work and should be started on day one.
+The code cannot be proven until they exist.** Items 1 and 1b are both off that list now: the
+token is real and works, and the dedicated store exists and is API-addressable. Printify is
+therefore no longer on the critical path for *access* at all — what remains of it is item 2,
+the billing-trigger question, which needs one real order rather than any setup.
 
 **Items 0, 0b and 0c are serial with the operator work in a way the original register did not
 anticipate**, because the flag they gate is the same flag item 3's provisioning is heading
@@ -1852,8 +1867,9 @@ it and should be done first for that reason as well as for the safety one.
 **The seven steps, in order:**
 
 1. Merchant row + Printify PAT stored **server-side** (`KAX_PRINTIFY_API_TOKEN`, verified;
-   `KAX_PRINTIFY_SHOP_ID`, which does not exist yet — see dependency 1b, and refuse to start
-   the fulfilment path rather than defaulting it); no agent ever sees a provider credential.
+   `KAX_PRINTIFY_SHOP_ID` = `28604869`, verified — but still resolve it from configuration and
+   refuse to start the fulfilment path rather than defaulting it, because the Shopify shop is
+   still in the list and a fallback would find it); no agent ever sees a provider credential.
 2. Capture source `width_px`, `height_px`, `format` and `sha256` for **one** artifact, lazily,
    via the allowlisted streaming fetch. Expect 1024 × 1024 and JPEG bytes; assert rather than
    assume, because the whole product choice below rests on those two numbers.
@@ -2150,9 +2166,10 @@ than the source, and the 12 × 12 the earlier draft illustrated is not a variant
 catalogue at all. Two of the five rights assertions ship as merchant attestations rather than
 checks, and two more do not ship at all. Checkout throws the buyer out of the 3D city and back.
 And the external accounts must be provisioned before a single line of the proof can be
-executed — **four operator dependencies remain**, register items 1b–4: the dedicated Printify
-store, a Printify payment method on file whose billing trigger is still unverified, the Stripe
-activation, and the legal merchant entity. Only item 1, the Printify token, is off that list.
+executed — **three operator dependencies remain**, register items 2–4: a Printify payment method
+on file whose billing trigger is still unverified, the Stripe activation, and the legal merchant
+entity. Items 1 and 1b are off that list: the Printify token is verified and the dedicated
+store `28604869` exists, is `custom_integration`, and answers the API.
 
 **What it inherits.** A working Stripe integration — client, credential resolution, hosted
 Checkout, signature-verified webhook, webhook-driven settlement, feature flag, fail-closed
@@ -2169,8 +2186,8 @@ regulatory weight). Whether KAX or the merchant is tax collector of record under
 marketplace-facilitator statutes once v0.2 merchants exist (operator, with advice). Whether
 Printify charges at order-submit time (**still unverified** — it needs one manual order through
 Printify's own UI, and it changes the dependency register). Which Printify shop KAX publishes
-into (operator — a dedicated store is being created; the existing Shopify-channel shop 28599902
-is not it, and nothing may default to it). Which of the two measured sticker specs v0.1 ships —
+into (**resolved 2026-08-16** — shop `28604869`, `custom_integration`; the existing Shopify-channel
+shop 28599902 is not it, and nothing may default to it). Which of the two measured sticker specs v0.1 ships —
 3.5 in vinyl on blueprint 476/73/65212, or 3 in kiss-cut on 400/99/45750 (operator; both are
 native passes, so this is a product judgement rather than an engineering constraint). Whether
 the signup grant is inside or outside the purchase caps (operator, with a named reason recorded
