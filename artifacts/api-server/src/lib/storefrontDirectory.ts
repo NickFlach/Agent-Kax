@@ -1,4 +1,5 @@
 import { db } from "@workspace/db";
+import { compareFrontage, frontageModeFrom } from "./frontageRank";
 import {
   agentsTable,
   agentStorefrontSettingsTable,
@@ -79,9 +80,8 @@ export async function listObcStorefronts(): Promise<DirectoryEntry[]> {
       };
     })
     .filter((e) => e.artifactCount > 0 || e.publishedDropCount > 0 || e.claimed)
-    .sort(
-      (a, b) =>
-        b.artifactCount - a.artifactCount ||
-        (b.latestIngestAt?.getTime() ?? 0) - (a.latestIngestAt?.getTime() ?? 0),
-    );
+    // Sorted through lib/frontageRank, which adds `slug` as a final
+    // comparator. Without it the 48-store cut lands inside a tie and which
+    // buildings exist on the street becomes a fact about the query plan.
+    .sort((a, b) => compareFrontage(a, b, frontageModeFrom(process.env)));
 }
