@@ -3,8 +3,9 @@
 - Status: Proposed (2026-08-15)
 - Date: 2026-08-15
 - Depends on: KAX-ADR-0001 (Agent Economic Authority) — every consequential commerce action **records an immutable authority decision** under that ADR; the full policy engine is a **v0.2** dependency (KAX-ADR-0001 Phase 1b), not a v0.1 one, and this ADR defines **no** permission model of its own; kannaka-memory ADR-0041 (Resonance Futures — identity tokens, double-entry hash-chained credit ledger, floor ledger)
-- Related: NickFlach/Agent-Kax issue #181 (operator decisions, locked 2026-08-13); the Joinery (`lib/joinery.ts`, `lib/joinery-core.ts`) as the existing buy-a-thing-with-credits primitive; `store_listings` as the existing consignment listing
+- Related: NickFlach/Agent-Kax issue #181 (operator decisions, locked 2026-08-13); NickFlach/Agent-Kax **issue #269** (`store_listings.price` read as credits by the Joinery and as USD by Stripe checkout — a **blocking precondition** of this ADR, see "What has already shipped"); the Joinery (`lib/joinery.ts`, `lib/joinery-core.ts`) as the existing buy-a-thing-with-credits primitive; `store_listings` as the existing consignment listing
 - Code of record today: `artifacts/api-server/src/lib/ledger-core.ts`, `artifacts/api-server/src/lib/ledger.ts`, `artifacts/api-server/src/lib/joinery-core.ts`, `artifacts/api-server/src/lib/joinery.ts`, `artifacts/api-server/src/lib/visibility.ts`, `artifacts/api-server/src/lib/ensureCriticalSchema.ts`, `artifacts/api-server/src/routes/webhooks.ts`, `artifacts/api-server/src/routes/ledger.ts`, `artifacts/api-server/src/routes/identity.ts`, `lib/db/src/schema/artifacts.ts`, `lib/db/src/schema/store-listings.ts`, `lib/db/migrations/0013_credit_ledger.sql`, `lib/db/migrations/0024_unit_furnishings.sql`
+- Commerce code of record, shipped to `main` while this ADR was being written: `artifacts/api-server/src/lib/stripeClient.ts`, `artifacts/api-server/src/routes/store-checkout.ts`, the Stripe leg of `artifacts/api-server/src/routes/webhooks.ts` (`:132-173`), `lib/db/src/schema/listing-orders.ts`, `lib/db/migrations/0025_stripe_listing_orders.sql`, the `initStripe` startup step (`artifacts/api-server/src/index.ts:245-267`), and `.agents/memory/kax-commerce-gating.md`
 
 ## Context
 
@@ -24,7 +25,7 @@ This one governs *what happens to money and matter when it does it*. The two mus
 units, on identity, and on which invariants are policy and which are structural — where
 they overlap, the shared text is stated identically in both, deliberately.
 
-Two things are true about the repository today and both shape everything below.
+Three things are true about the repository today and all three shape everything below.
 
 The ledger write surface **is armed in production**. An unauthenticated `POST /api/ledger/grant`
 and `POST /api/ledger/trade` both return 401, not 503, which means `KAX_LEDGER_MINT_TOKEN`
@@ -33,14 +34,179 @@ incident to clean up; the surface works and is gated.
 
 And KAX has already shipped a unit-label defect of exactly the kind this ADR must not
 repeat. `splitSale()` in `lib/joinery-core.ts` takes `price` as a **bigint of minor units**;
-`lib/joinery.ts` posts `-split.price` straight into the ledger. But `lib/joinery.ts:150`
+`lib/joinery.ts` posts `-split.price` straight into the ledger. But `lib/joinery.ts:174`
 tells the user "price must be a positive whole number of **credits**", and
-`routes/mcp.ts:276` advertises "whole **credits**, up to `MAX_LIST_PRICE`". A piece listed
+`routes/mcp.ts:292` advertises "whole **credits**, up to `MAX_LIST_PRICE`". A piece listed
 at 1000 debits 0.001 credits. `MAX_LIST_PRICE = 1_000_000`, presented to agents as
 "1,000,000 credits", is one credit. Conservation holds — `splitSale` asserts it, the ledger
 enforces sum-to-zero, no value is lost or created — but every human-facing string in the
 Joinery is wrong by a factor of 10^6. That is the concrete precedent for the first section
 of this document: **a number without a named unit is not a number.**
+
+And the third: **a Stripe checkout already exists.** It was shipped to `main` while this
+document was being drafted, and this ADR is written against a repository that contains it.
+The section immediately below records what it is, because an ADR that described a greenfield
+here would send an implementer to rebuild working code — and, worse, would leave the defect
+that same code introduced unrecorded.
+
+## What has already shipped: the digital-listing checkout
+
+The first leg of commerce is not a proposal. It is on `main`, and it is the surface the rest
+of this document extends rather than replaces.
+
+**What it does.** `artifacts/api-server/src/routes/store-checkout.ts` mounts three routes,
+unconditionally, from `routes/index.ts:62`:
+
+- `POST /store/listings/:id/checkout` (`:62`) — resolves a `store_listings` row joined to its
+  artifact, lazily creates a Stripe **Product** and **Price** for that listing on first
+  purchase (`:96` and `:114`) under deterministic idempotency keys
+  (`kax-listing-product-<id>`, `kax-listing-price-<id>-<cents>`) so concurrent first
+  purchases converge on the same Stripe objects instead of racing, remembers the two ids on
+  the listing row (`store_listings.stripe_product_id` / `stripe_price_id`, migration 0025
+  `:9-10`), creates a **hosted Stripe Checkout Session** (`:129`), and writes one
+  `listing_orders` row keyed on the session id with `onConflictDoNothing` (`:140-150`).
+  A stored Stripe price is reused only while it still matches the listing's amount and is
+  active; otherwise a fresh Price is created, because Stripe prices are immutable (`:107-119`).
+- `GET /store/orders/confirm` (`:159`) — the success page's read/repair path.
+- `GET /store/my-orders` (`:193`) — the buyer's own purchases.
+
+Settlement is **webhook-driven**, not confirm-driven: the Stripe leg of `routes/webhooks.ts`
+(`:132-173`) verifies the signature through `stripe-replit-sync`, then on
+`checkout.session.completed` with `payment_status === "paid"` sets
+`listing_orders.status = 'paid'` for that session id (`:156-163`). A buyer who closes the tab
+and never returns to the success page still gets a paid order. `GET /store/orders/confirm`
+re-reads the session from Stripe and repairs the row if it is behind (`:177-187`); it is a
+read/repair path and never the primary settlement route.
+
+**What gates it.** `commerceEnabled()` (`lib/stripeClient.ts:10-13`) is true only when
+`KAX_COMMERCE_ENABLED` is exactly `"1"` or `"true"`. With it unset, the whole `/store`
+surface 404s from a router-level middleware (`store-checkout.ts:16-20`), the Stripe webhook
+404s (`webhooks.ts:134-137`), and the `initStripe` startup step logs and returns without
+touching Stripe (`index.ts:247-250`). With it **on**, the `/store` gate additionally **fails
+closed with 503** until a probe read against `listing_orders` succeeds
+(`store-checkout.ts:21-32`), so flipping the flag on a DB that never received migration 0025
+refuses cleanly instead of 500ing mid-checkout. That fail-closed-until-migrated posture is
+exactly the discipline the deployment section below argues for, and it is adopted, not
+restated.
+
+**Where credentials come from.** `getStripeCredentials()` (`lib/stripeClient.ts:20-70`)
+**short-circuits on the secret key.** If `STRIPE_SECRET_KEY` is set, the function returns
+immediately with whatever `STRIPE_WEBHOOK_SECRET` happens to hold and the Replit Stripe
+connector is never queried at all (`:26-28`, `if (envKey) { return { secretKey: envKey,
+webhookSecret: envWebhookSecret }; }`). The connector supplies the webhook secret in exactly
+one case: when the secret key also came from the connector (`:68`, `envWebhookSecret ??
+settings.webhook_secret`). The source comment at `:21-23` describes the resolution as
+per-field, and the one mix it names — connector-supplied secret key plus a dashboard-created
+`STRIPE_WEBHOOK_SECRET` — is indeed the mix that works; the reverse is not.
+
+That asymmetry deserves stating flatly, because it fails silently and it fails at the leg that
+settles money. **An env `STRIPE_SECRET_KEY` with the webhook secret left to the connector
+yields a `StripeSync` constructed with `stripeWebhookSecret: ""` (`:98`), so every webhook
+delivery fails signature verification** — and since settlement is webhook-driven, no order ever
+reaches `paid`. If the key comes from env, the webhook secret must come from env too. Neither
+`getUncachableStripeClient()` (`:76`) nor `getStripeSync()` (`:85`) caches, deliberately, so a
+rotated key is picked up on the next call rather than at the next deploy. A set
+`STRIPE_WEBHOOK_SECRET` also tells startup that a dashboard-created webhook is in charge, and
+suppresses creation of a managed one (`index.ts:256-259`).
+
+**What it does NOT do.** This list is the reason the rest of this ADR still has work in it,
+and every item is an absence in the code, not an oversight in the description:
+
+- **No physical product.** It sells the artifact behind a `store_listings` row. There is no
+  product spec, no size, no variant, no SKU, no `minimum_ppi`, no print area.
+- **No fulfilment.** Nothing is submitted anywhere. There is no Printify adapter, no
+  `submitOrder`, no shipping address collected, and no tracking write-back. `paid` is the
+  terminal state of `listing_orders`; its status vocabulary is three values —
+  `pending | paid | canceled` (migration 0025 `:22`).
+- **No rights preflight.** No `creator_control` check, no `generation_terms` attestation, no
+  lineage, no revocation re-check. The checkout requires only `requireAuth` — any signed-in
+  user may buy any priced listing. The one check it does apply is on the *magnitude*: `:85`
+  refuses with 400 when the computed `amountCents` is below Stripe's $0.50 floor, or when
+  `listing.price * 100` is not a whole number of cents, so a price with more than two decimals
+  cannot be quietly rounded onto a card. That guard constrains the size of the number, not the
+  currency it is denominated in — it is not a unit check, and it does nothing to separate the
+  two readings of `price` recorded immediately below.
+- **No printability preflight.** Nothing measures the asset. `artifact_print_assets` does not
+  exist; no width, height, format, byte size or sha256 is recorded anywhere.
+- **No merchant entity.** There is no merchant row, no merchant of record field, no payout
+  destination, no KYB verdict, and no indemnity attestation. The Stripe account is whichever
+  one the credentials point at.
+- **No tax handling.** No Stripe Tax configuration in code, no `tax_collected`, no
+  jurisdiction, no collector-of-record field.
+- **No cost of goods and no leg set.** `listing_orders` records `amount_cents` and nothing
+  else about the money: no `processor_fee`, no `platform_fee`, no `merchant_net`, no
+  `fulfillment_cost`. Margin cannot be derived from the row, and the sum-to-zero settlement
+  identity of "The commerce event" below has nothing to be computed against.
+- **No AI disclosure** on the product page or in the order record.
+
+So what shipped is a **digital-listing checkout**: real money, real Stripe, real order rows,
+for a thing that is already a row in KAX. Every remaining section of this ADR is about the
+distance between that and a physical object in the post.
+
+### The blocking defect: issue #269
+
+The shipped checkout introduced, and this ADR must record, precisely the failure its own
+units rule exists to prevent. `store_listings.price` is a single `real` (float4) column,
+declared with no unit in its name in migration 0011 (`"price" real`, `:7`) and typed
+`price: real("price")` in `lib/db/src/schema/store-listings.ts`. It is now read **two
+incompatible ways, with nothing separating them**:
+
+| Site | Reads it as | A stored `1000` means |
+|---|---|---|
+| `lib/joinery.ts:406` — `Math.round(listing.price ?? 0)`, passed to `splitSale(BigInt(price), …)` at `:481`, whose postings are debited verbatim by the ledger | **ledger minor units of play_credit** | 0.001 play_credit |
+| `routes/store-checkout.ts:84` — `Math.round(listing.price * 100)`, used as the Stripe Price `unit_amount` at `:115` | **USD dollars** (multiplied by 100 into the Stripe `unit_amount` / `listing_orders.amount_cents`) | $1,000.00 |
+
+The divergence has to be stated in one named unit, because naming the unit is the entire
+point. For a stored `1000`: the Joinery debits **1,000 ledger minor units**, which is 0.001
+play_credit, while Stripe charges **$1,000.00**, which at this ADR's peg is 100,000 credits —
+**10^11 minor units**. The two readings of one column are a factor of 10^8 apart. The tempting
+shorthand, "they differ by 10^6, which is exactly `MINOR_UNITS_PER_CREDIT`", holds only if one
+credit is treated as one dollar, and that implicit conversion is the very thing this section
+forbids. What the two defects genuinely share is a cause, not a magnitude: the same unnamed
+10^6 column factor from the Joinery precedent above, here compounded by the 100:1 peg, now
+with a card on the other end of it.
+
+Nothing structural keeps the two apart. `purchase()` refuses a listing whose artifact is not
+furniture (`lib/joinery.ts:403`), but the checkout's selection is
+`.where(eq(storeListingsTable.id, id))` and nothing else (`store-checkout.ts:69`) — **no
+artifact-kind filter, no listing-kind column to filter on.** The `:85` amount guard does not
+stand in the way either: `list()` requires a positive whole number (`lib/joinery.ts:171`, guard
+at `:173`),
+so every Joinery price is a clean two-decimal USD amount of at least $1.00 and clears the
+$0.50 floor. Every Joinery furniture listing priced in credits is therefore reachable at the
+fiat checkout, where it quotes as dollars. A chair listed at 1,000 credits — which the Joinery
+posts as 0.001 play_credit — is a $1,000.00 Stripe Checkout Session.
+
+It has not fired only because `KAX_COMMERCE_ENABLED` is unset, and the operator is actively
+provisioning Stripe. So this ADR states it as a hard precondition rather than as a risk:
+
+> **`KAX_COMMERCE_ENABLED` must not be set to `1` in any environment that shares a database
+> with the Joinery until #269 is closed.** This is a precondition of the v0.1 critical path,
+> ahead of every engineering item on it.
+
+Two candidate fixes, and the ADR prefers the second:
+
+1. **A structural filter on what the checkout may sell.** The checkout's query gains a
+   predicate restricting it to listings that are unambiguously fiat-priced — the cheapest
+   version being the same `artifactType !== "furniture"` refusal `purchase()` already makes,
+   the more durable version being an explicit `tender` or `listing_kind` column on
+   `store_listings` that says which world the number lives in. This closes the reachability
+   but leaves one float column meaning two things, which will be misread again by the next
+   reader.
+2. **Split the column: `price_minor` (ledger minor units of play_credit, `bigint`) and
+   `price_cents` (integer USD cents).** This is the honest fix, because these are genuinely
+   different quantities in different currencies and always were. It makes the two readings
+   impossible to confuse, it puts the unit in the name as the rule below demands, it removes
+   the float from a money path, and a listing that is priced in neither world simply has both
+   columns null. It costs a migration, a backfill of the existing `price` values into
+   `price_minor` (they are credits today — every existing writer is the Joinery), and touching
+   the four `Math.round` display sites in `lib/joinery.ts`.
+
+Either fix must land with a **behavioural test against the real Postgres CI service** — not a
+source-string test — asserting that a furniture listing cannot produce a Checkout Session.
+The reason is in the ADR's own warning about `lib/publicRouteGating.test.ts`: a test that
+greps a route file passes on a rename and on a predicate that is constructed but never
+applied.
 
 ## Decision
 
@@ -55,7 +221,9 @@ v0.1 will prove exactly one thesis end to end and nothing more:
 > bought by one real human with a card, manufactured and shipped by one real production
 > provider, and recorded in one reconciled order row.
 
-A demo listing without fulfilment does not count.
+A demo listing without fulfilment does not count. **Neither does the shipped digital-listing
+checkout**, which takes a card for a row in KAX and stops there — the thesis is about matter,
+and every clause after "physical poster" is still to be built.
 
 ## Units, and the names money goes by
 
@@ -66,11 +234,19 @@ A demo listing without fulfilment does not count.
 Those two must exist as named exported constants in
 `artifacts/api-server/src/lib/ledger-core.ts` — the pure, DB-free module that already holds
 `GENESIS_HASH`, `HOUSE_ACCOUNT` and `MAX_POSTINGS_PER_TX` — and be pinned by a unit test
-that fails if either value moves. Today the 10^6 factor exists only as an unnamed literal
-in two places (`routes/identity.ts:29`, `SIGNUP_GRANT_MINOR = 100_000_000n`, and
-`routes/ledger.ts:315`, `Number(bal) / 1_000_000` for display), and the 100:1 ratio appears
-nowhere in code at all. Both of those sites must be re-expressed in terms of the named
-constants, so that the peg has exactly one definition a test can hold down.
+that fails if either value moves.
+
+**They do not exist on `main`, and they do not exist on the branch this ADR is committed to.**
+`lib/ledger-core.ts` here is 145 lines long and carries those three constants and nothing else.
+A foundation slice that adds `MINOR_UNITS_PER_CREDIT`, `CREDITS_PER_USDC` and
+`MINOR_UNITS_PER_USDC` (`lib/ledger-core.ts:30-34`) with a pinning test in
+`lib/ledger-core.test.ts` is written, but it sits on the unmerged branch
+`fix/ledger-units-topology-revocation`. Until that branch lands, an implementer must treat the
+constants as work to do, not as an import that resolves. On `main` the 10^6 factor exists only
+as an unnamed literal in two places (`routes/identity.ts:29`, `SIGNUP_GRANT_MINOR =
+100_000_000n`, and `routes/ledger.ts:315`, `Number(bal) / 1_000_000` for display), and the
+100:1 ratio appears nowhere in code at all. Both of those sites must be re-expressed in terms
+of the named constants, so that the peg has exactly one definition a test can hold down.
 
 For commerce specifically:
 
@@ -85,10 +261,30 @@ For commerce specifically:
   constant the arithmetic uses.
 
 `store_listings.price` is a `real` (float4) and is rounded with `Math.round` at **four**
-sites in `lib/joinery.ts` — the catalog (`:128`), `worksForSale` (`:329`), `listingsOfAgent`
-(`:355`) and **`purchase()` (`:415`)**. The last is the one that matters: a float is rounded
-into the number the ledger then posts. **Commerce adds no rounding site of its own** —
-commerce money is integer cents end to end and never crosses `store_listings.price`.
+sites in `lib/joinery.ts` — the catalog (`:128`), `worksForSale` (`:320`), `listingsOfAgent`
+(`:346`) and **`purchase()` (`:406`)**. The last is the one that matters: a float is rounded
+into the number the ledger then posts.
+
+The original draft of this ADR added, here, "**Commerce adds no rounding site of its own** —
+commerce money is integer cents end to end and never crosses `store_listings.price`." **That
+sentence is now false**, and it was falsified by the checkout that shipped while this
+document was being written: `routes/store-checkout.ts:84` is a fifth rounding site,
+`Math.round(listing.price * 100)`, and it reads the very column the Joinery reads as ledger
+minor units. This is issue #269, recorded above as a blocking precondition. The rule survives
+the correction — it is the right rule, and the shipped code is what has to move — so it is
+restated in the only form that is enforceable:
+
+> **Commerce money is integer USD cents end to end, and no commerce path may read
+> `store_listings.price` while that column can also mean ledger minor units.** Either the
+> column is split so its name carries its unit (`price_minor` / `price_cents`), or commerce is
+> structurally prevented from selecting a credit-priced listing. Until one of those is true,
+> the commerce surface stays flagged off.
+
+The generalisation worth carrying forward, because it is the second time the same defect has
+appeared in this repository: a unit ambiguity costs nothing while only one reader exists, and
+becomes an incident the moment a second reader quotes the number in a real currency. The
+Joinery's 10^6 error was harmless for as long as the ledger was the only consumer. It stopped
+being harmless the day a Stripe Price was built from the same column.
 
 ## Platform invariants are not policy
 
@@ -106,7 +302,7 @@ yield (operator decision 7).
 Operator decision 5 — **no credit transfers between users; prediction markets are the only
 peer-to-peer value flow** — is the operator's locked intent, and this ADR carries it as
 that rather than as a description of the running system, because shipped code already
-departs from its literal reading. `lib/joinery.ts:494-514` posts buyer `trader:*` → seller
+departs from its literal reading. `lib/joinery.ts:485-505` posts buyer `trader:*` → seller
 `trader:*` plus a maker royalty to a *third* `trader:*`. The boundary that makes that
 legitimate is the **goods-purchase-with-a-platform-fee carve-out** named below; stated
 precisely, decision 5's rule is *no bare value transfer between two principals* — a
@@ -117,52 +313,86 @@ These are not defaults and they are not scope lines. A scope line can be un-scop
 sprint; a deny-by-default capability implies an operator may grant it. So KAX-ADR-0001
 **removes** `credits.transfer`, `usdc.withdraw`, `fiat.withdraw`, `merchant.payout.change`
 and `merchant.bank.change` from its capability enumeration entirely rather than listing them
-as denied, and the enforcement is structural, in `validatePostings` in `lib/ledger-core.ts`,
-as a per-`kind` permitted-account-topology rule:
+as denied, and the enforcement belongs in `validatePostings` in `lib/ledger-core.ts`, as a
+per-`kind` permitted-account-topology rule. KAX-ADR-0001 prints the table, and it is
+reproduced here rather than paraphrased, because a paraphrase that collapsed the three Joinery
+kinds into one row would be weaker than the rule itself — `joinery_fee` may credit only the
+house and may debit nobody, and `joinery_royalty` may credit only a trader and may debit
+nobody; those legs are paid *out of* the buyer's `joinery` debit, never on their own:
 
-```
-kind                                     permitted topology
----------------------------------------  ------------------------------------
-grant                                    house -> trader
-escrow                                   house -> amm
-trade                                    trader <-> amm
-payout                                   amm -> trader | house
-joinery, joinery_fee, joinery_royalty    trader -> trader | house
-```
+| kind | may debit | may credit |
+| --- | --- | --- |
+| `grant` | `house` | `trader:*` |
+| `escrow` | `house` | `amm:*` |
+| `trade` | `trader:*`, `amm:*` | `trader:*`, `amm:*` |
+| `payout` | `amm:*` | `trader:*`, `house` |
+| `joinery` | `trader:*` | `trader:*` |
+| `joinery_fee` | — | `house` |
+| `joinery_royalty` | — | `trader:*` |
 
-with a test in `lib/ledger.test.ts` that **fails** if a `trader -> house` redemption shape
-is ever accepted. As shipped, `validatePostings` (`lib/ledger-core.ts`) checks posting
-count, bigint amounts, a non-empty `account` and `kind` on every posting, a non-empty
-`asset` argument, and `sum === 0n` — and nothing about *which accounts* may face each other
-under *which kind*. It would accept a redemption without complaint. An invariant protected
-by nothing is one endpoint away from being off.
+A kind absent from the table is refused outright, and so is an account that parses to class
+`unknown`, because a typo'd account would otherwise become a permanent balance no principal can
+spend from. On top of the table sits the whole-transaction refusal: a transaction that debits a
+trader and credits the house **without crediting any trader** throws. The test that holds this
+down is `lib/ledger-core.test.ts` ("permitted posting topology: what it refuses"), not
+`lib/ledger.test.ts` — it belongs in the pure core's own suite because the core, not the
+routes, is where the rule lives.
+
+**None of that is on `main`, and none of it is on this branch.** As it stands here,
+`validatePostings` (`lib/ledger-core.ts:64-79`) checks posting count, bigint amounts, a
+non-empty `account` and `kind` on every posting, a non-empty `asset` argument, and `sum === 0n`
+— and nothing about *which accounts* may face each other under *which kind*. It would accept a
+redemption without complaint. The implementation of the table above (`accountClass` at `:143`,
+`PERMITTED_TOPOLOGY` at `:178`, `assertPermittedTopology` at `:204`, called from
+`validatePostings` at `:320`) exists on the unmerged branch
+`fix/ledger-units-topology-revocation` and nowhere else. KAX-ADR-0001 records these two items
+as landed; on this branch they are not, and the honest reading is that they are written and
+awaiting merge. Until they merge, every invariant in this section is protected by nothing — and
+an invariant protected by nothing is one endpoint away from being off.
 
 The carve-out that keeps the shipped Joinery inside decision 5, stated identically to
 KAX-ADR-0001, with its boundary drawn where the code can actually hold it:
 
 > **Goods purchase with a platform fee** is a defined carve-out from the no-transfer rule.
-> Three conditions, all required, and **only the first two are enforceable at the ledger
-> core**:
+> Three conditions, all required, and only the first is enforceable at the ledger core — and
+> then only partly:
 >
-> 1. **A platform fee is taken under a fee `kind`** — the transaction must include a
->    posting to `HOUSE_ACCOUNT` under a `*_fee` kind. *Core-enforceable.*
+> 1. **The movement happens under a named sale `kind`, and paying the house is never the
+>    whole transaction.** There is no generic `transfer` kind and there cannot be one: a kind
+>    absent from `PERMITTED_TOPOLOGY` is refused outright, so the only `trader:* ->
+>    trader:*` shape the core will accept is `joinery`. The redemption test keys on the house
+>    being **credited without any trader being credited**, not on a fee posting being
+>    present — see the cheap-sale hole below for why, and for what that costs.
 > 2. **The counterparty is not caller-chosen as a free field** — seller and maker accounts
->    are derived server-side from a listing row, inside `purchase()` (`lib/joinery.ts:390`
->    onward: the listing join at `:393`, the maker resolution and the
->    `SellerCannotBePaid` refusal before any posting is built), never read out of the
+>    are derived server-side from a listing row, inside `purchase()` (`lib/joinery.ts:381`
+>    onward: the listing join at `:397`, the maker resolution and the
+>    `SellerCannotBePaid` refusal at `:478`, all before any posting is built), never read out of the
 >    request body. Contrast `routes/ledger.ts`, where `principal` *is* a request string.
->    *Core-enforceable* as a topology rule.
 > 3. **A good is delivered.** The ledger core **cannot see this**. `validatePostings` is
 >    pure and DB-free; it has no row to look at. This clause is an **obligation on the
 >    caller**, discharged by writing the delivery row in the same logical operation
 >    (`unit_furnishings` for the Joinery, the `commerce_orders` row for Commerce), and this
 >    ADR says so rather than pretending the core checks it.
 
-So the rule the core actually enforces is: **a bare `trader:* -> trader:*` posting carrying
-no fee posting under a `*_fee` kind is refused at the ledger core, not at a route.** Routes
-are added by people in a hurry; the core is not. Delivery is enforced one layer up, by the
-caller, and is auditable only because the delivery row and the postings share a
-deterministic reference.
+The earlier draft of this ADR claimed the core refuses "a bare `trader:* -> trader:*` posting
+carrying no fee posting under a `*_fee` kind". It does not, and the difference is not
+pedantic. Clause 1 is a *kind* rule, not a *fee-presence* rule, and KAX-ADR-0001 names the
+hole that follows from that: with `HOUSE_BPS = 1000` (10%, `lib/joinery-core.ts:25`) and
+integer division, a sale priced below 10 minor units computes a house cut of zero, and
+`lib/joinery.ts:508` filters zero postings out. Such a sale posts `trader -> trader` under
+kind `joinery` with **no fee posting at all**, and the topology check accepts it —
+deliberately, because keying the redemption test on the *presence* of a house leg would refuse
+a legitimate cheap sale. The fix is a floor, not a stricter core check: **a minimum sale price
+such that the computed house fee is at least 1 minor unit**, which is a Phase 1a item in
+KAX-ADR-0001 and is not yet in code. Both documents state that one boundary; neither states a
+second.
+
+And, as the section above records, on this branch the core enforces none of it: `PERMITTED_TOPOLOGY`
+and `assertPermittedTopology` live on `fix/ledger-units-topology-revocation`, unmerged. Routes
+are added by people in a hurry and the core is not, which is the whole reason the rule belongs
+there — but a rule that has not merged is not yet protecting anything. Delivery is enforced one
+layer up regardless, by the caller, and is auditable only because the delivery row and the
+postings share a deterministic reference.
 
 ## Tender rules and the closed loop
 
@@ -211,6 +441,13 @@ and consistent with #181.
 A **single Stripe account** owned by the KAX operating entity, with **no Stripe Connect**.
 The operating entity is the sole merchant of record. This is being provisioned in Replit
 via the Replit Stripe integration, in **test mode first**.
+
+The code already assumes exactly this shape and nothing more: `getStripeCredentials()` resolves
+one secret key and constructs one `Stripe` client with no `stripeAccount` option and no
+`on_behalf_of`, and `checkout.sessions.create` passes no `application_fee_amount` and no
+`transfer_data` (`store-checkout.ts:129-138`). There is no Connect topology latent in the
+shipped code waiting to be switched on — which is the correct v0.1 state, and worth recording
+so nobody reads the presence of a Stripe integration as the presence of a marketplace.
 
 ### v0.2 payments: Connect with direct charges, committed now
 
@@ -278,7 +515,7 @@ requirements_currently_due }` — and never the underlying documents. KAX does n
 custody of an identity document and should never acquire it.
 
 A hard schema constraint both ADRs carry: **status fields are `varchar` with app-level
-validation, never a `pgEnum`.** `routes/identity.ts:245` states the reason in the source —
+validation, never a `pgEnum`.** `routes/identity.ts:221` states the reason in the source —
 "adding pg enum values breaks the Replit deploy flow" — and `user_bots.attached_via`
 (migration 0022) is the pattern to copy.
 
@@ -354,27 +591,50 @@ L402/Lightning is the alternate rail (operator decision 1).
 
 Card checkout is a **Stripe hosted Checkout Session** for v0.1: server-created, the browser
 redirects to Stripe's page, Stripe redirects back. PCI scope is SAQ A and no publishable key
-is needed client-side.
+is needed client-side. **This is shipped** — `routes/store-checkout.ts:129`,
+`stripe.checkout.sessions.create({ mode: "payment", … })` — so the physical checkout extends a
+working hosted-Checkout call rather than introducing one.
 
 Being honest about the cost: the redirect **breaks immersion**. A buyer standing in KAX's 3D
 city is thrown out to a Stripe-hosted page and back. That is accepted for v0.1 because the
 alternative — Stripe Embedded Checkout — is more integration surface on the critical path of
 a one-transaction proof. Embedded Checkout is a v0.2 polish item and is listed as such.
 
-Environment names, already agreed with the operator, to be used exactly:
+Environment names. The first three are **shipped and read by `lib/stripeClient.ts`**; the
+Printify pair is still to be introduced. Use exactly these:
 
-| Name | Purpose | v0.1 |
-|---|---|---|
-| `STRIPE_SECRET_KEY` | server-side Stripe API | required |
-| `STRIPE_WEBHOOK_SECRET` | verify `/api/webhooks/stripe` | required |
-| `KAX_COMMERCE_ENABLED` | feature flag, **default off** | required to write |
-| `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | required |
-| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | required |
+| Name | Purpose | Status | v0.1 |
+|---|---|---|---|
+| `STRIPE_SECRET_KEY` | server-side Stripe API | **shipped** — `stripeClient.ts:24` | required |
+| `STRIPE_WEBHOOK_SECRET` | verify `/api/webhooks/stripe` | **shipped** — `stripeClient.ts:25` | required only on the dashboard-webhook path; the connector-managed webhook supplies its own — see "v0.1 deployment and feature-flag posture". Required whenever `STRIPE_SECRET_KEY` is set in env |
+| `KAX_COMMERCE_ENABLED` | feature flag, **default off** | **shipped** — `stripeClient.ts:10-13`, accepts `"1"` or `"true"` | required to write |
+| `KAX_PRINTIFY_API_TOKEN` | Printify Personal Access Token | to build | required |
+| `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | to build | required |
+
+**Credential resolution is the shipped one and is not re-specified here.** The precedence —
+an explicit `STRIPE_SECRET_KEY` short-circuits the connector entirely, so the webhook secret
+must come from env alongside it; the connector supplies a webhook secret only when it supplied
+the key too — plus the deliberate non-caching of the client, is defined in
+`getStripeCredentials()` (`lib/stripeClient.ts:20-70`) and described under "What has already
+shipped". Physical commerce calls `getUncachableStripeClient()` and inherits it, including that
+trap. Do not add a second credential path; a rotated key must be picked up in one place, not
+two.
+
+### Redirect base URL — the shipped implementation must change
 
 Success and cancel redirects reuse an **existing** base-URL variable. No new base-URL
-variable is invented, and the base is never taken from request headers.
+variable is invented, and **the base is never taken from request headers**.
 
-Be specific about *which* existing one, because the repo has two and they are not
+The shipped `webBaseUrl()` (`routes/store-checkout.ts:54-60`) **violates that rule**, and the
+rule wins. It reads `req.get("origin")` first, falls back to the first entry of
+`REPLIT_DOMAINS`, and falls back again to `req.protocol` plus the `Host` header. Two of those
+three sources are attacker-supplied request headers. An attacker who can set `Origin` on the
+checkout POST chooses the host the buyer is returned to **after a real card charge**, with a
+`session_id` in the query string — which is an open redirect on the one request in the system
+where the user is most primed to trust where they land. It must be replaced before
+`KAX_COMMERCE_ENABLED` is set, and it is listed as a precondition alongside #269.
+
+Be specific about *which* existing variable, because the repo has two and they are not
 interchangeable. Checkout `success_url` and `cancel_url` derive from the **same precedence
 `resetLinkBase()` uses** (`routes/auth-email.ts:209-216`): `KAX_PUBLIC_URL`, else
 `REPLIT_DEV_DOMAIN` / the first entry of `REPLIT_DOMAINS`. **Never `PUBLIC_APP_URL`** — that
@@ -389,9 +649,33 @@ unresolvable base is a **hard refusal to create the Checkout Session**, not an e
 and not `https://kax.replit.app`. Sending a buyer back to the wrong host after a real charge
 is worse than not taking the charge.
 
-The Stripe webhook endpoint is **`/api/webhooks/stripe`**, matching the existing
-`/api/webhooks/openbotcity` convention. The path prefix is load-bearing, not cosmetic — see
-Deployment posture.
+Note that `REPLIT_DOMAINS` is already what the startup step uses to register the managed
+Stripe webhook (`index.ts:262-264`), so a single env-derived base serves both and there is no
+new variable to provision.
+
+### Settlement is webhook-driven
+
+The Stripe webhook endpoint is **`/api/webhooks/stripe`** — shipped at `routes/webhooks.ts:132`,
+matching the existing `/api/webhooks/openbotcity` convention. The path prefix is load-bearing,
+not cosmetic — see Deployment posture.
+
+The settlement shape is likewise decided in code and adopted here rather than re-proposed:
+**the webhook is the settlement path and the confirm endpoint is a read/repair path.** The
+`checkout.session.completed` handler moves the order to `paid` (`webhooks.ts:156-163`);
+`GET /store/orders/confirm` re-reads the session and repairs a stale row on refresh
+(`store-checkout.ts:177-187`). Physical orders follow the same discipline for the same reason:
+a buyer who closes the tab after paying must still get a fulfilled order, so no state
+transition may depend on the browser coming back. The corollary for fulfilment is in the
+critical path below — **Printify submission hangs off the paid webhook, never off the success
+page.**
+
+One thing the shipped webhook does *not* do, and physical commerce must: its settlement block
+is wrapped in a `try/catch` that logs and swallows (`webhooks.ts:165-167`), then returns 200.
+That is defensible when the only consequence is an order row that the confirm path will repair
+on the buyer's next page load. It is **not** defensible once the same event triggers a
+manufacturing submission, because a swallowed failure there is a paid order that never ships
+and nothing retries. Physical settlement must return non-2xx so Stripe redelivers, with the
+work made idempotent under the order's deterministic key.
 
 ## Cash flow and custody timeline
 
@@ -477,7 +761,7 @@ Commitments this ADR makes:
 - **KAX's application fee (v0.2)** is taken gross via `application_fee_amount`, at a rate
   recorded on the order row together with the basis it applied to (see the leg set below).
   **The rate itself is not set by this ADR.** The repo's only existing rate is
-  `HOUSE_BPS = 1000` (10%), a hardcoded module constant at `lib/joinery-core.ts:27` with
+  `HOUSE_BPS = 1000` (10%), a hardcoded module constant at `lib/joinery-core.ts:25` with
   no fee table behind it; whether commerce uses that rate or another is an **operator**
   decision, to be made and recorded before the first charge. v0.1 records the same fields
   with no Stripe object behind them, per the v0.1 flow above.
@@ -513,6 +797,70 @@ about the ledger as built, not preferences:
 and the normalized commerce event is a projection computed from it. This is stated
 explicitly because the original success criterion's phrase "reconciled ledger record" reads
 as though `credit_ledger` were involved. It is not, and it must not become so by drift.
+
+### `commerce_orders` and `listing_orders` are two tables, deliberately
+
+`listing_orders` now exists (migration 0025, `lib/db/src/schema/listing-orders.ts`) and does
+one job well: it ties a Stripe Checkout Session to a listing and a buyer, with Stripe as the
+source of truth for payment state. The question an implementer will otherwise have to guess
+at is whether physical orders extend it or get their own table. **They get their own table:
+`commerce_orders`. `listing_orders` is not extended, not renamed, and not duplicated.**
+
+The justification is in what `listing_orders` actually stores. It has nine columns —
+`id`, `listing_id`, `buyer_user_id`, `stripe_session_id`, `amount_cents`, `currency`,
+`status`, and the two timestamps — and three of them are the reasons:
+
+- **`listing_id INTEGER NOT NULL REFERENCES store_listings(id) ON DELETE CASCADE`**
+  (migration 0025 `:17`). A physical order must not be keyed on `store_listings` at all. It is
+  keyed on `(artifact_id, product_spec_id, merchant_id)` — the commerce product row — because
+  the same artifact is a different product as a 12×12 poster than as a sticker, and
+  `store_listings` has no notion of a product spec. And the cascade is disqualifying on its
+  own: this ADR's rule, argued at length under Stage 3, is **no FK to a table the deploy diff
+  can drop**, because the Replit publish step has already eaten `residence_units` and
+  `city_residents`. A row that records a real card charge and a manufacturing submission may
+  not vanish because a listing row did.
+- **`amount_cents INTEGER` is the whole money model.** The physical order's money is the
+  balanced leg set of "The commerce event" — `item_price`, `shipping_charged`,
+  `tax_collected`, `processor_fee`, `platform_fee`, `merchant_net`, plus the out-of-band
+  `fulfillment_cost` and `fulfillment_shipping_cost`, each with its bearer and its settlement
+  ref. Extending `listing_orders` to carry those means roughly fifteen columns that are
+  permanently null for every digital row, on a table whose entire virtue is that it is small
+  and says only what it knows.
+- **`status` has three values** — `pending | paid | canceled` (migration 0025 `:22`). The
+  physical lifecycle has twelve, and `paid` is its fourth state rather than its last. Widening
+  the digital table's vocabulary would make `listing_orders.status` mean "one of twelve things,
+  nine of which cannot happen here", which is how a status column stops being readable.
+
+There is a fourth reason, and it is the sharpest: `listing_orders.listing_id` points into
+`store_listings`, whose `price` column is the subject of issue #269. Building the physical
+order path on top of that row is building it on top of the unit ambiguity. `commerce_orders`
+carries its own `item_price_cents` and never reads `store_listings.price`.
+
+What **is** copied from `listing_orders`, because the shipping session got it right:
+
+- `stripe_session_id TEXT NOT NULL UNIQUE` as the natural idempotency key, with
+  `onConflictDoNothing` on that target at insert (`store-checkout.ts:150`) — the same
+  deterministic-reference discipline `saleTxId()` applies to Joinery sales.
+- **Amount columns that name their unit** (`amount_cents`, not `amount`) and an explicit
+  `currency`.
+- **`status` as `TEXT`, not a `pgEnum`** — matching this ADR's own hard schema constraint, for
+  the Replit deploy reason.
+- Webhook-driven settlement with the confirm endpoint as a read/repair path.
+
+The two tables are **never joined and never unioned**. "All my purchases" across both is a
+question for a view or an application-level merge, not for a shared table — and that question
+does not arise in v0.1, which sells one poster.
+
+**One registration gap to close, in the shipped table.** This ADR's deployment rule 1 requires
+every commerce table in three places. `listing_orders` is in the migration and in the drizzle
+barrel (`lib/db/src/schema/index.ts:14`), but there is **no `CREATE TABLE IF NOT EXISTS
+listing_orders` in `artifacts/api-server/src/lib/ensureCriticalSchema.ts`** — its `STATEMENTS`
+cover `residence_units`, `city_residents`, `user_bots` columns and `unit_furnishings`, and
+nothing else. Two of three is exactly the state `residence_units` was in before the deploy
+diff dropped it, and an applied migration never re-runs. `listing_orders` will hold real
+orders. It must be added to `ensureCriticalSchema`, along with the two
+`ALTER TABLE store_listings ADD COLUMN IF NOT EXISTS stripe_*_id` statements, before the flag
+is flipped.
 
 **3. If a `commerce_ledger` is introduced in v0.2** it is a **separate double-entry table**,
 in integer minor units of an explicit ISO currency (USD cents), with:
@@ -678,14 +1026,21 @@ the asset host.** `public_url` points at OBC's Supabase bucket. Those bytes can 
 with no KAX-side write, no `updated_at` change, and nothing at all to notice — the merchant
 approved a photograph and the poster prints something else.
 
-One implementation hazard to name: the revocation gate lives in `refuseIfRevoked`
-(`lib/actor.ts:81-90`), and it is reached from the two *actor-resolution* doors —
-`resolveActor`'s agent-token branch and `agentForActor` (`lib/actor.ts:197`) — and from
-nowhere else. That covers a request that arrives as an agent or as its owner's session. It
-covers nothing that reaches commerce without resolving an actor at all: a background job, a
-service-token surface, a future MCP façade calling the library directly. **The Commerce
-Gateway must call the revocation check itself, at its own library boundary**, so every
-façade over it gets the gate rather than only the doors that happen to have it today.
+One implementation hazard to name, and it is narrower than the original draft claimed. The
+revocation gate is `isRevoked` (`lib/revocation.ts:33`), and it is reached from **exactly one
+place**: `resolveActor`'s agent-token branch, `lib/actor.ts:98-104`, where a withdrawn
+verification raises a 403. `agentForActor` (`lib/actor.ts:157`) does **not** call it — the
+owner-session path resolves the agent by id and checks `canMutate` against `agent.ownerId`
+(`:174-175`), and nothing on that path consults `revoked_at` at all. Outside `lib/actor.ts`
+the only caller is `routes/identity.ts:97`, which reads the state to report it, not to gate on
+it.
+
+So the covered surface is "a request presenting an agent token", and nothing else — not the
+owner's session, not a background job, not a service-token surface, not a future MCP façade
+calling the library directly. **The Commerce Gateway must call the revocation check itself,
+at its own library boundary**, so every façade over it gets the gate rather than the single
+door that happens to have it today. The shipped checkout illustrates the point exactly: its
+only guard is `requireAuth` (`routes/store-checkout.ts:62`), so it consults revocation nowhere.
 
 ## v0.1 eligible set
 
@@ -726,7 +1081,7 @@ Commerce eligibility is therefore a **third named predicate, defined once** in
 `publicArtifactWhere` — e.g. `commerceEligibleWhere()` — and never re-derived ad hoc in a
 route. The repo already carries **two contradictory answers** to "is this artifact public":
 `lib/visibility.ts` requires a published drop plus a `narrated | dropped` status, while
-`routes/agent-storefront.ts:328-337` (`agentWorksWhere`) deliberately applies neither,
+`routes/agent-storefront.ts:333-337` (`agentWorksWhere`) deliberately applies neither,
 because the storefront *is* the agent's harvested body of work. Both are correct for their
 purpose. A fourth ad-hoc copy of "is this sellable" would not be.
 
@@ -819,10 +1174,21 @@ independent permission model.
 This is the matching half of **KAX-ADR-0001's Phase 1a**, and it is stated here because the
 sequencing error it prevents is the largest one available in this pair of documents. In v0.1
 the authority question is a **single** one — *may this actor commercialize this artifact* —
-answered **with no new subsystem**: `resolveActor(req)` + `isRevoked` + the existing
-`agentWorksWhere(agent)` predicate (`routes/agent-storefront.ts`), plus **one immutable
-`authority_decisions` row per consequential action**. Everything else is DENY, hard-coded,
-with no policy row at all.
+answered **with no new subsystem**: `resolveActor(req)` + `isRevoked` +
+**`commerceEligibleWhere()`** — the commerce-eligibility predicate defined once under "v0.1
+eligible set" above and in `lib/visibility.ts` — plus **one immutable `authority_decisions`
+row per consequential action**. Everything else is DENY, hard-coded, with no policy row at
+all.
+
+The gate is emphatically **not** `agentWorksWhere(agent)`
+(`routes/agent-storefront.ts:333`), which an earlier draft of this ADR named here. That was
+wrong twice over. Wrong on the semantics: `agentWorksWhere` answers *whose storefront does this
+piece appear on*, attributing on `agentId` OR `creatorBotId` with no publication gate and no
+attachment gate, so it would admit the entire harvested catalogue that the "v0.1 eligible set"
+exists to exclude — **storefront appearance is not commercial eligibility.** And wrong on the
+mechanics: it is module-private (`function agentWorksWhere(agent: Agent)`, no `export`), so a
+`lib/` module cannot call it at all. KAX-ADR-0001's Phase 1a states the same correction in the
+same terms.
 
 Policy documents, versioning, per-channel scope, amount limits and approval modes are
 **KAX-ADR-0001 Phase 1b**, and Phase 1b is a v0.2 dependency of this ADR. Nothing in the
@@ -906,10 +1272,10 @@ assert truthfully.
 **No v0.1 revenue split may depend on lineage.** This is a hard constraint, not a
 preference, and "revenue-split obligations" is removed from the v0.1 lineage requirements.
 The repo's only split is `HOUSE_BPS = 1000` / `MAKER_ROYALTY_BPS = 1000`, hardcoded as
-module constants at `lib/joinery-core.ts:27` and `:29`, with no fee table and no per-artifact
+module constants at `lib/joinery-core.ts:25` and `:27`, with no fee table and no per-artifact
 terms.
 And it has a silent failure mode: when the maker cannot be resolved to an agent with an
-`obc_bot_id`, `lib/joinery.ts:508-514` folds the royalty into the seller's posting, leaving
+`obc_bot_id`, `lib/joinery.ts:504` folds the royalty into the seller's posting, leaving
 **no ledger record that the maker went unpaid** — the transaction balances, the money moves,
 and nothing anywhere says a royalty was owed. A lineage-driven split would inherit that
 invisibly.
@@ -1035,7 +1401,7 @@ amended:
 > **Product source image** — KAX is authoritative for *which image*. The print file is held
 > by the fulfilment provider once uploaded. Until that upload happens, KAX holds only a URL
 > on a host it does not control (OBC's Supabase bucket, per the arcade allowlist in
-> `routes/arcade.ts:32`).
+> `routes/arcade.ts:45`).
 
 KAX must still read the bytes once, for two things and only two: **width/height**, and a
 **sha256** to pin merchant approval. The mechanism is a single **size-capped, https-only,
@@ -1063,12 +1429,16 @@ The existing `store_listings` table **stays** as the storefront-facing consignme
 and is **not** replaced. To be explicit about the question that would otherwise be argued at
 implementation time: **the KAX-native physical product page's buy button reads the commerce
 product row, not `store_listings`.** `store_listings` continues to drive the Joinery and the
-storefront directory, in credits, unchanged.
+storefront directory, in credits, unchanged — and, once #269 is closed, the shipped digital
+checkout too.
 
 **2. `commerce_orders` copies `unit_furnishings`' shape:** a deterministic external
 reference; `onConflictDoNothing`; and **no foreign key to any table the deploy diff can
-drop.** It deliberately **inverts** `unit_furnishings`' *ordering*, because the counterparty
-is external — see below. Migration 0024's header
+drop.** (That last clause is why the physical order does not extend the shipped
+`listing_orders`, whose `listing_id` and `buyer_user_id` are both hard FKs with
+`ON DELETE CASCADE` — the full decision is under "`commerce_orders` and `listing_orders` are
+two tables, deliberately".) It deliberately **inverts** `unit_furnishings`' *ordering*, because
+the counterparty is external — see below. Migration 0024's header
 explains at length why `unit_furnishings` has no FK to `residence_units` and uses the natural
 key `(floor, letter)` instead — a FK would turn the very drop `ensureCriticalSchema` exists to
 repair into a cascade that deletes every purchase in the city.
@@ -1228,31 +1598,55 @@ compressed.
 
 | # | Dependency | Owner | Hard blocker? | Lead time |
 |---|---|---|---|---|
+| 0 | **Issue #269 closed** — `store_listings.price` no longer readable as both credits and USD | engineering | **HARD — gates the flag, not just the pilot.** Blocks `KAX_COMMERCE_ENABLED=1` in any environment sharing a database with the Joinery | days; a migration plus a behavioural CI test |
+| 0b | **`webBaseUrl()` no longer derived from request headers** (`store-checkout.ts:54-60`) | engineering | **HARD — gates the flag.** Post-charge open redirect | hours |
+| 0c | **`listing_orders` + the two `store_listings.stripe_*` columns added to `ensureCriticalSchema`** | engineering | **HARD — gates the flag.** Two-of-three registration is how `residence_units` was lost | hours |
 | 1 | Printify merchant account + **Personal Access Token** | operator | **HARD** for fulfilment | minutes — self-serve, *My Profile > Connections*; 1-year expiry |
 | 2 | Printify **payment method on file** so orders can be manufactured | operator | **HARD** — *must verify whether Printify charges at order-submit time* | minutes, once #1 exists |
-| 3 | **Stripe account activated for live charges** — requires a legal entity, business identity and a linked bank account | operator | **HARD** blocker for "one real human purchase" | typically days; longer if Stripe reviews. **START THIS FIRST — it is the longest pole** |
+| 3 | **Stripe account activated for live charges** — requires a legal entity, business identity and a linked bank account | operator | **HARD** blocker for "one real human purchase" | **in progress** — the operator is provisioning Stripe now, which is what makes items 0/0b/0c urgent rather than merely open |
 | 4 | A **legal merchant entity** that owns the Stripe account and is merchant of record | operator | **HARD** — a legal decision, not an engineering task | operator-determined |
 | 5 | **Sales-tax registration** wherever the merchant entity has nexus | operator | SOFT for one test transaction; **HARD before public launch** | unbounded |
 | 6 | A real human buyer with a shipping address | anyone | not a blocker | — |
 | 7 | Object storage | — | **not a blocker for v0.1** (upload-by-URL; see print masters) | — |
 | 8 | Printify **OAuth app approval** | operator | **not needed for v0.1** | up to ~1 week, when needed in v0.2 |
+| 9 | Stripe API credentials reaching the server | operator | **satisfied by shipped code** — `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` or the Replit Stripe connector, resolved by `lib/stripeClient.ts`. **An env secret key short-circuits the connector, so the webhook secret must be set in env alongside it** or every delivery fails verification | — |
 
 **Items 1–4 are strictly serial with all engineering work and should be started on day one.
 The code cannot be proven until they exist.**
 
+**Items 0, 0b and 0c are serial with the operator work in a way the original register did not
+anticipate**, because the flag they gate is the same flag item 3's provisioning is heading
+toward. They are the only entries whose owner is engineering, and they are the only ones that
+can cause harm by being late rather than merely delay the pilot: the day Stripe is live and the
+flag goes on with #269 open, every credit-priced furniture listing in the city becomes a fiat
+checkout quoting its credit price as dollars — a chair the Joinery debits 1,000 minor units for
+(0.001 play_credit) charges a card $1,000.00.
+
 ## v0.1 critical path
 
 The original's flat eighteen-item list was a feature inventory, not a path. Sorted by what it
-actually costs:
+actually costs — and the first column is now substantially larger than when this ADR was
+drafted, because the digital-listing checkout shipped:
 
 | Already exists | Small extension | Genuinely new subsystem |
 |---|---|---|
 | OBC/KAX agent identity (`lib/actor.ts` `resolveActor`, `routes/auth-agent.ts` challenge flow) | source width/height inspection | verified merchant relationship |
 | one image artifact | printability evaluation (a pure function comparing px to `required_px`) | rights preflight |
-| | one poster product definition (a constant: Printify blueprint id + variant id + print-area px) | POD adapter |
-| | shipment/tracking update (one webhook handler) | KAX-native product page |
-| | audit trail (columns on the order row) | retail checkout |
-| | | order creation + fulfilment submission |
+| **Stripe client + credential resolution** (`lib/stripeClient.ts`) | one poster product definition (a constant: Printify blueprint id + variant id + print-area px) | POD adapter |
+| **hosted Checkout Session creation** (`store-checkout.ts:129`) | shipment/tracking update (one webhook handler) | KAX-native **physical** product page |
+| **`/api/webhooks/stripe` with signature verification** (`webhooks.ts:132`) | audit trail (columns on the order row) | `commerce_orders` + the balanced leg set |
+| **webhook-driven settlement + confirm/repair path** | **redirect base URL** — replace the header-derived `webBaseUrl()` with the `resetLinkBase()` precedence | order creation + fulfilment submission |
+| **`KAX_COMMERCE_ENABLED` gate + fail-closed-until-migrated middleware** | lazy Stripe Product/Price creation for a *product spec* rather than a listing | |
+| **an order row keyed on the Checkout Session, with a unique idempotency target** | | |
+
+Retail checkout is no longer a subsystem to build. It is a working call to
+`stripe.checkout.sessions.create` that has to be pointed at a commerce product row instead of a
+`store_listings` row, given a safe redirect base, and taught to collect a shipping address.
+
+**Step 0, before any of the seven: close the preconditions.** #269, the header-derived redirect
+base, and the `ensureCriticalSchema` registration gap. Until all three land,
+`KAX_COMMERCE_ENABLED` stays unset. This step has no engineering dependency on anything below
+it and should be done first for that reason as well as for the safety one.
 
 **The seven steps, in order:**
 
@@ -1263,8 +1657,12 @@ actually costs:
 3. Hard-code **one** poster spec and accept **only** `native_pass`.
 4. Merchant approval row carrying an **approver id** and the **`approved_content_hash`**.
 5. `commerce_orders` row written **first**, then the Stripe **hosted Checkout Session**
-   created under an idempotency key derived from that row (see Stage 3, reuse item 2).
-6. Printify **order submit** on the `checkout.session.completed` / paid webhook.
+   created under an idempotency key derived from that row (see Stage 3, reuse item 2). This
+   reuses `getUncachableStripeClient()` and the shipped session-creation call; what is new is
+   the row-first ordering and the leg-set columns, not the Stripe integration.
+6. Printify **order submit** on the `checkout.session.completed` / paid webhook — extending the
+   shipped handler at `webhooks.ts:156-163`, and returning non-2xx on failure so Stripe
+   redelivers rather than swallowing the error as the digital path does.
 7. Tracking webhook **writes back** to the order row.
 
 ### Deliberately cut from v0.1, with the reason for each
@@ -1278,7 +1676,7 @@ actually costs:
 | upscaling, object storage, multi-product | see print masters — upload-by-URL removes the need |
 | trademark / likeness review | no producer exists; replaced by merchant indemnity + takedown |
 | multi-merchant Connect | v0.2, committed above, not built now |
-| the full Agent Economic Authority policy engine | v0.1 needs one hard-coded decision, not a policy subsystem — see KAX-ADR-0001's Phase 1a/1b split; the `scopes` claim it would have built on is decoration, minted in `lib/identity.ts:209` and copied forward on refresh (`routes/identity.ts:450`) but enforced by no code path anywhere |
+| the full Agent Economic Authority policy engine | v0.1 needs one hard-coded decision, not a policy subsystem — see KAX-ADR-0001's Phase 1a/1b split; the `scopes` claim it would have built on is decoration, minted in `lib/identity.ts:209` and copied forward on refresh (`routes/identity.ts:407`) but enforced by no code path anywhere |
 
 ## v0.1 deployment and feature-flag posture
 
@@ -1287,13 +1685,17 @@ commerce table, a state enum, or every webhook delivery.
 
 **1. Every new commerce table is registered in THREE places, not one.**
 
-- the numbered migration (**next is 0025**);
+- the numbered migration (**0025 is taken by `0025_stripe_listing_orders.sql`; next is 0026**);
 - a drizzle table **plus an `export * from './<file>'` line in
   `lib/db/src/schema/index.ts`** — `schemaSelfCheck` derives its expectations from that
   barrel via `Object.values(schema)`, so a table missing from the barrel is **silently
   unchecked**;
 - an **idempotent `CREATE TABLE IF NOT EXISTS` in
   `artifacts/api-server/src/lib/ensureCriticalSchema.ts`'s `STATEMENTS`**.
+
+**The already-shipped `listing_orders` is currently registered in only two of the three** —
+see the registration gap noted under "`commerce_orders` and `listing_orders` are two tables,
+deliberately". Closing that is a precondition of enabling commerce, not a follow-up.
 
 The third is not optional and not paranoia. The deploy host runs its own drizzle-push-style
 schema diff on every publish and **drops tables the built schema view does not know about** —
@@ -1307,25 +1709,47 @@ migration able to restore it.
 **2. `commerce_state` and `order_status` are `varchar` with app-level validation, never
 `pgEnum`.** Follow `user_bots.attached_via` (migration 0022). An unknown enum literal in a
 `WHERE` clause is a **500**, not a non-match, and adding enum values breaks the Replit deploy
-flow (`routes/identity.ts:245`).
+flow (`routes/identity.ts:221`).
 
 **3. Feature-flag posture.** The commerce router **mounts unconditionally** in
-`routes/index.ts`, and every commerce **write** is gated by middleware that **503s** when its
-env var is unset:
-
-```
-503 { error: "commerce surface disabled (KAX_COMMERCE_ENABLED unset)" }
-```
-
-`KAX_COMMERCE_ENABLED` defaults **off**. Any service-to-service commerce surface additionally
-takes a bearer token compared with `crypto.timingSafeEqual` — **copying
-`requireLedgerMintToken` exactly**: 503 when the secret is unset, 401 on mismatch.
+`routes/index.ts`, and gating is done by middleware inside it. `KAX_COMMERCE_ENABLED` defaults
+**off**. Both halves of this are already how the shipped surface behaves —
+`routes/index.ts:62` mounts `storeCheckoutRouter` with no condition on it, and the flag is
+read per-request inside the router (`store-checkout.ts:16-20`).
 
 **Do not env-gate the mount.** An unmounted route 404s indistinguishably from a bad deploy,
 and the first hour of the first commerce incident should not be spent deciding which one
 happened. And never the silent degradation of `requireAdminOrServiceToken`, which falls
 through to `requireAdmin` when its variable is unset — a gate that gets *weaker* when
 misconfigured.
+
+Two response codes, for two different conditions, and the shipped code establishes the second:
+
+- **Flag off.** The shipped digital surface answers `404 {"error":"Not found"}`
+  (`store-checkout.ts:18`), the deliberate inert-until-configured idiom recorded in
+  `.agents/memory/kax-commerce-gating.md`. That choice stands for the digital surface and is
+  not to be "fixed" by removing the gate. **The physical commerce surface answers 503
+  instead**, and the reason is the same one that forbids env-gating the mount: 404 is the code
+  a broken deploy also returns, and a physical order path that has taken money and shipped
+  goods is exactly where an operator must be able to tell "switched off" from "not deployed"
+  without reading logs. The digital surface can afford the ambiguity because nothing
+  irreversible happens behind it when it is off; the physical one cannot.
+
+  ```
+  503 { error: "commerce surface disabled (KAX_COMMERCE_ENABLED unset)" }
+  ```
+
+- **Flag on, schema not migrated.** **503, fail closed** — adopted verbatim from the shipped
+  gate at `store-checkout.ts:21-32`, which probes `listing_orders` once, caches the verdict,
+  and refuses with `{"error":"Commerce enabled but schema not migrated (0025)"}` rather than
+  500ing mid-checkout. This is the correct posture and physical commerce reuses the pattern
+  against its own tables. Note the one operational consequence of the cached verdict: a
+  process that boots before its migration lands stays 503 until it restarts. That is the right
+  failure direction, and it is worth naming so nobody debugs it as a stuck cache.
+
+Any service-to-service commerce surface additionally takes a bearer token compared with
+`crypto.timingSafeEqual` — **copying `requireLedgerMintToken` exactly**: 503 when the secret is
+unset, 401 on mismatch.
 
 **4. Verify a deploy landed with `GET /version` (build sha) and `GET /health/schema` (503 +
 the exact missing tables and columns).** Never by probing for the feature — a 404 from a
@@ -1342,8 +1766,43 @@ if (req.path.startsWith("/api/webhooks/")) return next();
 A webhook mounted anywhere else has `express.json()` consume the bytes first, `req.body`
 stops being a `Buffer`, the verifier falls back to `Buffer.from("")`, and **every delivery
 401s in a way indistinguishable from a wrong secret**. `routes/webhooks.ts` is the pattern to
-copy — HMAC over the untouched raw bytes, `timingSafeEqual`, 401 on failure. A missing webhook
-secret must **fail boot in production**, matching `index.ts`'s `requiredSecrets` check.
+copy — HMAC over the untouched raw bytes, `timingSafeEqual`, 401 on failure. The shipped
+Stripe leg already sits under the prefix (`routes/webhooks.ts:132`) and takes `raw({ type:
+"application/json" })`, delegating verification to `stripe-replit-sync`; the Printify webhook
+mounts beside it.
+
+**One divergence to record rather than paper over.** This ADR asked that a missing webhook
+secret **fail boot in production**, matching `index.ts`'s `requiredSecrets` check. The shipped
+Stripe integration does the opposite by construction: `initStripe` runs through
+`runStartupStep`, which is non-fatal by design (`index.ts:241-244` — "a connector hiccup must
+not take the rest of KAX down"), and with no `STRIPE_WEBHOOK_SECRET` the step registers a
+*managed* webhook through `stripeSync.findOrCreateManagedWebhook()` (`index.ts:264`) which
+supplies its own secret. So "missing secret" is not actually a misconfiguration in the shipped
+design — it is the connector-managed path, and it is why the environment table above marks
+`STRIPE_WEBHOOK_SECRET` required only on the dashboard-webhook path.
+
+That holds on **one** of the two credential paths, and the distinction is the operator trap
+recorded under "Where credentials come from": the managed webhook's secret reaches
+`getStripeSync()` only because `getStripeCredentials()` read it off the connector response
+(`stripeClient.ts:68`), and it reads that response only when `STRIPE_SECRET_KEY` was *not* set
+in env. **Set an env secret key and leave `STRIPE_WEBHOOK_SECRET` unset and the two halves come
+apart**: `initStripe` still takes the `else` branch and registers a managed webhook
+(`index.ts:256`, `:264`), because that branch tests the env variable alone — but the secret
+that webhook was created with never reaches the verifier, since `getStripeCredentials()`
+already returned at `:26-28` and `getStripeSync()` builds `StripeSync` with
+`stripeWebhookSecret: ""` (`:98`). Boot logs a success, a webhook exists in the Stripe
+dashboard, and every delivery fails verification. Env key and env webhook secret travel
+together, or neither does.
+
+The ADR therefore narrows its rule to what is still true and still worth enforcing: **with
+`KAX_COMMERCE_ENABLED` on, a Stripe client that cannot be constructed at all must be loud.**
+`getStripeCredentials()` throws with an actionable message when neither an env key nor a
+connector is present (`stripeClient.ts:37-41`, `:60-64`), but that throw surfaces only on the
+first checkout request — a buyer's request — because `runStartupStep` swallowed the same
+failure at boot. Commerce must add a **boot-time readiness probe** that attempts credential
+resolution once when the flag is on and records the result where `GET /health/schema` and
+`GET /version` can be read beside it. The operator turning the flag on should learn in the
+deploy log that Stripe is unreachable, not from the first customer.
 
 **One correction to the documented deploy behaviour.** `replit.md` states that migrations run
 "at boot before `app.listen()`" and that "a migration failure is fatal — the process exits".
@@ -1390,7 +1849,13 @@ channel, action, **authority decision**, result, external id, correlation id, ti
 Commerce operations are **idempotent**. Retries must never create duplicate products,
 duplicate fulfilment orders, duplicate listing publications, or duplicate charges. Every
 external call carries an idempotency key derived deterministically from the order, the same
-discipline `saleTxId(listingId, buyerAccount)` already applies to Joinery sales.
+discipline `saleTxId(listingId, buyerAccount)` already applies to Joinery sales — and the same
+discipline the shipped checkout already applies to Stripe, with
+`kax-listing-product-<id>` and `kax-listing-price-<id>-<cents>` as `idempotencyKey`
+(`store-checkout.ts:102`, `:116`) and a unique `stripe_session_id` as the insert conflict
+target (`:150`). Physical commerce derives its keys from the `commerce_orders` row rather than
+from a listing id, because the row exists first — that is what makes a lost response
+reconcilable.
 
 Failures become **explicit state**, not silence:
 
@@ -1471,6 +1936,15 @@ which KAX holds money belonging to a third party.
 work. Two of the five rights assertions ship as merchant attestations rather than checks, and
 two more do not ship at all. Checkout throws the buyer out of the 3D city and back. And four
 external accounts must be provisioned before a single line of the proof can be executed.
+
+**What it inherits.** A working Stripe integration — client, credential resolution, hosted
+Checkout, signature-verified webhook, webhook-driven settlement, feature flag, fail-closed
+schema gate — arrived on `main` while this ADR was being written, and roughly a third of the
+"genuinely new subsystem" column is now already built. It also arrived carrying issue #269,
+which is the second appearance in this repository of a money column that does not name its
+unit, and the first one where the mistake is denominated in dollars. That is the honest
+summary of what a concurrent session bought and what it cost: the checkout is real and is
+kept; the flag must stay off until the unit is named.
 
 **What is still undecided, and who decides.** How a third-party creator is paid a real-money
 share (operator: house-minted credits at the peg, or Connect sub-merchant — different

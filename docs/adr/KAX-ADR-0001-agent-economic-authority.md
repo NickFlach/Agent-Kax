@@ -117,12 +117,15 @@ Until the foundation slice landed, these invariants held only by absence of code
 `validatePostings` checked posting count, bigint-ness, non-empty account/kind and
 `sum === 0n`, and would have accepted a `trader:X -> house` redemption without complaint.
 
-**Enforcement is now structural, at the ledger core.** `validatePostings`
-(`lib/ledger-core.ts:227`) calls `assertPermittedTopology` (`:175`), which evaluates a
-per-kind permitted account-class topology over the whole posting array (not per posting —
-a Joinery sale legitimately mixes `joinery`, `joinery_fee` and `joinery_royalty` in one
-transaction). `accountClass` (`:126`) is the grammar: `house`, `trader:*`, `amm:*`, and
-`unknown` for everything else. The shipped table (`PERMITTED_TOPOLOGY`, `:153`):
+**Enforcement becomes structural, at the ledger core.** This is written on branch
+`fix/ledger-units-topology-revocation` (PR #270, CI green, **not yet merged**) — it is not
+on `main`, and until it merges the invariants below still hold only by absence of code.
+`validatePostings` (`lib/ledger-core.ts:305`) calls `assertPermittedTopology` (`:204`,
+module-private), which evaluates a per-kind permitted account-class topology over the
+whole posting array (not per posting — a Joinery sale legitimately mixes `joinery`,
+`joinery_fee` and `joinery_royalty` in one transaction). `accountClass` (`:143`) is the
+grammar: `house`, `trader:*`, `amm:*`, and `unknown` for everything else. The table
+(`PERMITTED_TOPOLOGY`, `:178`):
 
 | kind | may debit | may credit |
 | --- | --- | --- |
@@ -136,11 +139,33 @@ transaction). `accountClass` (`:126`) is the grammar: `house`, `trader:*`, `amm:
 
 A kind absent from the table is refused outright, and so is an account that parses to
 class `unknown` — a typo'd account would otherwise become a permanent balance no principal
-can spend from. On top of the table sits the whole-transaction redemption refusal: a
-transaction that debits a trader and credits the house **without crediting any trader**
-throws. `lib/ledger-core.test.ts` ("what it refuses") fails if any of those shapes is ever
-accepted. It lives in the pure core rather than in a route because the routes are not the
-only writers (see "Enforcement boundary").
+can spend from.
+
+On top of the table sit three whole-transaction rules, because the shape of a cash-out is
+a property of the transaction and not of any single posting:
+
+1. **No bare redemption.** A transaction that debits a trader and credits the house
+   without crediting any trader throws. The test is whether house is *credited*, not
+   whether house is *present*: `lib/joinery.ts` drops zero-amount postings, so a piece
+   cheap enough for the fee to round to zero is a legitimate trader-to-trader sale with no
+   house leg at all, and keying on presence would refuse it.
+2. **The house's take is bounded as a rate.** Rule 1 alone is defeated by a token
+   kickback — `[trader:x −100, trader:x +1, house +99]` credits a trader and still moves
+   99 to the house. No threshold on the kickback closes that, because the attacker picks
+   the number. What distinguishes a fee from a cash-out is its *rate*, so the house credit
+   is bounded against the total debited from traders. Keyed on a trader being debited,
+   since the residual sweep at the end of a market credits the house out of a pool and is
+   not a fee at all.
+3. **A `trade` must cross a trader and a pool.** The per-side table cannot express "one
+   leg must be an `amm`", so two traders could otherwise move a balance between them under
+   a market's name. The debited and credited classes are required to differ, which given
+   the table means one of them is the pool.
+
+`lib/ledger-core.test.ts` ("what it refuses") fails if any of those shapes is ever
+accepted, and its redemption case is chosen so that only rule 1 can refuse it — a
+100%-fee "sale" where every kind is permitted and every class sits on an allowed side.
+This lives in the pure core rather than in a route because the routes are not the only
+writers (see "Enforcement boundary").
 
 ### The goods-purchase carve-out, and where its boundary actually is
 
@@ -843,13 +868,15 @@ KAX-ADR-0002 carries the matching amendment: "every consequential Commerce Gatew
 records an immutable authority decision; the full policy engine is a v0.2 dependency, not
 a v0.1 one."
 
-Two Phase 1a items have already landed in the working tree and are recorded here as done
-rather than as work, because the rest of the list is sized against them:
+Two Phase 1a items are written and reviewed but **not yet on `main`**. They live on branch
+`fix/ledger-units-topology-revocation` (PR #270 — CI green, 641 tests passing, awaiting
+merge), and are recorded here because the rest of the list is sized against them. Until
+that PR merges, treat both as outstanding:
 
-- ~~`MINOR_UNITS_PER_CREDIT` / `CREDITS_PER_USDC` / `MINOR_UNITS_PER_USDC` in
-  `lib/ledger-core.ts:29-34`, pinned by `lib/ledger-core.test.ts`.~~ **Landed.**
-- ~~Per-kind topology in `validatePostings`, with the redemption-shape test.~~ **Landed**
-  (`lib/ledger-core.ts:153-243`).
+- `MINOR_UNITS_PER_CREDIT` / `CREDITS_PER_USDC` / `MINOR_UNITS_PER_USDC` in
+  `lib/ledger-core.ts:30-34`, pinned by `lib/ledger-core.test.ts`. **Written, unmerged.**
+- Per-kind topology in `validatePostings`, with the redemption-shape tests
+  (`lib/ledger-core.ts:178-297`, reached from `:320`). **Written, unmerged.**
 
 Still outstanding in Phase 1a, because they are correctness fixes to shipped code rather
 than new architecture:
