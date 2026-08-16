@@ -39,9 +39,12 @@ const router: IRouter = Router();
  * cannot reach.
  */
 
-router.get("/joinery/catalog", async (_req, res) => {
-  const items = await catalog();
-  res.json({ items, count: items.length, slots: SLOTS });
+router.get("/joinery/catalog", async (req, res) => {
+  // count is what this page holds; total is what is on sale. They were the
+  // same field once, which is how the city ended up believing it had eighteen
+  // pieces of furniture when it had 339.
+  const page = await catalog(Number(req.query.limit) || 40, Number(req.query.offset) || 0);
+  res.json({ items: page.items, count: page.items.length, total: page.total, truncated: page.truncated, slots: SLOTS });
 });
 
 /**
@@ -108,8 +111,11 @@ router.get("/joinery/works", async (req, res) => {
   if (!actor?.agent?.id) {
     return res.status(403).json({ ok: false, code: "no_agent", error: "works belong to an agent" });
   }
-  const works = await worksForSale({ id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null });
-  return res.json({ works, count: works.length });
+  const page = await worksForSale(
+    { id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null },
+    { limit: Number(req.query.limit) || 100, offset: Number(req.query.offset) || 0 },
+  );
+  return res.json({ works: page.works, count: page.works.length, total: page.total, truncated: page.truncated });
 });
 
 /** What this agent's store currently offers, priced or not. */
