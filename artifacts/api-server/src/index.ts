@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { publicBaseUrl, NO_PUBLIC_URL_MESSAGE } from "./lib/publicBaseUrl";
 import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership, repairCreatorAttribution } from "./lib/backfill";
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
@@ -271,16 +272,25 @@ async function warmUpInBackground(): Promise<void> {
       // unreachable on a fresh deployment and leave the webhook uncreated for
       // good.
       //
-      // At runtime REPLIT_DOMAINS is the right base: prod domain in a
-      // deployment, dev domain in the workspace (registers a dev webhook).
-      // Note that this is REPLIT_DOMAINS alone. The checkout redirect base
-      // (routes/store-checkout.ts) consults KAX_PUBLIC_URL and
-      // REPLIT_DEV_DOMAIN first, so the two ends of the payment round trip do
-      // NOT share a precedence: a deployment that satisfies checkout by
-      // setting only KAX_PUBLIC_URL registers this webhook at
-      // `https://undefined/api/webhooks/stripe` and settles nothing.
-      const webhookBaseUrl = `https://${process.env["REPLIT_DOMAINS"]?.split(",")[0]}`;
-      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/webhooks/stripe`);
+      // The SAME resolver checkout uses. These two derived the base
+      // differently — checkout from KAX_PUBLIC_URL first, this from
+      // REPLIT_DOMAINS alone — so setting only KAX_PUBLIC_URL registered the
+      // webhook at `https://undefined/api/webhooks/stripe`: customers charged,
+      // checkout.session.completed never delivered, and nothing visibly wrong
+      // from either end (#277).
+      //
+      // Refusing beats registering a broken endpoint. A missing webhook is a
+      // loud absence an operator can find; a webhook pointing at `undefined`
+      // looks configured in the Stripe dashboard and silently settles nothing.
+      const webhookBaseUrl = publicBaseUrl();
+      if (!webhookBaseUrl) {
+        logger.error(
+          { detail: NO_PUBLIC_URL_MESSAGE },
+          "stripe: refusing to register a managed webhook — " + NO_PUBLIC_URL_MESSAGE,
+        );
+      } else {
+        await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/webhooks/stripe`);
+      }
     }
     await stripeSync.syncBackfill();
   });
