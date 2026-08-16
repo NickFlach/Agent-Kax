@@ -73,7 +73,14 @@ export class BadListPrice extends Error {
  * it, this does not. Treating unpriced as free would give away other agents'
  * work on the strength of a missing field.
  */
-export async function catalog(limit = 40): Promise<CatalogItem[]> {
+export interface CatalogPage {
+  items: CatalogItem[];
+  /** Everything on sale, not just this page. */
+  total: number;
+  truncated: boolean;
+}
+
+export async function catalog(limit = 40, offset = 0): Promise<CatalogPage> {
   const rows = await db
     .select({
       listingId: storeListingsTable.id,
@@ -97,15 +104,32 @@ export async function catalog(limit = 40): Promise<CatalogItem[]> {
       ),
     )
     .orderBy(desc(storeListingsTable.id))
-    .limit(limit);
+    .limit(Math.min(Math.max(limit, 1), 500))
+    .offset(Math.max(offset, 0));
 
-  return rows.map((r) => ({
-    ...r,
-    // store_listings.price is a real; the ledger deals in integer minor units.
-    // Rounding here rather than at the till means the price a buyer is quoted
-    // is the price they are charged.
-    price: Math.round(r.price ?? 0),
-  }));
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(storeListingsTable)
+    .innerJoin(artifactsTable, eq(storeListingsTable.artifactId, artifactsTable.id))
+    .where(
+      and(
+        eq(artifactsTable.artifactType, "furniture"),
+        isNotNull(storeListingsTable.price),
+        sql`${storeListingsTable.price} > 0`,
+      ),
+    );
+
+  return {
+    items: rows.map((r) => ({
+      ...r,
+      // store_listings.price is a real; the ledger deals in integer minor
+      // units. Rounding here rather than at the till means the price a buyer
+      // is quoted is the price they are charged.
+      price: Math.round(r.price ?? 0),
+    })),
+    total,
+    truncated: Math.max(offset, 0) + rows.length < total,
+  };
 }
 
 export interface ListingInput {
@@ -235,17 +259,41 @@ export async function list(input: ListingInput): Promise<ListingResult> {
  * Attribution matches the storefront's own rule — the artifact's agent_id, or
  * its creator_bot_id, which survives a rename in a way a display name does not.
  */
-export async function worksForSale(agent: { id: number; obcBotId: string | null }): Promise<Array<{
-  artifactId: number;
-  title: string;
-  thumbnailUrl: string | null;
-  /** What you are currently asking, or null if it is on display only. */
-  price: number | null;
-  listingId: number | null;
-}>> {
+export interface WorksPage {
+  works: Array<{
+    artifactId: number;
+    title: string;
+    thumbnailUrl: string | null;
+    /** What you are currently asking, or null if it is on display only. */
+    price: number | null;
+    listingId: number | null;
+  }>;
+  /** Every furniture work this agent has, not just the page returned. */
+  total: number;
+  /** True when there are more beyond this page. */
+  truncated: boolean;
+}
+
+export async function worksForSale(
+  agent: { id: number; obcBotId: string | null },
+  opts: { limit?: number; offset?: number } = {},
+): Promise<WorksPage> {
+  // A hundred was a number I picked without checking. Kannaka has 282 pieces
+  // of furniture, so the tool answered "here is your work" with a bit under
+  // two fifths of it and no indication of the rest — the same silent
+  // truncation I had just finished fixing in the showroom, reintroduced in the
+  // tool I wrote to fix it. A count that looks complete invites no checking,
+  // which is exactly why it keeps happening.
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const offset = Math.max(opts.offset ?? 0, 0);
   const mine = agent.obcBotId
     ? or(eq(artifactsTable.agentId, agent.id), eq(artifactsTable.creatorBotId, agent.obcBotId))
     : eq(artifactsTable.agentId, agent.id);
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(artifactsTable)
+    .where(and(mine, eq(artifactsTable.artifactType, "furniture")));
 
   const rows = await db
     .select({
@@ -265,9 +313,14 @@ export async function worksForSale(agent: { id: number; obcBotId: string | null 
     )
     .where(and(mine, eq(artifactsTable.artifactType, "furniture")))
     .orderBy(desc(artifactsTable.id))
-    .limit(100);
+    .limit(limit)
+    .offset(offset);
 
-  return rows.map((r) => ({ ...r, price: r.price === null ? null : Math.round(r.price) }));
+  return {
+    works: rows.map((r) => ({ ...r, price: r.price === null ? null : Math.round(r.price) })),
+    total,
+    truncated: offset + rows.length < total,
+  };
 }
 
 /** What this store currently offers, priced or not, so a seller can see it. */

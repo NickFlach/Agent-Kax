@@ -303,7 +303,7 @@ describe("joinery purchase", () => {
     const listed = await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 250 });
     expect(listed.repriced).toBe(false);
     expect(listed.price).toBe(250);
-    expect((await catalog(200)).some((i) => i.artifactId === art!.id)).toBe(true);
+    expect((await catalog(200)).items.some((i) => i.artifactId === art!.id)).toBe(true);
 
     // Repricing is the same call, not a second listing.
     const again = await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 400 });
@@ -329,7 +329,7 @@ describe("joinery purchase", () => {
     expect(target, "the seller had nothing priced to withdraw").toBeTruthy();
 
     await list({ sellerAgentId: seller.id, artifactId: target!.artifactId, price: null });
-    expect((await catalog(200)).some((i) => i.listingId === target!.listingId)).toBe(false);
+    expect((await catalog(200)).items.some((i) => i.listingId === target!.listingId)).toBe(false);
     expect((await listingsOfAgent(seller.id)).some((l) => l.listingId === target!.listingId)).toBe(true);
 
     await list({ sellerAgentId: seller.id, artifactId: target!.artifactId, price: target!.price });
@@ -392,14 +392,14 @@ describe("joinery purchase", () => {
       .returning({ id: artifactsTable.id });
     artifactIds.push(art!.id);
 
-    const works = await worksForSale({ id: seller.id, obcBotId: seller.botId });
+    const works = (await worksForSale({ id: seller.id, obcBotId: seller.botId })).works;
     const found = works.find((w) => w.artifactId === art!.id);
     expect(found, "an agent cannot see its own work").toBeTruthy();
     expect(found!.price, "an unlisted work should not claim a price").toBeNull();
 
     // And what it is already asking, so a seller can reprice without guessing.
     await list({ sellerAgentId: seller.id, artifactId: art!.id, price: 300 });
-    const after = (await worksForSale({ id: seller.id, obcBotId: seller.botId })).find(
+    const after = (await worksForSale({ id: seller.id, obcBotId: seller.botId })).works.find(
       (w) => w.artifactId === art!.id,
     );
     expect(after!.price).toBe(300);
@@ -437,8 +437,56 @@ describe("joinery purchase", () => {
     expect(await balance(maker.account, ASSET), "the maker was not paid").toBe(makerBefore + 100n);
   });
 
+  it("says how much work there is, not how much it returned", async () => {
+    // A hundred was a number I picked without checking. Kannaka has 282
+    // pieces of furniture, so the tool answered "here is your work" with a bit
+    // under two fifths of it and nothing to say the rest existed.
+    const before = await worksForSale({ id: seller.id, obcBotId: seller.botId });
+    for (let i = 0; i < 6; i++) {
+      const [a] = await db
+        .insert(artifactsTable)
+        .values({
+          externalId: `test-joinery-page-${i}-${Math.random().toString(36).slice(2)}`,
+          title: `Test Paged ${i}`,
+          creatorName: "Whoever",
+          creatorBotId: seller.botId,
+          publicUrl: "https://example.invalid/p",
+          artifactType: "furniture",
+        })
+        .returning({ id: artifactsTable.id });
+      artifactIds.push(a!.id);
+    }
+
+    const all = await worksForSale({ id: seller.id, obcBotId: seller.botId });
+    expect(all.total).toBe(before.total + 6);
+
+    // A page smaller than the total must say so.
+    const page = await worksForSale({ id: seller.id, obcBotId: seller.botId }, { limit: 3 });
+    expect(page.works).toHaveLength(3);
+    expect(page.total, "a page reported itself as the whole").toBe(all.total);
+    expect(page.truncated).toBe(true);
+
+    // And the offset actually moves, rather than returning the same three.
+    const second = await worksForSale({ id: seller.id, obcBotId: seller.botId }, { limit: 3, offset: 3 });
+    const firstIds = page.works.map((w) => w.artifactId);
+    expect(second.works.some((w) => firstIds.includes(w.artifactId)), "offset returned the same page").toBe(false);
+
+    // The other direction: a page that holds everything must not cry wolf.
+    const whole = await worksForSale({ id: seller.id, obcBotId: seller.botId }, { limit: 500 });
+    expect(whole.truncated).toBe(false);
+  });
+
+  it("says how much is on sale, not how much the page holds", async () => {
+    const wide = await catalog(500);
+    const narrow = await catalog(2);
+    expect(narrow.items).toHaveLength(Math.min(2, wide.total));
+    expect(narrow.total).toBe(wide.total);
+    expect(narrow.truncated).toBe(wide.total > 2);
+    expect(wide.truncated).toBe(false);
+  });
+
   it("keeps display-only pieces out of the catalog entirely", async () => {
-    const items = await catalog(200);
+    const items = (await catalog(200)).items;
     const mine = items.filter((i) => i.sellerAgentId === seller.id);
     expect(mine.length).toBeGreaterThanOrEqual(3);
     expect(mine.every((i) => i.price > 0), "an unpriced piece reached the catalogue").toBe(true);

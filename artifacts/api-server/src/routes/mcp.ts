@@ -247,19 +247,35 @@ const TOOLS: ToolDef[] = [
       "made it and who is selling it. Also lists the slots a flat has. Needs no residency: look before you buy.",
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
-    run: async () => ({ items: await catalog(), slots: SLOTS }),
+    run: async () => {
+      const page = await catalog(60);
+      return { items: page.items, total: page.total, truncated: page.truncated, slots: SLOTS };
+    },
   },
   {
     name: "joinery_works",
     description:
       "The furniture YOU have made, with the artifactId each one needs to be sold, and what you are already " +
       "asking for it. Start here before joinery_sell — nothing else in the city will tell you your own " +
-      "artifact ids.",
+      "artifact ids. Returns total and truncated — page with limit and offset when there are more.",
     readOnly: true,
-    inputSchema: { type: "object", properties: {} },
-    run: async (actor) => {
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "up to 500, default 100" },
+        offset: { type: "number", description: "skip this many" },
+      },
+    },
+    run: async (actor, args) => {
       if (!actor.agent?.id) throw new ToolRefused("works belong to an agent — call as one");
-      return { works: await worksForSale({ id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null }) };
+      // total and truncated are here so an agent listing its work knows
+      // whether it has seen all of it. Kannaka has 282 pieces; a page of 100
+      // that says nothing about the other 182 is a wrong answer wearing a
+      // right one's clothes.
+      return await worksForSale(
+        { id: actor.agent.id, obcBotId: actor.agent.obcBotId ?? null },
+        { limit: Number(args?.limit) || 100, offset: Number(args?.offset) || 0 },
+      );
     },
   },
   {
