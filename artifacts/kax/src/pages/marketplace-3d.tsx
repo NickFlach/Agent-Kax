@@ -29,6 +29,7 @@ import {
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
+import { streetDepthFor, monumentZFor, venueFootprint } from "@/lib/city-layout";
 
 
 type SceneAgent = {
@@ -542,7 +543,7 @@ function Bench({ position, rotation = 0 }: { position: [number, number, number];
 /** Street furniture + the KAX monument closing the vista + skyline backdrop. */
 function CityProps({ storeCount, lit }: { storeCount: number; lit: boolean }) {
   const rows = Math.max(1, Math.ceil(storeCount / 2));
-  const depth = -2 - rows * 4.5;
+  const depth = streetDepthFor(storeCount);
   const concrete = concreteTexture();
 
   const lamps: Array<[number, number, number]> = [];
@@ -614,7 +615,7 @@ function CityProps({ storeCount, lit }: { storeCount: number; lit: boolean }) {
       ))}
 
       {/* KAX monument closing the vista — carved stone, planted base */}
-      <group position={[0, 0, depth - 4]}>
+      <group position={[0, 0, monumentZFor(storeCount)]}>
         <mesh position={[0, 0.25, 0]} receiveShadow castShadow>
           <cylinderGeometry args={[2.2, 2.4, 0.5, 24]} />
           <meshStandardMaterial map={concrete} roughness={0.95} />
@@ -1249,20 +1250,26 @@ export default function Marketplace3D() {
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
   const [nearby, setNearby] = useState<SceneAgent | null>(null);
   const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
-  const streetDepth = -2 - Math.max(1, Math.ceil(sceneAgents.length / 2)) * 4.5;
+  const streetDepth = streetDepthFor(sceneAgents.length);
   const towerZ = streetDepth - 20;
   const obstacles = useMemo(
     () => [
       ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
       { cx: 0, cz: towerZ, hx: 7.8, hz: 7.8 }, // Ghost Signals tower
-      { cx: 0, cz: streetDepth - 6, hx: 1.2, hz: 1.2 }, // monument shaft
-      { cx: -12.5, cz: streetDepth - 8, hx: 5.2, hz: 4.7 }, // the Arcade
-      { cx: 12.5, cz: streetDepth - 8, hx: 5.7, hz: 4.7 }, // Resonance Trust
-      { cx: 12.5, cz: 3, hx: 4.7, hz: 4.2 }, // Standing Wave Residences
-      { cx: -12.5, cz: 3, hx: 5.4, hz: 4.2 }, // The Joinery
+      // The monument reads its Z from the same helper the stone does, so the
+      // shaft and the thing you walk into cannot drift apart again (#301).
+      { cx: 0, cz: monumentZFor(sceneAgents.length), hx: 1.2, hz: 1.2 }, // monument shaft
+      // Footprints DERIVED from each shell and its rotation. All four venues
+      // are mounted a quarter turn round, which swaps a box's x and z
+      // extents — these were transcribed from the unrotated geometry, so
+      // every one blocked along the wrong axis.
+      { cx: -12.5, cz: streetDepth - 8, ...venueFootprint("arcade") }, // the Arcade
+      { cx: 12.5, cz: streetDepth - 8, ...venueFootprint("bank") }, // Resonance Trust
+      { cx: 12.5, cz: 3, ...venueFootprint("residences") }, // Standing Wave Residences
+      { cx: -12.5, cz: 3, ...venueFootprint("joinery") }, // The Joinery
       { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 }, // Flaukowski's No. 2, off the first cross street
     ],
-    [layout, towerZ, streetDepth],
+    [layout, towerZ, streetDepth, sceneAgents.length],
   );
 
   const GS_TOWER: SceneAgent = useMemo(
