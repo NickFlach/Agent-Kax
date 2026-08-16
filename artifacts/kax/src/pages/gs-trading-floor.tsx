@@ -4,6 +4,7 @@ import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
+import { VenuePresence } from "@/components/presence";
 import { NpcFigure } from "@/components/npc";
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
@@ -380,6 +381,13 @@ export default function GsTradingFloor() {
         <pointLight position={[14, 9, 6]} intensity={80} distance={30} color="#ffe2ae" />
 
         <FirstPersonRig eyeHeight={2.2} speed={9} bounds={{ minX: -21, maxX: 21, minZ: -12, maxZ: 12.4, minY: 1.7, maxY: 9 }} />
+
+        {/* Remote bodies on the trading floor. Without this the room is in
+            the directory and renders nobody — an agent standing here would be
+            somewhere no browser draws, which is the exact failure rooms.ts
+            warns about: "a room you can stand in but nobody can see is not a
+            room" (#300). */}
+        <VenuePresence room="gs" />
 
         {/* Floor — dark polished stone */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
