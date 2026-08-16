@@ -1139,12 +1139,23 @@ export interface UnknownAgentRepairResult {
  * Idempotent: a repaired agent no longer matches the placeholder filter.
  */
 export async function repairUnknownAgents(): Promise<UnknownAgentRepairResult> {
+  // CLAIMED placeholders are included, and are treated differently below.
+  //
+  // The scope used to be system-owned rows only, which is right for MERGING —
+  // folding one claimed agent into another moves somebody's storefront out
+  // from under them. But it also meant a claimed agent stuck on the literal
+  // name "Unknown" stayed that way forever, with no path back to its own name.
+  // Three of them are sitting in the directory right now (ren_final, ren_obc,
+  // herald), reading as Unknown to every visitor.
+  //
+  // So claimed rows are RENAMED and never merged: the name comes from OBC's
+  // own directory by bot uuid, so this restores what the agent is actually
+  // called rather than inventing anything, and nothing moves between owners.
   const placeholders = await db
     .select()
     .from(agentsTable)
     .where(
       and(
-        eq(agentsTable.ownerId, KANNAKA_SYSTEM_USER_ID),
         sql`${agentsTable.obcBotId} IS NOT NULL`,
         or(
           sql`lower(${agentsTable.displayName}) = 'unknown'`,
@@ -1179,6 +1190,17 @@ export async function repairUnknownAgents(): Promise<UnknownAgentRepairResult> {
       .where(and(eq(agentsTable.slug, targetSlug), sql`${agentsTable.id} <> ${ph.id}`))
       .limit(1);
 
+    const claimed = ph.ownerId !== KANNAKA_SYSTEM_USER_ID;
+
+    if (target && claimed) {
+      // A claimed agent gets its name back and nothing else. Merging it would
+      // move a storefront its owner holds into another row entirely.
+      await db.update(agentsTable).set({ displayName: name, avatarUrl: ph.avatarUrl ?? info?.avatarUrl ?? null }).where(eq(agentsTable.id, ph.id));
+      result.renamed++;
+      result.details.push({ slug: ph.slug, action: "renamed", name });
+      continue;
+    }
+
     if (target) {
       if (target.obcBotId && target.obcBotId !== botId) {
         // Same display name, different bot — a genuine namesake. Rename the
@@ -1205,7 +1227,16 @@ export async function repairUnknownAgents(): Promise<UnknownAgentRepairResult> {
     }
 
     // No existing agent under the real name — rename the placeholder in place.
-    await db.update(agentsTable).set({ displayName: name, slug: targetSlug, avatarUrl: ph.avatarUrl ?? info?.avatarUrl ?? null }).where(eq(agentsTable.id, ph.id));
+    // A CLAIMED row keeps its slug: that URL is somebody's published link, and
+    // fixing a display name should not quietly move it.
+    await db
+      .update(agentsTable)
+      .set({
+        displayName: name,
+        ...(claimed ? {} : { slug: targetSlug }),
+        avatarUrl: ph.avatarUrl ?? info?.avatarUrl ?? null,
+      })
+      .where(eq(agentsTable.id, ph.id));
     await db.update(artifactsTable).set({ creatorName: name }).where(and(eq(artifactsTable.agentId, ph.id), sql`lower(${artifactsTable.creatorName}) = 'unknown'`));
     result.renamed++;
     result.details.push({ slug: ph.slug, action: "renamed", name });
