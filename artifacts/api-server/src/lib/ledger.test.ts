@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { creditLedgerTable } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT } from "./ledger-core";
+import { splitSale } from "./joinery-core";
 import {
   postTransaction,
   balance,
@@ -24,12 +25,17 @@ import {
 // signup grant in routes/identity.ts posts from HOUSE_ACCOUNT. These tests
 // previously funded from `house:test:<random>` and only ever passed against a
 // long-lived database where those accounts happened to carry a balance.
+//
+// Every account below is `house`, `trader:…` or `amm:…` because since #244
+// those are the only classes the ledger recognises. The placeholder names this
+// file used before (`user:…`, `a:…`, `sink:…`) are now refused, and correctly
+// so: an account outside the grammar is one no principal can ever spend from.
 const uniq = () => Math.random().toString(36).slice(2, 10);
 
 describe("credit ledger (DB)", () => {
   it("posts a balanced transaction and derives balances", async () => {
     const asset = "play_credit";
-    const user = `user:test:${uniq()}`;
+    const user = `trader:test:${uniq()}`;
     // Shared, so measure the delta rather than an absolute balance.
     const houseBefore = await balance(HOUSE_ACCOUNT, asset);
     await postTransaction({
@@ -60,8 +66,8 @@ describe("credit ledger (DB)", () => {
         txId: `bad-${uniq()}`,
         asset: "play_credit",
         postings: [
-          { account: `a:${uniq()}`, amount: -100n, kind: "grant" },
-          { account: `b:${uniq()}`, amount: 99n, kind: "grant" },
+          { account: HOUSE_ACCOUNT, amount: -100n, kind: "grant" },
+          { account: `trader:test:${uniq()}`, amount: 99n, kind: "grant" },
         ],
       }),
     ).rejects.toThrow(/sum to zero/);
@@ -73,7 +79,7 @@ describe("credit ledger (DB)", () => {
       asset: "play_credit",
       postings: [
         { account: HOUSE_ACCOUNT, amount: -5n, kind: "grant" },
-        { account: `y:${uniq()}`, amount: 5n, kind: "grant" },
+        { account: `trader:test:${uniq()}`, amount: 5n, kind: "grant" },
       ],
     });
     const res = await verifyLedgerChain();
@@ -93,7 +99,7 @@ describe("credit ledger (DB)", () => {
       asset: "play_credit",
       postings: [
         { account: HOUSE_ACCOUNT, amount: -1n, kind: "grant" },
-        { account: `sink:${uniq()}`, amount: 1n, kind: "grant" },
+        { account: `trader:test:${uniq()}`, amount: 1n, kind: "grant" },
       ],
     });
     // drizzle wraps driver errors, replacing the message with "Failed query:
@@ -114,7 +120,7 @@ describe("credit ledger (DB)", () => {
   it("is idempotent: a replayed txId applies nothing and returns the original", async () => {
     const asset = "play_credit";
     const house = `house`; // house is exempt from the overdraft guard
-    const user = `user:test:${uniq()}`;
+    const user = `trader:test:${uniq()}`;
     const txId = `grant-${uniq()}`;
     const postings = [
       { account: house, amount: -100n, kind: "grant" as const },
@@ -137,19 +143,19 @@ describe("credit ledger (DB)", () => {
     const txId = `conflict-${uniq()}`;
     await postTransaction({
       txId, asset,
-      postings: [{ account: "house", amount: -5n, kind: "grant" }, { account: `u:${uniq()}`, amount: 5n, kind: "grant" }],
+      postings: [{ account: "house", amount: -5n, kind: "grant" }, { account: `trader:test:${uniq()}`, amount: 5n, kind: "grant" }],
     });
     await expect(
       postTransaction({
         txId, asset,
-        postings: [{ account: "house", amount: -6n, kind: "grant" }, { account: `u:${uniq()}`, amount: 6n, kind: "grant" }],
+        postings: [{ account: "house", amount: -6n, kind: "grant" }, { account: `trader:test:${uniq()}`, amount: 6n, kind: "grant" }],
       }),
     ).rejects.toBeInstanceOf(LedgerIdempotencyConflict);
   });
 
   it("blocks an overdraft: a debit that would take a non-house account negative", async () => {
     const asset = "play_credit";
-    const user = `user:test:${uniq()}`;
+    const user = `trader:test:${uniq()}`;
     await postTransaction({
       txId: `seed-${uniq()}`, asset,
       postings: [{ account: "house", amount: -50n, kind: "grant" }, { account: user, amount: 50n, kind: "grant" }],
@@ -162,5 +168,167 @@ describe("credit ledger (DB)", () => {
       }),
     ).rejects.toBeInstanceOf(LedgerInsufficientFunds);
     expect(await balance(user, asset)).toBe(50n); // unchanged
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Permitted posting topology at the DB boundary (issue #244).
+//
+// ledger-core.test.ts covers the rule itself against every shape. What these
+// add is that postTransaction refuses BEFORE anything is written: a wrongly
+// refused post is a 400, but a wrongly ACCEPTED one is a balance that exists
+// forever, so each refusal here also asserts the balances did not move.
+// ---------------------------------------------------------------------------
+
+describe("credit ledger topology (DB)", () => {
+  const asset = "play_credit";
+
+  /** A funded trader, granted from the house exactly as signup does. */
+  async function fundedTrader(amount: bigint): Promise<string> {
+    const account = `trader:test:${uniq()}`;
+    await postTransaction({
+      txId: `topo-fund-${uniq()}`,
+      asset,
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -amount, kind: "grant" },
+        { account, amount, kind: "grant" },
+      ],
+    });
+    return account;
+  }
+
+  it("refuses a redemption and writes nothing", async () => {
+    const trader = await fundedTrader(100n);
+    await expect(
+      postTransaction({
+        txId: `redeem-${uniq()}`,
+        asset,
+        postings: [
+          { account: trader, amount: -100n, kind: "redeem" },
+          { account: HOUSE_ACCOUNT, amount: 100n, kind: "redeem" },
+        ],
+      }),
+    ).rejects.toThrow(/not a permitted posting kind/);
+    expect(await balance(trader, asset)).toBe(100n);
+  });
+
+  it("refuses a cash-out dressed in a joinery sale's kinds", async () => {
+    // Both kinds are permitted and both classes sit on a side the table allows.
+    // Only the no-redemption rule refuses this, so if that rule were dropped
+    // this test would be the one that noticed.
+    const trader = await fundedTrader(100n);
+    await expect(
+      postTransaction({
+        txId: `fee-cashout-${uniq()}`,
+        asset,
+        postings: [
+          { account: trader, amount: -100n, kind: "joinery", ref: "joinery sale: listing 1" },
+          { account: HOUSE_ACCOUNT, amount: 100n, kind: "joinery_fee", ref: "joinery sale: listing 1" },
+        ],
+      }),
+    ).rejects.toThrow(/no redemption/);
+    expect(await balance(trader, asset)).toBe(100n);
+  });
+
+  it("refuses a P2P transfer between two traders", async () => {
+    const from = await fundedTrader(100n);
+    const to = `trader:test:${uniq()}`;
+    await expect(
+      postTransaction({
+        txId: `transfer-${uniq()}`,
+        asset,
+        postings: [
+          { account: from, amount: -100n, kind: "transfer" },
+          { account: to, amount: 100n, kind: "transfer" },
+        ],
+      }),
+    ).rejects.toThrow(/kind 'transfer' is not a permitted posting kind/);
+    expect(await balance(from, asset)).toBe(100n);
+    expect(await balance(to, asset)).toBe(0n);
+  });
+
+  it("refuses a P2P transfer that calls itself a trade", async () => {
+    // The test above only proves the WORD `transfer` is refused, which is the
+    // easy half. `trade` is a permitted kind with a trader on both sides of
+    // its row, so this is the same movement under a name the ledger accepts —
+    // and the one a caller reaching for a sideways move would actually pick.
+    const from = await fundedTrader(100n);
+    const to = `trader:test:${uniq()}`;
+    await expect(
+      postTransaction({
+        txId: `sideways-${uniq()}`,
+        asset,
+        postings: [
+          { account: from, amount: -100n, kind: "trade" },
+          { account: to, amount: 100n, kind: "trade" },
+        ],
+      }),
+    ).rejects.toThrow(/kind 'trade' must exchange value between a trader and a market pool/);
+    expect(await balance(from, asset)).toBe(100n);
+    expect(await balance(to, asset)).toBe(0n);
+  });
+
+  it("refuses an account outside the known classes", async () => {
+    // Per-run, like every other account here, and for a sharper reason than
+    // tidiness: the one failure this test exists to catch is the guard being
+    // gone, and a fixed name would then take a permanent 100n balance on an
+    // append-only ledger that has no delete. The assertion below would fail
+    // forever afterwards — against CI's database and against the developer's —
+    // turning a diagnosis into damage.
+    const stranger = `merchant:${uniq()}`;
+    await expect(
+      postTransaction({
+        txId: `merchant-${uniq()}`,
+        asset,
+        postings: [
+          { account: HOUSE_ACCOUNT, amount: -100n, kind: "grant" },
+          { account: stranger, amount: 100n, kind: "grant" },
+        ],
+      }),
+    ).rejects.toThrow(/'unknown'/);
+    expect(await balance(stranger, asset)).toBe(0n);
+  });
+
+  it("permits a joinery sale whose house fee rounds away to nothing", async () => {
+    // The shape lib/joinery.ts posts for a very cheap piece: the fee leg is 0
+    // and gets filtered, leaving two traders and no house posting at all.
+    const split = splitSale(9n, true);
+    expect(split.house, "pick a price whose house cut actually rounds to zero").toBe(0n);
+
+    const buyer = await fundedTrader(split.price);
+    const seller = `trader:test:${uniq()}`;
+    const ref = "joinery sale: listing 1";
+    const postings = [
+      { account: buyer, amount: -split.price, kind: "joinery", ref },
+      { account: seller, amount: split.seller, kind: "joinery", ref },
+      { account: HOUSE_ACCOUNT, amount: split.house, kind: "joinery_fee", ref },
+    ].filter((p) => p.amount !== 0n);
+    expect(postings).toHaveLength(2);
+
+    await postTransaction({ txId: `cheap-sale-${uniq()}`, asset, postings });
+    expect(await balance(buyer, asset)).toBe(0n);
+    expect(await balance(seller, asset)).toBe(split.seller);
+  });
+
+  it("permits the residual-only payout sweep with no winners", async () => {
+    const pool = `amm:test${uniq()}`;
+    await postTransaction({
+      txId: `escrow-${uniq()}`,
+      asset,
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -1000n, kind: "escrow" },
+        { account: pool, amount: 1000n, kind: "escrow" },
+      ],
+    });
+    // Nobody held the winning side, so the whole pool goes back to the house.
+    await postTransaction({
+      txId: `sweep-${uniq()}`,
+      asset,
+      postings: [
+        { account: pool, amount: -1000n, kind: "payout" },
+        { account: HOUSE_ACCOUNT, amount: 1000n, kind: "payout" },
+      ],
+    });
+    expect(await balance(pool, asset)).toBe(0n);
   });
 });

@@ -29,7 +29,44 @@ export interface Revocation {
   reason: string | null;
 }
 
-/** Is this bot currently revoked? Cheap enough to call on every gate. */
+/**
+ * Is this bot currently revoked? Cheap enough to call on every gate.
+ *
+ * EVERY GATE THAT CONSULTS THIS, listed here on purpose. The first version of
+ * this function had exactly one caller and looked adequate, which is precisely
+ * how it stayed one-sided: a revoked bot was stopped when it presented its own
+ * token and waved through when its owner asked for a new one. A list that
+ * lives next to the definition makes the next missing gate visible from here
+ * rather than from an incident.
+ *
+ *   - `lib/actor.ts` refuseIfRevoked(), reached from:
+ *       · resolveActor()   — the agent's own door (Authorization: Bearer)
+ *       · agentForActor()  — the owner's door, acting for an agent it owns
+ *   - `routes/identity.ts` POST /auth/token          — minting a fresh token
+ *   - `routes/identity.ts` POST /auth/token/refresh  — extending a lineage
+ *   - `routes/identity.ts` POST /identity/revocation — reporting current state
+ *   - `routes/auth-bots.ts` DELETE /auth/bots/:botId — refusing to DETACH a
+ *       frozen bot. Not a gate on acting, a gate on erasing the freeze: this
+ *       row is the only place revoked_at lives, so detaching it and
+ *       re-verifying would clear the revocation with no admin restore().
+ *
+ * The residency sweep uses `revokedBotIds()` instead: it needs the whole set
+ * once per tick rather than one bot per gate.
+ *
+ * DELIBERATELY UNGATED, so the next reader does not have to re-derive that
+ * they were considered. Each reads user_bots for OWNERSHIP, and none of them
+ * lets a revoked bot act:
+ *
+ *   - `routes/agents.ts` agent registration/claim
+ *   - `routes/auth-agent.ts` npub and bsky identity binding
+ *
+ * A frozen bot's owner may still record who it is and what identities it
+ * carries; what they may not do is use it, and that is enforced where using it
+ * happens — `agentForActor()` and the token gates above. Refusing the
+ * bookkeeping too would mean a restored agent came back with less than it had,
+ * which is the demolition this module exists to avoid. If any of these ever
+ * grants a power rather than recording a fact, it belongs in the list above.
+ */
 export async function isRevoked(botId: string): Promise<Revocation | null> {
   const [row] = await db
     .select({

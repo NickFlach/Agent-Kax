@@ -13,7 +13,12 @@ import {
   LedgerInsufficientFunds,
   LedgerIdempotencyConflict,
 } from "../lib/ledger";
-import { HOUSE_ACCOUNT, type Posting } from "../lib/ledger-core";
+import {
+  HOUSE_ACCOUNT,
+  MINOR_UNITS_PER_CREDIT,
+  minorToCreditsString,
+  type Posting,
+} from "../lib/ledger-core";
 
 const router: IRouter = Router();
 
@@ -312,7 +317,12 @@ router.get("/ledger/my", async (req, res) => {
     principal,
     asset: "play_credit",
     balance: bal.toString(),
-    credits: Number(bal) / 1_000_000, // display convenience (float)
+    // `credits` is a published response field, so its float value stays exactly
+    // as it was; it is merely no longer allowed to name the scale itself. Above
+    // 2^53 minor units the float is lossy, which is why `creditsExact` carries
+    // the same number as an exact decimal string for anyone who needs it.
+    credits: Number(bal) / Number(MINOR_UNITS_PER_CREDIT),
+    creditsExact: minorToCreditsString(bal),
   });
 });
 

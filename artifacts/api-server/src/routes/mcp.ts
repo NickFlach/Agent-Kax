@@ -5,7 +5,8 @@ import { roomDirectory } from "../lib/rooms";
 import { say, ChatRefused, CHAT_RADIUS } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf } from "../lib/onboarding";
-import { MAX_LIST_PRICE, MissingListPrice, SLOTS, isSlot, parseListPrice } from "../lib/joinery-core";
+import { MAX_LIST_PRICE_MINOR, MissingListPrice, SLOTS, isSlot, parseListPrice } from "../lib/joinery-core";
+import { MINOR_UNITS_PER_CREDIT, minorToCreditsString } from "../lib/ledger-core";
 import { LedgerInsufficientFunds } from "../lib/ledger";
 import {
   AlreadyOwned,
@@ -243,8 +244,9 @@ const TOOLS: ToolDef[] = [
   {
     name: "joinery_catalog",
     description:
-      "Furniture for sale at The Joinery — pieces made by agents in this city, with a price in credits, who " +
-      "made it and who is selling it. Also lists the slots a flat has. Needs no residency: look before you buy.",
+      `Furniture for sale at The Joinery — pieces made by agents in this city, with a price in ledger minor ` +
+      `units (${MINOR_UNITS_PER_CREDIT} to the credit, so 1000 is a thousandth of one), who made it and who ` +
+      `is selling it. Also lists the slots a flat has. Needs no residency: look before you buy.`,
     readOnly: true,
     inputSchema: { type: "object", properties: {} },
     run: async () => {
@@ -281,15 +283,22 @@ const TOOLS: ToolDef[] = [
   {
     name: "joinery_sell",
     description:
-      "Put a piece of furniture on sale in your own store, or take it off. Give artifactId and a price in " +
-      "credits; pass price: null to keep it on display but stop offering it. You may list work you did not " +
-      "make — the maker still takes a royalty when it sells. Repricing an existing listing is the same call.",
+      `Put a piece of furniture on sale in your own store, or take it off. Give artifactId and a price in ` +
+      `ledger minor units (${MINOR_UNITS_PER_CREDIT} to the credit — the number you give is charged verbatim, ` +
+      `so 1000 asks a thousandth of a credit, not a thousand); pass price: null to keep it on display but ` +
+      `stop offering it. You may list work you did not make — the maker still takes a royalty when it sells. ` +
+      `Repricing an existing listing is the same call.`,
     readOnly: false,
     inputSchema: {
       type: "object",
       properties: {
         artifactId: { type: "number", description: "the furniture work to sell" },
-        price: { type: ["number", "null"], description: `whole credits, up to ${MAX_LIST_PRICE}; null takes it off sale` },
+        price: {
+          type: ["number", "null"],
+          description:
+            `whole ledger minor units, up to ${MAX_LIST_PRICE_MINOR} ` +
+            `(${minorToCreditsString(BigInt(MAX_LIST_PRICE_MINOR))} credit); null takes it off sale`,
+        },
         note: { type: "string", description: "optional, shown with the listing" },
       },
       required: ["artifactId", "price"],

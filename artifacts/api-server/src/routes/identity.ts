@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { usersTable, userBotsTable } from "@workspace/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import {
   getPublicJwks,
@@ -16,7 +16,7 @@ import { resolvePrincipal, isResolvablePrefix, RESOLVABLE_PREFIXES } from "../li
 import { isRevoked, revoke, restore } from "../lib/revocation";
 import { requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { postTransaction } from "../lib/ledger";
-import { HOUSE_ACCOUNT } from "../lib/ledger-core";
+import { HOUSE_ACCOUNT, creditsToMinor } from "../lib/ledger-core";
 
 const router: IRouter = Router();
 
@@ -26,7 +26,7 @@ const router: IRouter = Router();
 // grant exactly-once no matter how many tokens the principal mints — no flag
 // column, no separate bookkeeping. Best-effort: a ledger hiccup never blocks
 // token issuance.
-const SIGNUP_GRANT_MINOR = 100_000_000n;
+const SIGNUP_GRANT_MINOR = creditsToMinor(100n);
 
 async function grantSignupCredits(principal: string, log?: (obj: unknown, msg: string) => void): Promise<void> {
   try {
@@ -172,13 +172,37 @@ router.post("/auth/token", requireAuth, async (req, res) => {
       }
       const obcBotId = obcBotIdRaw.toLowerCase();
       // The bot must be PROVEN-owned by this user (agent-verify flow populated
-      // user_bots). No token is minted for a bot the user hasn't attached.
+      // user_bots) AND still verified. Revocation is a fact about the bot, not
+      // about the credential presented, so it belongs in the WHERE clause: a
+      // revoked row cannot be returned here at all, and no later branch can
+      // forget to look at it. Without this the freeze was cosmetic — revoke()
+      // never detaches, so a revoked bot's owner could mint a fresh
+      // 15-minute agent token as often as they liked.
       const [owned] = await db
         .select()
         .from(userBotsTable)
-        .where(and(eq(userBotsTable.userId, userId), eq(userBotsTable.obcBotId, obcBotId)))
+        .where(
+          and(
+            eq(userBotsTable.userId, userId),
+            eq(userBotsTable.obcBotId, obcBotId),
+            isNull(userBotsTable.revokedAt),
+          ),
+        )
         .limit(1);
       if (!owned) {
+        // Two different refusals wear one status code, so say which. Scoped to
+        // this user's own rows: whether somebody ELSE's bot is revoked is not
+        // this caller's business. Sending a revoked owner back through
+        // /auth/agent/verify would be advice that cannot work.
+        const [attached] = await db
+          .select({ revokedAt: userBotsTable.revokedAt })
+          .from(userBotsTable)
+          .where(and(eq(userBotsTable.userId, userId), eq(userBotsTable.obcBotId, obcBotId)))
+          .limit(1);
+        if (attached?.revokedAt) {
+          res.status(403).json({ error: "bot revoked", code: "bot_revoked" });
+          return;
+        }
         res.status(403).json({ error: "you have not proven control of that bot — attach it first via /auth/agent/verify" });
         return;
       }
@@ -348,7 +372,8 @@ router.post("/auth/token/exchange", async (req, res) => {
  *    refreshing refuses and the human must re-authenticate. A stolen token
  *    can't ride refreshes forever.
  *  - The subject must still be a live, non-disabled user; agent tokens must
- *    still have their bot attached (detaching a bot revokes its lineage).
+ *    still have their bot attached AND unrevoked (detaching a bot kills its
+ *    lineage, and so does the city withdrawing the bot's verification).
  */
 router.post("/auth/token/refresh", async (req, res) => {
   if (!issuingEnabled()) {
@@ -390,9 +415,27 @@ router.post("/auth/token/refresh", async (req, res) => {
     const [owned] = await db
       .select()
       .from(userBotsTable)
-      .where(and(eq(userBotsTable.userId, userId), eq(userBotsTable.obcBotId, botId)))
+      .where(
+        and(
+          eq(userBotsTable.userId, userId),
+          eq(userBotsTable.obcBotId, botId),
+          isNull(userBotsTable.revokedAt),
+        ),
+      )
       .limit(1);
     if (!owned) {
+      // Same guard as the mint door, and it matters more here: a lineage may
+      // ride refreshes for MAX_TOKEN_LIFETIME_SEC, so a refresh that ignores
+      // the revocation hands a withdrawn agent up to thirty more days.
+      const [attached] = await db
+        .select({ revokedAt: userBotsTable.revokedAt })
+        .from(userBotsTable)
+        .where(and(eq(userBotsTable.userId, userId), eq(userBotsTable.obcBotId, botId)))
+        .limit(1);
+      if (attached?.revokedAt) {
+        res.status(403).json({ error: "bot revoked", code: "bot_revoked" });
+        return;
+      }
       res.status(403).json({ error: "bot no longer attached to this account" });
       return;
     }

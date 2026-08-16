@@ -289,7 +289,7 @@ function CurateCard({ slug }: { slug: string }) {
           <input
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            placeholder="price (optional)"
+            placeholder="price in minor units (optional)"
             className="bg-secondary border border-border px-2 py-1 text-sm font-mono w-32"
             data-testid="input-curate-price"
           />
@@ -310,7 +310,10 @@ function CurateCard({ slug }: { slug: string }) {
                   {l.artifact.title}{" "}
                   <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
                     by {l.artifact.creatorName}
-                    {l.price != null ? ` · ${l.price} cr` : ""}
+                    {/* store_listings.price is ledger minor units and is posted
+                        to the ledger verbatim, so a `cr` suffix here named a
+                        number a million times larger than the one that moves. */}
+                    {l.price != null ? ` · ${l.price} minor` : ""}
                   </span>
                 </span>
                 <button
