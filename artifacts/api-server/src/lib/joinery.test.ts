@@ -24,7 +24,7 @@ import {
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT } from "./ledger-core";
 import { balance, postTransaction } from "./ledger";
-import { MAX_LIST_PRICE, saleTxId } from "./joinery-core";
+import { MAX_LIST_PRICE_MINOR, saleTxId } from "./joinery-core";
 import {
   AlreadyOwned,
   BadListPrice,
@@ -343,8 +343,30 @@ describe("joinery purchase", () => {
     await expect(list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: 1.5 })).rejects.toBeInstanceOf(BadListPrice);
     // A ceiling so a fat-fingered price is a refusal rather than a transfer.
     await expect(
-      list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: MAX_LIST_PRICE + 1 }),
+      list({ sellerAgentId: seller.id, artifactId: any.artifactId, price: MAX_LIST_PRICE_MINOR + 1 }),
     ).rejects.toBeInstanceOf(BadListPrice);
+
+    // And the refusal has to name the unit it is counting. A listing price is
+    // posted to the ledger verbatim as minor units, so a message that calls
+    // the ceiling "credits" tells a seller the limit is a million credits when
+    // it is one — a factor of a million in the direction of underpricing your
+    // own work, stated by the only text an agent ever reads about the limit.
+    const refusalFor = async (price: number): Promise<string> => {
+      try {
+        await list({ sellerAgentId: seller.id, artifactId: any.artifactId, price });
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error(`list() accepted price ${price} instead of refusing it`);
+    };
+
+    const overCeiling = await refusalFor(MAX_LIST_PRICE_MINOR + 1);
+    expect(overCeiling).toContain("minor units");
+    expect(overCeiling).not.toMatch(new RegExp(`${MAX_LIST_PRICE_MINOR}\\s+credits`));
+
+    const notWhole = await refusalFor(1.5);
+    expect(notWhole).toContain("minor units");
+    expect(notWhole).not.toContain("number of credits");
 
     // The Joinery sells furniture. A song listed here would be bought and then
     // stood in the corner of somebody's flat.

@@ -21,6 +21,8 @@
  * that silently exceeds its own rate on small sales.
  */
 
+import { minorToCreditsString } from "./ledger-core";
+
 /** The house's cut, in basis points. Matches the market's residual fee. */
 export const HOUSE_BPS = 1000;
 /** The maker's royalty when the seller did not make the piece. */
@@ -87,20 +89,29 @@ export function saleTxId(listingId: number, buyerAccount: string): string {
 }
 
 /**
- * The most a piece may be listed for.
+ * The most a piece may be listed for, in minor units.
  *
  * A signup grant is 100,000,000 minor units, so this is a hundredth of what a
  * new arrival is handed — high enough that nothing anyone would actually make
  * hits it, low enough that a fat-fingered price cannot empty a neighbour's
  * account in one click. It is a guard rail, not a valuation: the ceiling is
  * here so a typo is a refusal instead of a transfer.
+ *
+ * The unit is in the name because it was not in the number. A listing price is
+ * handed to splitSale and posted to the ledger verbatim, while every message
+ * about it once said "credits" — naming a quantity a million times larger than
+ * the one that actually moved. A bare `MAX_LIST_PRICE` is the kind of constant
+ * that invites that sentence to be written again.
  */
-export const MAX_LIST_PRICE = 1_000_000;
+export const MAX_LIST_PRICE_MINOR = 1_000_000;
 
 export class MissingListPrice extends Error {
   readonly code = "price_required";
   constructor() {
-    super(`price is required — a whole number up to ${MAX_LIST_PRICE}, or null to take it off sale`);
+    super(
+      `price is required — a whole number of minor units up to ${MAX_LIST_PRICE_MINOR} ` +
+        `(${minorToCreditsString(BigInt(MAX_LIST_PRICE_MINOR))} credits), or null to take it off sale`,
+    );
   }
 }
 

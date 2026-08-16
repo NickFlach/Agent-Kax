@@ -9,8 +9,10 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { MAX_HOUSE_FEE_BPS, minorToCreditsString } from "./ledger-core";
 import {
   HOUSE_BPS,
+  MAX_LIST_PRICE_MINOR,
   MissingListPrice,
   parseListPrice,
   MAKER_ROYALTY_BPS,
@@ -52,6 +54,15 @@ describe("joinery sale split", () => {
     }
   });
 
+  it("keeps the house cut inside the rate the ledger will accept", () => {
+    // The ledger refuses a transaction that hands the house more than
+    // MAX_HOUSE_FEE_BPS of what it took from traders, which is how a cash-out
+    // is told from a fee. Raising HOUSE_BPS past that ceiling would not produce
+    // a more expensive joinery — it would produce a joinery whose every sale
+    // is rejected at the door, and this is where that is discovered.
+    expect(BigInt(HOUSE_BPS)).toBeLessThanOrEqual(MAX_HOUSE_FEE_BPS);
+  });
+
   it("never lets the fee exceed its own rate", () => {
     // The remainder goes to the seller, not the house. If it went the other
     // way a 3-credit sale would charge well over 10% and nothing would say so.
@@ -74,6 +85,28 @@ describe("joinery sale split", () => {
     // seller receives nothing.
     expect(() => splitSale(1n, false)).not.toThrow();
     expect(splitSale(1n, false).seller).toBe(1n);
+  });
+
+  it("charges the buyer the listed number itself, as minor units", () => {
+    // The denomination, pinned. lib/joinery.ts hands store_listings.price
+    // straight to splitSale and posts `-split.price` as the buyer's leg, so a
+    // piece listed at 1000 moves 1000 minor units — a thousandth of a credit,
+    // not a thousand credits. This does not argue that is the right scale. It
+    // makes a redenomination arrive as an edit to these numbers rather than as
+    // a silent factor of a million appearing in everybody's balance.
+    //
+    // The posting itself is not visible from here — nothing pure can see it.
+    // joinery.test.ts pins that half against a database, where a purchase of a
+    // listing priced 1000 must move the buyer's balance by exactly 1000n.
+    const listedPrice = 1000;
+    const split = splitSale(BigInt(listedPrice), false);
+    expect(split.price).toBe(1000n);
+    expect(minorToCreditsString(split.price)).toBe("0.001");
+    // The ceiling reads like a generous one and is worth a credit.
+    expect(minorToCreditsString(BigInt(MAX_LIST_PRICE_MINOR))).toBe("1");
+    // And the refusal an agent actually reads names the unit it is counting,
+    // which is the whole defect: the number was never wrong, the word was.
+    expect(new MissingListPrice().message).toContain("minor units");
   });
 
   it("makes a retry idempotent before any money moves", () => {

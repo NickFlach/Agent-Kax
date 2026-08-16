@@ -7,9 +7,9 @@ import {
   storeListingsTable,
   unitFurnishingsTable,
 } from "@workspace/db/schema";
-import { HOUSE_ACCOUNT } from "./ledger-core";
+import { HOUSE_ACCOUNT, minorToCreditsString } from "./ledger-core";
 import { LedgerInsufficientFunds, postTransaction } from "./ledger";
-import { InvalidSalePrice, MAX_LIST_PRICE, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
+import { InvalidSalePrice, MAX_LIST_PRICE_MINOR, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
 
 /**
  * The Joinery, trading.
@@ -171,10 +171,13 @@ export interface ListingResult {
 export async function list(input: ListingInput): Promise<ListingResult> {
   if (input.price !== null) {
     if (!Number.isInteger(input.price) || input.price <= 0) {
-      throw new BadListPrice("price must be a positive whole number of credits, or null to take it off sale");
+      throw new BadListPrice("price must be a positive whole number of minor units, or null to take it off sale");
     }
-    if (input.price > MAX_LIST_PRICE) {
-      throw new BadListPrice(`price may not exceed ${MAX_LIST_PRICE} credits`);
+    if (input.price > MAX_LIST_PRICE_MINOR) {
+      throw new BadListPrice(
+        `price may not exceed ${MAX_LIST_PRICE_MINOR} minor units ` +
+          `(${minorToCreditsString(BigInt(MAX_LIST_PRICE_MINOR))} credits)`,
+      );
     }
   }
 

@@ -71,6 +71,25 @@ export class ActorError extends Error {
 }
 
 /**
+ * Refuse a bot whose verification the city has withdrawn.
+ *
+ * Shared by both doors — the agent's own token and its owner's session — so
+ * the two cannot drift into telling the holder different things about the same
+ * fact. The import is lazy to keep this module loadable without the database
+ * in the tests that only exercise principal derivation.
+ */
+async function refuseIfRevoked(botId: string): Promise<void> {
+  const { isRevoked } = await import("./revocation");
+  const revoked = await isRevoked(botId);
+  if (revoked) {
+    throw new ActorError(
+      `this bot's verification was withdrawn${revoked.reason ? `: ${revoked.reason}` : ""}`,
+      403,
+    );
+  }
+}
+
+/**
  * Resolve the actor behind a request. Two doors, checked in this order:
  *
  *   1. An identity token (Authorization: Bearer). This is the agent's own door
@@ -95,14 +114,7 @@ export async function resolveActor(req: Request): Promise<Actor | null> {
       // A withdrawn verification stops the agent HERE, at the one gate every
       // agent action passes through. Checking it at each route instead would
       // mean the newest route is always the one that forgot.
-      const { isRevoked } = await import("./revocation");
-      const revoked = await isRevoked(c.bot_id);
-      if (revoked) {
-        throw new ActorError(
-          `this bot's verification was withdrawn${revoked.reason ? `: ${revoked.reason}` : ""}`,
-          403,
-        );
-      }
+      await refuseIfRevoked(c.bot_id);
       const [agent] = await db
         .select()
         .from(agentsTable)
@@ -153,6 +165,12 @@ export async function resolveActor(req: Request): Promise<Actor | null> {
  *
  * An agent token acts as itself — no ownership lookup, which is the whole
  * point. A user session may act for an agent it owns, named explicitly.
+ *
+ * Both routes into this function are gated on revocation, because OWNERSHIP IS
+ * NOT STANDING. The token door was gated from the start (in resolveActor) and
+ * the owner door was not, which made the revocation one-sided: the city could
+ * withdraw its verification of a bot and the human holding its login could
+ * keep acting for it anyway.
  */
 export async function agentForActor(
   actor: Actor,
@@ -173,5 +191,9 @@ export async function agentForActor(
 
   const { canMutate } = await import("../middlewares/requireAuth");
   if (!(await canMutate(req, agent.ownerId))) throw new ActorError("Not your agent", 403);
+
+  // An agent that has never been seen in OBC has no verification to withdraw,
+  // so there is nothing to check and no row that could carry a revocation.
+  if (agent.obcBotId) await refuseIfRevoked(agent.obcBotId);
   return agent;
 }

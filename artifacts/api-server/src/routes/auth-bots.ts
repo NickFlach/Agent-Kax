@@ -4,6 +4,7 @@ import { db, userBotsTable, usersTable, agentsTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireWalletAuth } from "../middlewares/requireWalletAuth";
 import { mayChangeBot } from "../middlewares/botAttachAuth";
+import { isRevoked } from "../lib/revocation";
 
 const router: Router = Router();
 
@@ -107,6 +108,28 @@ router.delete("/auth/bots/:botId", requireAuth, async (req, res) => {
   // requirement, so a session-attached bot can be detached by that session
   // while a wallet-attached one still cannot.
   if (!(await mayChangeBot(req, res, botId))) return;
+
+  // A revocation is recorded on this row and nowhere else, so deleting the row
+  // deletes the revocation with it. The owner could then re-run
+  // /auth/agent/challenge + /auth/agent/verify, which INSERTs a fresh row with
+  // revoked_at NULL — no conflict to no-op against, because the old row is
+  // gone — and every gate that consults isRevoked() waves the bot through
+  // again, with no admin restore() and no trace that a freeze ever happened.
+  // Re-verifying is not free (it needs a new artifact published from the bot
+  // in OBC), but where the revocation was raised KAX-side it is a complete
+  // bypass, performed by exactly the party the freeze was aimed at. A
+  // suspension is the city's to lift, so a frozen attachment cannot be
+  // dissolved by its owner. (#249)
+  const frozen = await isRevoked(botId);
+  if (frozen) {
+    res.status(403).json({
+      error: "this bot's verification is revoked; a frozen attachment cannot be detached",
+      code: "bot_revoked",
+      revokedAt: frozen.revokedAt,
+    });
+    return;
+  }
+
   const deleted = await db
     .delete(userBotsTable)
     .where(and(
