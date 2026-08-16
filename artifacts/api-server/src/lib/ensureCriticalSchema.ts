@@ -226,6 +226,72 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         AND a.obc_bot_id = '0f05e10b-f8a1-46d6-b4a2-a7d4bae837f7'
         AND NOT EXISTS (SELECT 1 FROM residence_units o WHERE o.agent_id = a.id)`),
   },
+  {
+    /**
+     * The first half of 0025, and first here for the same reason it is first
+     * there. These two columns are where a listing remembers the Stripe
+     * Product and Price it lazily created, and the diff deletes columns as
+     * readily as tables — bsky_handle above is the proof. Losing them does not
+     * just break the write: checkout would mint a fresh Product and Price for
+     * a listing that already has them on every purchase, so the damage would
+     * be a growing pile of duplicates in the Stripe catalog rather than an
+     * error anyone would notice.
+     *
+     * The loop below stops at the first statement that raises, and the
+     * listing_orders CREATE that follows depends on both of its foreign-key
+     * targets still existing. If the drift ever reaches store_listings itself,
+     * this repair — which needs nothing but the table it alters — has already
+     * run by then instead of being stranded behind that CREATE.
+     */
+    label: "store_listings stripe catalog columns",
+    sql: sql.raw(`
+      ALTER TABLE store_listings
+        ADD COLUMN IF NOT EXISTS stripe_product_id text,
+        ADD COLUMN IF NOT EXISTS stripe_price_id text`),
+  },
+  {
+    /**
+     * listing_orders, the newest table in exactly the state residence_units
+     * was in on the day the diff first ate it: written by a migration, exported
+     * from the schema barrel, and absent from here.
+     *
+     * Checkout fails louder than housing does. store-checkout.ts caches its
+     * schema probe in a module-level `schemaReady`, so once the table has been
+     * seen the verdict is `true` for the life of the process — a drop after
+     * boot turns every checkout into a 500 instead of the 503 that guard was
+     * written to return, and it stays that way until a restart. Rebuilding the
+     * table at boot is what keeps that cache honest.
+     *
+     * The shape below is copied from 0025 verbatim, foreign keys included, so
+     * a rebuilt table is the same table and not a lookalike that accepts rows
+     * the real one would have refused. Nothing here can invent lost orders:
+     * Stripe holds payment truth and a replayed webhook can reconcile, but only
+     * against a table that exists.
+     */
+    label: "listing_orders table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS listing_orders (
+        id                 serial PRIMARY KEY,
+        listing_id         integer NOT NULL REFERENCES store_listings(id) ON DELETE CASCADE,
+        buyer_user_id      text    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        stripe_session_id  text    NOT NULL UNIQUE,
+        amount_cents       integer NOT NULL,
+        currency           text    NOT NULL DEFAULT 'usd',
+        status             text    NOT NULL DEFAULT 'pending',
+        created_at         timestamp NOT NULL DEFAULT now(),
+        updated_at         timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "listing_orders buyer index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS listing_orders_buyer_idx
+                  ON listing_orders (buyer_user_id)`),
+  },
+  {
+    label: "listing_orders listing index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS listing_orders_listing_idx
+                  ON listing_orders (listing_id)`),
+  },
 ];
 
 export interface EnsureResult {

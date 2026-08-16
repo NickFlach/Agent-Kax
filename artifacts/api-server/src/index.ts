@@ -258,8 +258,27 @@ async function warmUpInBackground(): Promise<void> {
       // verifying secret. Don't create a managed one alongside it.
       logger.info("initStripe: using dashboard webhook (STRIPE_WEBHOOK_SECRET set)");
     } else {
+      // This call is what MAKES the signing secret this deployment will verify
+      // with, so nothing before it may require one to already exist.
+      // findOrCreateManagedWebhook creates the endpoint in Stripe and stores
+      // the `whsec_` it hands back in `stripe._managed_webhooks.secret`, which
+      // is the only copy there will ever be — it reaches no env var and no
+      // connector setting. `getStripeSync()` above is therefore constructed
+      // deliberately without a signing secret on this path (see
+      // lib/stripeClient.ts), and the per-delivery verifier picks the stored
+      // one up from there. A guard that refused to build a client until a
+      // secret resolved would not harden this branch, it would make it
+      // unreachable on a fresh deployment and leave the webhook uncreated for
+      // good.
+      //
       // At runtime REPLIT_DOMAINS is the right base: prod domain in a
       // deployment, dev domain in the workspace (registers a dev webhook).
+      // Note that this is REPLIT_DOMAINS alone. The checkout redirect base
+      // (routes/store-checkout.ts) consults KAX_PUBLIC_URL and
+      // REPLIT_DEV_DOMAIN first, so the two ends of the payment round trip do
+      // NOT share a precedence: a deployment that satisfies checkout by
+      // setting only KAX_PUBLIC_URL registers this webhook at
+      // `https://undefined/api/webhooks/stripe` and settles nothing.
       const webhookBaseUrl = `https://${process.env["REPLIT_DOMAINS"]?.split(",")[0]}`;
       await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/webhooks/stripe`);
     }

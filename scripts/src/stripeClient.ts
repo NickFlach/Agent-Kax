@@ -65,9 +65,18 @@ export async function getStripeSync(): Promise<StripeSync> {
   }
 
   const { secretKey, webhookSecret } = await getStripeCredentials();
+
   return new StripeSync({
     poolConfig: { connectionString: databaseUrl },
     stripeSecretKey: secretKey,
-    stripeWebhookSecret: webhookSecret ?? "",
+    // The one thing this copy shares with the api-server's #274 fix: an empty
+    // signing secret must never be passed off as a real one. "" verifies
+    // nothing while looking configured, whereas an absent secret sends
+    // stripe-replit-sync to the managed webhook's own secret in
+    // `stripe._managed_webhooks` — the connector-managed path's only copy —
+    // and to an accurate error when there is none. The credential resolution
+    // above is NOT the api-server's: this module reads the Replit connector
+    // and nothing else, so no env var can supply either half here.
+    stripeWebhookSecret: webhookSecret || undefined,
   });
 }
