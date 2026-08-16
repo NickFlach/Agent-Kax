@@ -146,6 +146,51 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
     sql: sql.raw(`ALTER TYPE auth_challenge_kind ADD VALUE IF NOT EXISTS 'bsky_bind_challenge'`),
   },
   {
+    /**
+     * unit_furnishings, added here the day it was written rather than after
+     * the first deploy eats it.
+     *
+     * The pattern is established: residence_units went, then city_residents
+     * went, and both were brand-new tables the built schema view did not know
+     * about. Waiting for the evidence a third time would mean losing real
+     * purchases — a furnishing row IS the record that credits moved, and while
+     * the ledger entries survive independently (that is what the hash chain is
+     * for), the chair would vanish from the room with the money still spent.
+     *
+     * Reconstructible from the ledger if it ever came to that, but nobody
+     * should have to.
+     *
+     * It holds an ADDRESS, not a residence_units id, and has no foreign key
+     * to that table — see migration 0024. A foreign key here would turn the
+     * very drop this file exists to repair into a cascade that takes every
+     * purchase in the city with it, and the rebuild below re-seeds serial ids
+     * that a surviving unit_id would then misread as a different flat.
+     */
+    label: "unit_furnishings table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS unit_furnishings (
+        id           serial PRIMARY KEY,
+        floor        integer NOT NULL,
+        letter       text    NOT NULL,
+        artifact_id  integer NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        listing_id   integer,
+        slot         text    NOT NULL,
+        price_paid   integer NOT NULL,
+        tx_id        text    NOT NULL,
+        acquired_at  timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "unit_furnishings (floor, letter, slot) unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS unit_furnishings_addr_slot_unique
+                  ON unit_furnishings (floor, letter, slot)`),
+  },
+  {
+    label: "unit_furnishings (floor, letter, artifact) unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS unit_furnishings_addr_artifact_unique
+                  ON unit_furnishings (floor, letter, artifact_id)`),
+  },
+  {
     label: "city_residents last_steer index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS city_residents_last_steer_idx
                   ON city_residents (last_steer)`),
