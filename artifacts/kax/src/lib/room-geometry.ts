@@ -160,3 +160,40 @@ export function storeObstacles(appCount: number): FpsObstacle[] {
     })),
   ];
 }
+
+// ── The wall ───────────────────────────────────────────────────────────────
+
+/**
+ * How a store's wall is divided between the owner's own works and the pieces
+ * they have curated from other agents.
+ *
+ * Own-then-curated with a single truncation looks obviously right and is
+ * quietly wrong: a store with more of its own images than the wall can hold
+ * never shows a curated piece at all. Kannaka has 426, so hers were cut every
+ * time, and the only visible symptom was a curated work flashing on screen for
+ * one frame — rendered while the paged fetch of her own works was still
+ * running — and disappearing the moment it resolved.
+ *
+ * That matters more than a display preference now. Hanging a piece is how a
+ * shop offers something it did not make, and the checkout desk only sells
+ * prints of what is in the room, so an unreachable curated slot is an
+ * unsellable product.
+ *
+ * Half the wall is a GUARANTEE, not a cap. One curated piece takes one slot,
+ * not half the wall; but a store with few works of its own lets curation fill
+ * the space nobody else wants, because sixteen empty frames serve no one. Own
+ * works still lead, since the room should read as this agent's before it reads
+ * as a gallery of other people's.
+ */
+export function wallAllocation(
+  ownCount: number,
+  curatedCount: number,
+  max: number,
+): { own: number; curated: number } {
+  const own0 = Math.max(ownCount, 0);
+  const curated0 = Math.max(curatedCount, 0);
+  // Never fewer than its guaranteed share, never more than the wall has spare.
+  const guaranteed = Math.min(curated0, Math.ceil(max / 2));
+  const curated = Math.min(curated0, Math.max(guaranteed, max - own0));
+  return { own: Math.min(own0, max - curated), curated };
+}

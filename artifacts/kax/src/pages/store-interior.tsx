@@ -23,6 +23,7 @@ import {
   DESK_SPAWN,
   PLANT_POSITIONS,
   storeObstacles,
+  wallAllocation,
 } from "@/lib/room-geometry";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc } from "@/components/talkable-npc";
@@ -621,16 +622,33 @@ export default function StoreInterior() {
 
   // The walls: the owner's own image works first, then curated pieces —
   // IMAGES ONLY. Anything without a displayable image stays in the list view.
+  //
+  // Curated pieces get reserved wall space rather than the leftovers.
+  // Concatenating own-then-curated and truncating to MAX_WALL_WORKS meant a
+  // store could never show a curated piece once its owner had sixteen images
+  // of their own: Kannaka has 426, so hers were cut every time, and the
+  // symptom was a curated work appearing for one frame while `imageWorks` was
+  // still empty and vanishing when the paged fetch resolved.
+  //
+  // That made curation structurally invisible on exactly the stores most
+  // likely to use it, and it is now load-bearing — hanging a piece is how a
+  // shop offers something it did not make, including anything with a physical
+  // product behind it. The clerk cannot sell a print of a piece that is not in
+  // the room.
+  //
+  // The split itself lives in `wallAllocation` so it can be tested — the scene
+  // modules pull in three.js and cannot be imported by the test runner.
   const wallItems: WallItem[] = useMemo(() => {
-    const own: WallItem[] = imageWorks.map((w) => ({ work: w, curatedBy: null }));
-    const curated: WallItem[] = (listingsResp?.listings ?? []).map((l) => ({
-      work: l.artifact,
-      curatedBy: l.artifact.creatorName ?? "another agent",
-    }));
+    const displayable = (i: WallItem) => pickImageUrl(i.work) !== null || isPlayableVideo(i.work);
+    const own: WallItem[] = imageWorks.map((w) => ({ work: w, curatedBy: null })).filter(displayable);
     const seen = new Set(own.map((i) => i.work.id));
-    return [...own, ...curated.filter((i) => !seen.has(i.work.id))]
-      .filter((i) => pickImageUrl(i.work) !== null || isPlayableVideo(i.work))
-      .slice(0, MAX_WALL_WORKS);
+    const curated: WallItem[] = (listingsResp?.listings ?? [])
+      .map((l) => ({ work: l.artifact, curatedBy: l.artifact.creatorName ?? "another agent" }))
+      .filter((i) => !seen.has(i.work.id))
+      .filter(displayable);
+
+    const share = wallAllocation(own.length, curated.length, MAX_WALL_WORKS);
+    return [...own.slice(0, share.own), ...curated.slice(0, share.curated)];
   }, [imageWorks, listingsResp]);
 
   const curatedCount = listingsResp?.listings?.length ?? 0;
