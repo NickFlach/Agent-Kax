@@ -36,7 +36,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { stepMove, type FpsBounds, type FpsObstacle } from "./fps-collision";
+import {
+  isTunnelProof,
+  OBSTACLE_PAD,
+  resolveObstacles,
+  stepMove,
+  type FpsBounds,
+  type FpsObstacle,
+} from "./fps-collision";
 import { storefrontWindowCard, THIN_STOREFRONT_ARTIFACTS } from "./storefront-window";
 import {
   ALLEY_PROP_LANE,
@@ -44,6 +51,8 @@ import {
   alleyPropFootprint,
   alleyProps,
   monumentZFor,
+  plazaZFor,
+  PLAZA_FLANK_X,
   streetDepthFor,
   venueFootprint,
   layoutFor,
@@ -51,6 +60,7 @@ import {
 import {
   DECK_CLEARANCE,
   MAX_UNDERCROFT_UNITS,
+  MAX_WALKABLE_GRADE,
   RAMP_DROP,
   RAMP_RUN,
   SURFACE_BAND,
@@ -60,13 +70,18 @@ import {
   UNDERCROFT_EYE,
   UNDERCROFT_FLOOR_Y,
   UNDERCROFT_MAX_STEP,
+  UNDERCROFT_MAX_TRAVEL,
+  UNDERCROFT_SCROLL,
   UNDERCROFT_SPEED,
   UNDERCROFT_STEP,
   UNDERCROFT_SURFACE_Y,
   compareUndercroft,
   deckYAt,
+  northMouthZFor,
+  NORTH_MOUTH_Z,
   rankUndercroft,
   streetMouthsFor,
+  streetReturnSpawn,
   undercroftDeckY,
   undercroftGroundHeight,
   undercroftGuards,
@@ -78,6 +93,14 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCENE = readFileSync(join(here, "..", "pages", "undercroft.tsx"), "utf8");
+const STREET = readFileSync(join(here, "..", "pages", "marketplace-3d.tsx"), "utf8");
+/**
+ * The rig itself, as source. It imports three.js and R3F, so the Node runner
+ * cannot execute a line of it — which is exactly why `fps-collision.ts` exists.
+ * What is left inside `useFrame` is the wiring, and the wiring is checked the
+ * only way it can be: by reading it.
+ */
+const RIG = readFileSync(join(here, "..", "components", "first-person-rig.tsx"), "utf8");
 
 /* -------------------------------------------------------------- the fixture */
 
@@ -297,8 +320,15 @@ export interface Pos {
   z: number;
 }
 
-/** One frame, through the rig's own code — not a tidied copy of it. */
-function frame(p: Pos, dx: number, dz: number): Pos {
+/**
+ * One frame, through the rig's own code — not a tidied copy of it.
+ *
+ * `maxGroundStep` is a parameter so the SAME frame can be run with the limit
+ * the scene arms today and with the one it armed before the rig's travel was
+ * bounded. That is what makes the gate falsifiable: a world is a movement model
+ * plus a geometry, and the pre-fix movement model has to be runnable.
+ */
+function frameWith(p: Pos, dx: number, dz: number, maxGroundStep: number): Pos {
   const r = stepMove({
     x: p.x,
     y: p.y,
@@ -310,9 +340,13 @@ function frame(p: Pos, dx: number, dz: number): Pos {
     bounds: BOUNDS,
     obstacles: OBSTACLES,
     groundHeight: undercroftGroundHeight,
-    maxGroundStep: UNDERCROFT_MAX_STEP,
+    maxGroundStep,
   });
   return { x: r.x, y: r.y, z: r.z };
+}
+
+function frame(p: Pos, dx: number, dz: number): Pos {
+  return frameWith(p, dx, dz, UNDERCROFT_MAX_STEP);
 }
 
 function standAt(x: number, z: number, storey: "deck" | "floor"): Pos {
@@ -367,6 +401,9 @@ export interface Survey {
   worstAt: { from: Pos; to: Pos } | null;
   highest: number;
   lowest: number;
+  /** Reachable positions the walls should have held and did not. */
+  outside: number;
+  outsideAt: Pos | null;
 }
 
 /**
@@ -400,11 +437,20 @@ export function surveyReachable(w: WorldUnderTest): Survey {
   let worstAt: { from: Pos; to: Pos } | null = null;
   let highest = -Infinity;
   let lowest = Infinity;
+  let outside = 0;
+  let outsideAt: Pos | null = null;
+
+  const b = w.bounds;
+  const isOutside = (p: Pos) => p.x < b.minX || p.x > b.maxX || p.z < b.minZ || p.z > b.maxZ;
 
   while (queue.length) {
     const p = queue.pop()!;
     if (p.y > highest) highest = p.y;
     if (p.y < lowest) lowest = p.y;
+    if (isOutside(p)) {
+      outside++;
+      if (!outsideAt) outsideAt = p;
+    }
     for (const [dx, dz] of dirs) {
       const n = w.move(p, dx, dz);
       const moved = Math.hypot(n.x - p.x, n.z - p.z);
@@ -421,7 +467,7 @@ export function surveyReachable(w: WorldUnderTest): Survey {
     }
   }
 
-  return { cells: seen.size, worstStep, worstAt, highest, lowest };
+  return { cells: seen.size, worstStep, worstAt, highest, lowest, outside, outsideAt };
 }
 
 /**
@@ -433,11 +479,27 @@ export function surveyReachable(w: WorldUnderTest): Survey {
  * or railing — that is precisely the mistake the previous gate made, and it is
  * what let a 6-metre drop set its own pass mark.
  */
+/**
+ * The coverage floor, in cells of the survey's OWN size.
+ *
+ * The flood fill quantises at `w.step`, so a survey that samples twice as
+ * coarsely covers the same excavation in a quarter of the cells. A fixed floor
+ * is therefore a floor on the STEP as much as on the coverage, and pointing the
+ * gate at a longer frame trips it for want of cells rather than for the thing
+ * it is looking for. Scaling by the area of a cell holds every survey to the
+ * same proportion of the scene, which is what the guard was ever about.
+ */
+export const SHIPPING_CELL_FLOOR = 3000;
+
+export function coverageFloor(step: number): number {
+  return Math.round(SHIPPING_CELL_FLOOR * (UNDERCROFT_MAX_TRAVEL / step) ** 2);
+}
+
 export function expectNoTeleport(w: WorldUnderTest, label: string) {
   const survey = surveyReachable(w);
   // Anti-vacuity, first and hard. A gate over three cells proves nothing, and
   // a gate that never left the apron would not have seen the concourse at all.
-  expect(survey.cells, `${label}: the survey barely moved`).toBeGreaterThan(3000);
+  expect(survey.cells, `${label}: the survey barely moved`).toBeGreaterThan(coverageFloor(w.step));
   expect(survey.highest, `${label}: the survey never stood on the surface`).toBeGreaterThan(
     UNDERCROFT_SURFACE_Y + w.eye - 1e-6,
   );
@@ -455,10 +517,20 @@ export function expectNoTeleport(w: WorldUnderTest, label: string) {
   ).toBeLessThanOrEqual(limit + 1e-9);
 }
 
-/** The Undercroft as it ships, surveyed from both spawns and from the floor. */
+/**
+ * The Undercroft as it ships, surveyed from both spawns and from the floor.
+ *
+ * THE STEP IS `UNDERCROFT_MAX_TRAVEL`, NOT `UNDERCROFT_STEP`. The gate used to
+ * survey at 0.45 m — walking pace — while the same file derived the armed
+ * `maxGroundStep` from a travel of 2.65 m and the rig would actually deliver
+ * it. A gate that samples at a sixth of the frame it polices is not sampling
+ * the frame; re-run at the real number it failed at 1.4909 m against a limit of
+ * 0.2250. The rig now rate-limits the scroll so the real number is 0.90, and
+ * this reads it from the movement model rather than from either literal.
+ */
 export function shippingWorld(): WorldUnderTest {
   return {
-    step: UNDERCROFT_STEP,
+    step: UNDERCROFT_MAX_TRAVEL,
     eye: UNDERCROFT_EYE,
     bounds: BOUNDS,
     spawns: [
@@ -467,6 +539,27 @@ export function shippingWorld(): WorldUnderTest {
     ],
     groundHeight: undercroftGroundHeight,
     move: (p, dx, dz) => frame(p, dx, dz),
+  };
+}
+
+/**
+ * The same geometry, walked by the rig AS IT STOOD before a frame had a travel
+ * budget: the whole accumulated scroll spent in one go on top of the walk, and
+ * a `maxGroundStep` derived from that 2.65 m travel.
+ *
+ * This exists so "the gate now polices the real frame" is a demonstration
+ * rather than a claim. Point the corrected gate at this world and it fails; a
+ * gate that passes on the movement model that produced the defect is not a
+ * gate, it is a calibration of it.
+ */
+export const PRE_CLAMP_TRAVEL = UNDERCROFT_STEP + UNDERCROFT_SCROLL;
+
+export function preClampWorld(): WorldUnderTest {
+  const maxStep = PRE_CLAMP_TRAVEL * MAX_WALKABLE_GRADE;
+  return {
+    ...shippingWorld(),
+    step: PRE_CLAMP_TRAVEL,
+    move: (p, dx, dz) => frameWith(p, dx, dz, maxStep),
   };
 }
 
@@ -497,10 +590,94 @@ describe("the walking decline", () => {
       /speed=\{UNDERCROFT_SPEED\}/,
     );
     expect(SCENE, "the scene does not arm the step limit").toMatch(/maxGroundStep=\{UNDERCROFT_MAX_STEP\}/);
+    // And the rig must actually spend the scroll out of a frame budget rather
+    // than all at once, or `UNDERCROFT_MAX_TRAVEL` describes a rig that is not
+    // running. `rigMaxTravelFor` cannot be observed from here — the rig imports
+    // three.js — so the wiring is read instead of executed.
+    expect(RIG, "the rig no longer bounds a frame's travel").toMatch(
+      /const budget = Math\.max\(0, rigMaxTravelFor\(speed\) - move\.current\.length\(\)\)/,
+    );
+    expect(RIG, "the rig no longer clamps the scroll into that budget").toMatch(
+      /clamp\(dolly0, -budget, budget\)/,
+    );
+    expect(RIG, "the rig discards the unspent scroll instead of carrying it").toMatch(
+      /scrollMove\.current -= dolly/,
+    );
+    expect(RIG, "the rig still spends the whole accumulated scroll in one frame").not.toMatch(
+      /const dolly = scrollMove\.current;/,
+    );
   });
 
   it("NEVER TELEPORTS: no reachable frame moves the ground more than the ramp does", () => {
     expectNoTeleport(shippingWorld(), "the Undercroft");
+  });
+
+  it("IS A GATE: the same threshold FAILS against the rig before the frame was bounded", () => {
+    // The most important assertion in this file. The previous gate surveyed at
+    // 0.45 m — walking pace — while the rig would deliver 2.65 m and the armed
+    // step limit was derived from that larger number, so the gate policed a
+    // frame six times shorter than the one that shipped. Re-pointed at the real
+    // movement model it does not merely wobble, it fails by a factor of two.
+    expect(PRE_CLAMP_TRAVEL, "the pre-clamp frame was not longer than a walk").toBeGreaterThan(UNDERCROFT_MAX_TRAVEL);
+    expect(() => expectNoTeleport(preClampWorld(), "the pre-clamp rig")).toThrow(/moved the ground/);
+    // And the failure is the teleport, not the anti-vacuity guards tripping:
+    // the same survey still covers the scene, in cells of its own size.
+    const survey = surveyReachable(preClampWorld());
+    expect(survey.cells, "the pre-clamp survey failed for want of coverage instead").toBeGreaterThan(
+      coverageFloor(PRE_CLAMP_TRAVEL),
+    );
+    expect(survey.highest, "the pre-clamp survey never stood on the surface").toBeGreaterThan(
+      UNDERCROFT_SURFACE_Y + UNDERCROFT_EYE - 1e-6,
+    );
+    expect(survey.lowest, "the pre-clamp survey never reached the concourse").toBeLessThan(
+      UNDERCROFT_FLOOR_Y + UNDERCROFT_EYE + 1e-6,
+    );
+    expect(survey.worstStep, "the pre-clamp rig did not actually teleport").toBeGreaterThan(
+      PRE_CLAMP_TRAVEL * (RAMP_DROP / RAMP_RUN),
+    );
+  });
+
+  it("has no wall thin enough for one frame to step across", () => {
+    // WHY THE CAP IS THE WALK STEP AND NOT ONE NOTCH. `resolveObstacles`
+    // resolves to whichever side of a box's CENTRE the proposal landed on, so a
+    // frame longer than a box's half-span carries the body over the middle and
+    // is pushed out the FAR face — through the wall. Capping a notch at the
+    // walk step (0.90 m of frame) was not enough: the cutting wall's half-span
+    // is 0.80 m and the survey walked a body from the concourse straight onto
+    // the side of its own ramp, 0.5023 m of ground in one frame.
+    const obs = undercroftObstacles();
+    expect(obs.length, "no obstacles — this test would measure nothing").toBeGreaterThan(50);
+    for (const o of obs) {
+      expect(
+        isTunnelProof(o, UNDERCROFT_MAX_TRAVEL),
+        `a box at ${o.cx},${o.cz} is ${Math.min(o.hx, o.hz)} half-thick — one frame steps over it`,
+      ).toBe(true);
+    }
+    // The negative half, at the travel the rig used to permit: the same boxes
+    // and the same rule find the walls a body genuinely did walk through.
+    const leaky = obs.filter((o) => !isTunnelProof(o, PRE_CLAMP_TRAVEL));
+    expect(leaky.length, "nothing was tunnellable even at 2.65 m, so this rule proves nothing").toBeGreaterThan(0);
+  });
+
+  it("holds a body inside the excavation, even against the wall that pushes outwards", () => {
+    // The 154 cells. The outer cutting wall's OUTWARD blocking face lies past
+    // `minX`, so the resolver's answer for a body on that side is a position
+    // outside the world — and `stepMove` used to return it unexamined.
+    const outer = undercroftGuards().find((g) => g.id === "north-cutting-outer")!;
+    const face = outer.cx - (outer.hx + OBSTACLE_PAD);
+    expect(face, "the fixture wall no longer straddles the bound — re-derive this test").toBeLessThan(
+      UNDERCROFT_BOUNDS.minX,
+    );
+    // The resolver really does send a body there; the clamp is what catches it.
+    const pushed = resolveObstacles(UNDERCROFT_BOUNDS.minX, outer.cz, UNDERCROFT_FLOOR_Y + UNDERCROFT_EYE, OBSTACLES);
+    expect(pushed.x, "the resolver did not push outwards here").toBeCloseTo(face, 9);
+
+    const survey = surveyReachable(shippingWorld());
+    expect(survey.cells).toBeGreaterThan(3000);
+    expect(
+      survey.outside,
+      `a body reached ${survey.outside} cells outside the walls, first at ${JSON.stringify(survey.outsideAt)}`,
+    ).toBe(0);
   });
 
   it("is never off the deck while above the floor", () => {
@@ -746,13 +923,34 @@ function streetFurniture(storeCount: number) {
     { id: "board-w", cx: -6.2, cz: -12, hx: BOARD.hz, hz: BOARD.hx },
     { id: "board-e", cx: 6.2, cz: -30, hx: BOARD.hz, hz: BOARD.hx },
     { id: "monument", cx: 0, cz: monumentZFor(storeCount), hx: 1.2, hz: 1.2 },
-    { id: "arcade", cx: -12.5, cz: streetDepth - 8, ...venueFootprint("arcade") },
-    { id: "bank", cx: 12.5, cz: streetDepth - 8, ...venueFootprint("bank") },
+    { id: "arcade", cx: -PLAZA_FLANK_X, cz: plazaZFor(storeCount), ...venueFootprint("arcade") },
+    { id: "bank", cx: PLAZA_FLANK_X, cz: plazaZFor(storeCount), ...venueFootprint("bank") },
     { id: "residences", cx: 12.5, cz: 3, ...venueFootprint("residences") },
     { id: "joinery", cx: -12.5, cz: 3, ...venueFootprint("joinery") },
     { id: "scada", cx: 17.6, cz: -8.5, ...venueFootprint("scada") },
     { id: "cafe", cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 },
   ];
+}
+
+/** Everything solid on the street, in the shape the rig takes it. */
+function streetObstacles(storeCount: number): FpsObstacle[] {
+  const mouth = venueFootprint("undercroft");
+  return [
+    ...streetFurniture(storeCount).map((o) => ({ cx: o.cx, cz: o.cz, hx: o.hx, hz: o.hz })),
+    ...streetMouthsFor(storeCount).map((m) => ({ cx: m.x, cz: m.z, ...mouth })),
+  ];
+}
+
+/** The street rig's own walls, from `marketplace-3d.tsx`. */
+function streetBounds(storeCount: number): FpsBounds {
+  const towerZ = streetDepthFor(storeCount) - 20;
+  return { minX: -20.5, maxX: 20.5, minZ: towerZ - 12, maxZ: 15, minY: 1.55, maxY: 28 };
+}
+
+/** How far the resolver shoves a body standing here. Zero is the only pass. */
+function pushAt(x: number, z: number, y: number, obstacles: FpsObstacle[]): number {
+  const r = resolveObstacles(x, z, y, obstacles);
+  return Math.hypot(r.x - x, r.z - z);
 }
 
 function overlaps(
@@ -764,12 +962,23 @@ function overlaps(
 
 describe("the street mouths stand where nothing else does", () => {
   const COUNTS = [24, 28, 32, 36, 40, 44, 48];
+  /**
+   * The counts the street can actually be asked to draw, not just the ones it
+   * is usually asked to draw.
+   *
+   * 0, 1 and 2 are an empty database and a degraded `/marketplace/combined`,
+   * and at all three of them `streetDepthFor` bottoms out at -6.5 and brings
+   * the plaza up to meet the near end. The previous sweep started at 24, so a
+   * north mouth sitting inside the Arcade — the only way down within walking
+   * distance of the entrance — was outside everything CI looked at.
+   */
+  const ALL_COUNTS = [0, 1, 2, 3, 4, 6, 8, 12, 16, 20, ...COUNTS];
 
   it("has mouths to check", () => {
     // Vacuity guard. Nothing imported `STREET_MOUTHS` at all before today,
     // which is how a hard-coded z survived beside four structures that all
     // derive theirs from the store count.
-    for (const n of COUNTS) {
+    for (const n of ALL_COUNTS) {
       const mouths = streetMouthsFor(n);
       expect(mouths.length).toBe(2);
       expect(mouths.map((m) => m.id)).toEqual(["north", "south"]);
@@ -808,16 +1017,43 @@ describe("the street mouths stand where nothing else does", () => {
     }
   });
 
+  it("keeps the near mouth clear of the Arcade however short the street gets", () => {
+    // The plaza comes up the street as the street shortens, and below three
+    // storefronts it arrives on top of the north mouth. The clamp is asserted
+    // both ways: it fires where it must, and it is inert everywhere else.
+    const arcade = venueFootprint("arcade");
+    const mouth = venueFootprint("undercroft");
+    let clamped = 0;
+    for (const n of ALL_COUNTS) {
+      const z = northMouthZFor(n);
+      const gap = Math.abs(z - plazaZFor(n));
+      expect(gap, `${n}: the near mouth is inside the Arcade`).toBeGreaterThan(arcade.hz + mouth.hz);
+      if (z !== NORTH_MOUTH_Z) clamped++;
+    }
+    expect(clamped, "the clamp never fired, so nothing here is being tested").toBeGreaterThan(0);
+    // …and it is the SHORT street it fires on, not the shipping one.
+    for (const n of COUNTS) expect(northMouthZFor(n), `${n}: the near mouth moved on a full street`).toBe(NORTH_MOUTH_Z);
+    // The negative half: without the clamp, the literal really does collide.
+    expect(
+      Math.abs(NORTH_MOUTH_Z - plazaZFor(0)),
+      "the bare literal is clear of the Arcade at zero storefronts, so the clamp guards nothing",
+    ).toBeLessThan(arcade.hz + mouth.hz);
+  });
+
   it("overlaps no venue, no shopfront and no alley prop, at any store count", () => {
     const mouth = venueFootprint("undercroft");
-    for (const n of COUNTS) {
+    // The production street's alley is fully populated; a two-storefront street
+    // has a two-prop alley, and demanding nine of it would only ever be a way
+    // of not testing the short street at all.
+    expect(alleyProps(streetDepthFor(48)).length * 2, "the production alley is bare").toBeGreaterThan(8);
+    for (const n of ALL_COUNTS) {
       const furniture = streetFurniture(n);
       expect(furniture.length, `${n}: nothing to collide with`).toBeGreaterThan(n);
       const props = [
         ...alleyProps(streetDepthFor(n)).map((p) => ({ id: `alley-w-${p.kind}@${p.z}`, ...alleyPropFootprint(p, -1) })),
         ...alleyProps(streetDepthFor(n)).map((p) => ({ id: `alley-e-${p.kind}@${p.z}`, ...alleyPropFootprint(p, 1) })),
       ];
-      expect(props.length, `${n}: no alley props`).toBeGreaterThan(8);
+      expect(props.length, `${n}: no alley props`).toBeGreaterThanOrEqual(4);
       for (const m of streetMouthsFor(n)) {
         const box = { cx: m.x, cz: m.z, ...mouth };
         for (const other of [...furniture, ...props]) {
@@ -840,6 +1076,76 @@ describe("the street mouths stand where nothing else does", () => {
     const props = alleyProps(streetDepthFor(48)).map((p) => alleyPropFootprint(p, -1));
     const onTop = { cx: props[1]!.cx, cz: props[1]!.cz, ...mouth };
     expect(overlaps(onTop, props[1]!), "the overlap check does not detect an overlap").toBe(true);
+  });
+});
+
+/* --------------------------------------------------- coming back up the ramp */
+
+describe("stepping back out onto the street", () => {
+  const COUNTS = [0, 1, 2, 3, 8, 24, 48];
+
+  it("stands the returning body in the alley, not inside the kiosk it came out of", () => {
+    for (const n of COUNTS) {
+      const m = streetMouthsFor(n)[0]!;
+      const spawn = streetReturnSpawn(m);
+      const [sx, sy, sz] = spawn.position;
+      const obstacles = streetObstacles(n);
+
+      // THE MEASUREMENT, through the resolver the rig actually runs. Not
+      // arithmetic about how far apart two numbers are: the shipped spawn was
+      // 1.4 m from the mouth's centre and the comment above it said it was
+      // clear of the mouth, so the arithmetic was never the problem.
+      expect(pushAt(sx, sz, sy, obstacles), `${n}: the return spawn is inside something solid`).toBe(0);
+
+      // Clear of the prop lane too — the constraint that makes the x axis
+      // unusable and is the reason the clearance is bought along z.
+      const inward = ALLEY_X - Math.abs(sx);
+      expect(inward, `${n}: the return spawn is in the alley's prop lane`).toBeLessThan(ALLEY_PROP_LANE.near);
+      // …and still in the alley rather than out in the skyline blocks.
+      expect(Math.abs(sx), `${n}: the return spawn is not in the alley`).toBeLessThan(ALLEY_X + 3.1);
+
+      // And reachable: the rig clamps to its own bounds on the first frame, so
+      // a spawn outside them is a spawn somewhere else.
+      const b = streetBounds(n);
+      expect(sx >= b.minX && sx <= b.maxX, `${n}: the return spawn is outside the movement clamp in x`).toBe(true);
+      expect(sz >= b.minZ && sz <= b.maxZ, `${n}: the return spawn is outside the movement clamp in z`).toBe(true);
+
+      // Facing the way back in, like every other door in the city.
+      const look = { x: -Math.sin(spawn.yaw), z: -Math.cos(spawn.yaw) };
+      const toMouth = { x: m.x - sx, z: m.z - sz };
+      const len = Math.hypot(toMouth.x, toMouth.z);
+      expect((look.x * toMouth.x + look.z * toMouth.z) / len, `${n}: the visitor surfaces facing away from the ramp`)
+        .toBeGreaterThan(0.5);
+    }
+  });
+
+  it("catches the spawn that shipped, which was 0.80 m inside the mouth", () => {
+    // The negative half, and the actual defect. Without it the test above could
+    // be green because `resolveObstacles` stopped pushing rather than because
+    // the spawn moved.
+    const n = 48;
+    const m = streetMouthsFor(n)[0]!;
+    const obstacles = streetObstacles(n);
+    const shipped = pushAt(m.x + 1.4, m.z, UNDERCROFT_EYE, obstacles);
+    expect(shipped, "the spawn that shipped is not inside the mouth after all").toBeCloseTo(0.8, 6);
+    // And the offset the comment implied — out along x, clear of the box —
+    // lands in the prop lane, which is why the fix went the other way.
+    const half = venueFootprint("undercroft").hx;
+    const alongX = Math.abs(m.x) - (half + OBSTACLE_PAD + 0.4);
+    expect(pushAt(-alongX, m.z, UNDERCROFT_EYE, obstacles), "the x-axis spawn is not clear of the mouth").toBe(0);
+    expect(ALLEY_X - alongX, "there is room on the x axis after all — re-derive the fix").toBeGreaterThan(
+      ALLEY_PROP_LANE.near,
+    );
+  });
+
+  it("is the spawn the street actually uses", () => {
+    // `marketplace-3d.tsx` imports three.js, so this is the only way to know
+    // the scene reads the derived spawn rather than keeping its own literal —
+    // which is exactly the shape the defect had.
+    expect(STREET, "the street no longer uses the derived return spawn").toMatch(
+      /setSpawn\(streetReturnSpawn\(streetMouths\[0\]!\)\)/,
+    );
+    expect(STREET, "a literal return-spawn offset came back").not.toMatch(/position: \[m\.x \+ [\d.]+/);
   });
 });
 

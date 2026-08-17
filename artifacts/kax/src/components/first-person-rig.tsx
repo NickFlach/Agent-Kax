@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { isTypingTarget } from "@/lib/is-typing";
-import { RIG_DT_CLAMP, stepMove, type FpsBounds, type FpsObstacle } from "@/lib/fps-collision";
+import { RIG_DT_CLAMP, rigMaxTravelFor, stepMove, type FpsBounds, type FpsObstacle } from "@/lib/fps-collision";
 
 /**
  * Re-exported for the same reason `FpsObstacle` is: the shape now lives in
@@ -241,9 +241,8 @@ export function FirstPersonRig({
     const fwd = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
     const strafe = (k["KeyD"] || k["ArrowRight"] ? 1 : 0) - (k["KeyA"] || k["ArrowLeft"] ? 1 : 0);
     const vert = (k["KeyR"] || k["Space"] ? 1 : 0) - (k["KeyF"] || k["ShiftLeft"] ? 1 : 0);
-    const dolly = scrollMove.current;
-    scrollMove.current = 0;
-    if (!fwd && !strafe && !vert && !dolly) return;
+    const dolly0 = scrollMove.current;
+    if (!fwd && !strafe && !vert && !dolly0) return;
 
     // Walk on the ground plane regardless of pitch (shooter-style).
     fwdV.current.set(-Math.sin(yaw.current), 0, -Math.cos(yaw.current));
@@ -254,6 +253,26 @@ export function FirstPersonRig({
     move.current.addScaledVector(rightV.current, strafe);
     if (move.current.lengthSq() > 0) move.current.normalize();
     move.current.multiplyScalar(speed * Math.min(dt, RIG_DT_CLAMP));
+
+    // THE SCROLL IS RATE-LIMITED, NOT DISCARDED.
+    //
+    // `scrollMove` accumulates a whole `scrollStep` per wheel event and this
+    // used to spend the entire accumulated sum in one frame, on top of the
+    // walk. Collision is a point test that resolves to whichever side of a
+    // box's CENTRE the proposal landed on, so the length of a frame is exactly
+    // the thickness of wall it can walk through: one 2.2 m notch stepped clean
+    // across the Undercroft's railings and its cutting rock, and a trackpad
+    // flick made the frame as long as the flick — through anything, in every
+    // scene this rig drives.
+    //
+    // So the frame has a TRAVEL BUDGET, `rigMaxTravelFor(speed)`, the walk
+    // takes its share first, and the scroll spends what is left and CARRIES the
+    // remainder to the next frame. A notch still moves you its full 2.2 m; it
+    // arrives over about seven frames at 60 Hz rather than in one, and `speed`
+    // is finally a speed limit rather than a suggestion the wheel ignores.
+    const budget = Math.max(0, rigMaxTravelFor(speed) - move.current.length());
+    const dolly = THREE.MathUtils.clamp(dolly0, -budget, budget);
+    scrollMove.current -= dolly;
     move.current.addScaledVector(fwdV.current, dolly);
 
     // Clamp, terrain and collision, in the order they have always run — but as

@@ -22,8 +22,15 @@
  * execute them.
  */
 
-import { ALLEY_X, layoutFor, streetDepthFor, type ShopPlacement } from "./city-layout";
-import { OBSTACLE_PAD, rigStepFor } from "./fps-collision";
+import {
+  ALLEY_X,
+  layoutFor,
+  plazaZFor,
+  streetDepthFor,
+  venueFootprint,
+  type ShopPlacement,
+} from "./city-layout";
+import { OBSTACLE_PAD, rigMaxTravelFor, rigStepFor } from "./fps-collision";
 
 /* ------------------------------------------------------------------ ranking */
 
@@ -155,7 +162,7 @@ export const RAMP_RUN = 24;
  * The first cut of this feature sized its railings and its terrain blend
  * against an imagined frame, and the imagined frame was smaller than the real
  * one. The rig moves `speed * Math.min(dt, RIG_DT_CLAMP)` — 0.45 m at this
- * scene's speed, not 0.15 — and a scroll notch adds `scrollStep` on top of
+ * scene's speed, not 0.15 — and a scroll notch added `scrollStep` on top of
  * that, UNCLAMPED. A railing that only blocks over 4 cm does not block. So the
  * geometry reads the movement model rather than guessing at it, and the tests
  * read the same constants.
@@ -163,10 +170,28 @@ export const RAMP_RUN = 24;
 export const UNDERCROFT_SPEED = 9;
 /** 0.45 m. The furthest a held key moves the body in one frame. */
 export const UNDERCROFT_STEP = rigStepFor(UNDERCROFT_SPEED);
-/** The rig's `scrollStep`, which one wheel notch adds on top, unclamped. */
+/** The rig's `scrollStep` — the distance ONE wheel notch is worth in total. */
 export const UNDERCROFT_SCROLL = 2.2;
-/** The longest horizontal hop a single frame can make. */
-export const UNDERCROFT_MAX_TRAVEL = UNDERCROFT_STEP + UNDERCROFT_SCROLL;
+/**
+ * The longest horizontal hop a single frame can make. 0.45 m.
+ *
+ * IT IS A PROPERTY OF THE RIG, so it is asked of the rig rather than assembled
+ * here — and that is the whole of this defect. It used to be
+ * `UNDERCROFT_STEP + UNDERCROFT_SCROLL` = 2.65 m, an honest description of what
+ * the rig did: spend the entire accumulated scroll in one frame on top of the
+ * walk. Everything downstream was then sized against 2.65 while the gate that
+ * was supposed to police it sampled at 0.45, so nothing in CI ever executed a
+ * frame of the length the code was designed for. Re-run at 2.65 the same
+ * geometry moved the ground 1.3625 m against a 0.6625 m bar; at 0.90 it still
+ * managed 0.5023 against 0.2250, by stepping across the centre of the 1.6 m
+ * cutting wall and being resolved out the far side of it.
+ *
+ * The rig now caps a whole frame's travel at the walk step and carries the
+ * unspent scroll (`rigMaxTravelFor`), so the real maximum is 0.45 — the number
+ * `DECK_CLEARANCE`, the guard windows and the ramp blend were all sized against
+ * in the first place. The gate samples at THIS constant, not at either literal.
+ */
+export const UNDERCROFT_MAX_TRAVEL = rigMaxTravelFor(UNDERCROFT_SPEED);
 
 /**
  * The steepest ground the city already asks a body to walk: the residences'
@@ -181,8 +206,21 @@ export const MAX_WALKABLE_GRADE = Math.tan((29.5 * Math.PI) / 180);
  * MODEL, not from any piece of geometry: the furthest the body can travel
  * horizontally in a frame, times the steepest slope it is allowed to travel it
  * on. Anything beyond this is not a slope, it is an edge, and the rig refuses
- * it (see `stepMove`). ≈ 1.50 m, against a 6 m drop — no edge in this scene is
- * anywhere near the limit, which is the point.
+ * it (see `stepMove`). ≈ 0.25 m, against a 6 m drop.
+ *
+ * WHY IT IS STILL THE STAIR'S GRADE AND NOT THE RAMP'S. This scene's only
+ * slope is the 14° ramp, so `UNDERCROFT_MAX_TRAVEL * (RAMP_DROP / RAMP_RUN)`
+ * — 0.1125 m — is the tightest value that still lets a visitor walk down. It is
+ * also EXACTLY the anti-teleport gate's threshold, which would leave a
+ * legitimate ramp step passing or failing on the last bit of a float, and a
+ * walker who fails it does not slide, they stop dead half way down.
+ *
+ * So this stays the backstop and the gate stays the proof: the runtime limit
+ * keeps its headroom, and `expectNoTeleport` asserts that nothing a body can
+ * actually reach comes within a factor of two of it. The tighter number would
+ * move the guarantee from a surveyed fact to a hard-coded hope — and the two
+ * defects this file has now had both came from a number that was believed
+ * rather than surveyed.
  */
 export const UNDERCROFT_MAX_STEP = UNDERCROFT_MAX_TRAVEL * MAX_WALKABLE_GRADE;
 
@@ -294,8 +332,34 @@ export const UNDERCROFT_ENTRANCES: readonly UndercroftEntrance[] = [
  */
 export const MOUTH_OFFSET = 1.4;
 
-/** The z of the near mouth. Fixed, because the near end of the street is. */
+/** The z of the near mouth, where the near end of the street is. */
 export const NORTH_MOUTH_Z = -12;
+
+/**
+ * The near mouth, held clear of the Arcade however short the street gets.
+ *
+ * `NORTH_MOUTH_Z` is a literal because the NEAR end of the street does not
+ * move — but the FAR end does, and the plaza comes with it. Below three
+ * storefronts `streetDepthFor` bottoms out at -6.5, which puts the Arcade at
+ * z = -14.5 with a rotated half-depth of 5.2, and its box then covers the
+ * mouth's: the north way down is inside a building and unreachable. An empty
+ * database and a degraded `/marketplace/combined` both produce exactly that
+ * store count, so it is not a hypothetical shape of the data.
+ *
+ * Non-overlap of two axis-aligned boxes on this axis is `|Δz| ≥ hz(a) + hz(b)`,
+ * and the mouth is pushed north of the Arcade's near face by that plus one
+ * `OBSTACLE_PAD` — the same air the resolver keeps between a body and a wall.
+ * Not decoration: at exactly `hz + hz` the two boxes touch, and `6.9 < 6.9` is
+ * a question about the last bit of a double rather than about the city.
+ *
+ * `Math.max` and not a clamp: at every store count the street actually ships
+ * with, the plaza is a hundred metres away and this returns `NORTH_MOUTH_Z`
+ * unchanged.
+ */
+export function northMouthZFor(storeCount: number): number {
+  const arcadeNearFace = plazaZFor(storeCount) + venueFootprint("arcade").hz;
+  return Math.max(NORTH_MOUTH_Z, arcadeNearFace + venueFootprint("undercroft").hz + OBSTACLE_PAD);
+}
 /**
  * The far mouth, measured from the street's far end — the same way the tower,
  * the monument, the Arcade and the Bank are all measured.
@@ -323,9 +387,59 @@ export interface StreetMouth {
  */
 export function streetMouthsFor(storeCount: number): StreetMouth[] {
   return [
-    { id: "north", x: -(ALLEY_X + MOUTH_OFFSET), z: NORTH_MOUTH_Z },
+    { id: "north", x: -(ALLEY_X + MOUTH_OFFSET), z: northMouthZFor(storeCount) },
     { id: "south", x: ALLEY_X + MOUTH_OFFSET, z: streetDepthFor(storeCount) + SOUTH_MOUTH_Z_OFFSET },
   ];
+}
+
+/* ------------------------------------------------- coming back up the ramp */
+
+/**
+ * HOW FAR UP THE ALLEY A RETURNING VISITOR STANDS, and why it is measured
+ * along z rather than out from the kiosk.
+ *
+ * `/undercroft` links back to `/city?from=__undercroft__`, and the street
+ * spawns the body beside the north mouth. The mouth is a solid piece of street
+ * furniture — `venueFootprint("undercroft")`, 1.7 half-extents, plus the
+ * resolver's 0.5 m of air — so anything inside 2.2 m of its centre is inside
+ * the box the visitor just walked out of. The first cut spawned at 1.4 m and
+ * `resolveObstacles` shoved the body 0.80 m sideways on its very first frame.
+ *
+ * ACROSS THE ALLEY THERE IS NOWHERE TO PUT IT. The mouth stands `MOUTH_OFFSET`
+ * outboard of the alley's centreline, and `ALLEY_PROP_LANE` — every dumpster,
+ * crate, pipe run and fire escape `BackAlley` draws — starts 1.1 m inboard of
+ * it. That leaves the x axis a window 0.3 m wide between "inside the kiosk"
+ * and "inside a dumpster", which is not a place to stand, it is a coincidence
+ * waiting to be edited away.
+ *
+ * ALONG THE ALLEY THERE IS ALL THE ROOM THERE IS. Standing the body ON the
+ * centreline puts it the full `MOUTH_OFFSET` clear of the prop lane and as far
+ * from the shop backs as the alley allows, and the clearance from the kiosk is
+ * then bought in z, where nothing else is competing for the space. Which is
+ * also, word for word, what the comment at the call site always claimed was
+ * happening.
+ */
+export const RETURN_SPAWN_CLEARANCE = 0.8;
+
+export interface StreetReturnSpawn {
+  position: [number, number, number];
+  yaw: number;
+}
+
+/**
+ * Where the street puts a body that has just come back up the given mouth.
+ *
+ * `+z` is up-alley towards the district entrance for both mouths, so a visitor
+ * surfaces facing the kiosk with the rest of the city behind them — the same
+ * "out of the door, turned to look at what you left" that `__scada__` uses.
+ */
+export function streetReturnSpawn(m: StreetMouth, eye: number = UNDERCROFT_EYE): StreetReturnSpawn {
+  const half = venueFootprint("undercroft").hz;
+  return {
+    position: [Math.sign(m.x) * ALLEY_X, eye, m.z + half + OBSTACLE_PAD + RETURN_SPAWN_CLEARANCE],
+    // Looking back down the alley at the mouth: 0 faces -z.
+    yaw: 0,
+  };
 }
 
 /** Is (x,z) on this rectangle at all? The deck is a rectangle, not a fade. */

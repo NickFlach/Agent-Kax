@@ -109,8 +109,72 @@ export function rigStepFor(speed: number): number {
   return speed * RIG_DT_CLAMP;
 }
 
+/**
+ * THE FURTHEST A SINGLE FRAME MAY MOVE THE BODY, whatever the input was.
+ *
+ * `speed` was never actually a speed limit. Walking obeyed it, but the wheel
+ * did not: `scrollMove` accumulated a whole `scrollStep` per wheel event and
+ * the rig spent the entire accumulated sum in one frame, on top of the walk and
+ * unclamped. One notch was 2.2 m; a trackpad flick was as long as the flick.
+ *
+ * That is not a cosmetic bug, because `resolveObstacles` is a POINT test with
+ * no swept check, and it resolves to whichever side of a box's CENTRE the
+ * proposal landed on. A frame longer than a box's half-span therefore carries
+ * the body across the centre and the resolver pushes it out the FAR side —
+ * through the wall, deliberately, as fast as you like. Every guard in the
+ * Undercroft has a half-span of `half + OBSTACLE_PAD`, thinnest at the railings
+ * (0.15 + 0.5 = 0.65 m), so one notch went through any of them.
+ *
+ * So a frame's total ground-plane travel is capped HERE, at the distance
+ * walking already covers — the number every piece of geometry in the city was
+ * sized against (`DECK_CLEARANCE`, the guard windows, the ramp blend). The
+ * scroll is not discarded: the rig spends what fits in the frame's remaining
+ * budget and CARRIES the rest, so a notch still delivers its full 2.2 m, over
+ * about seven frames at 60 Hz instead of in one. What it can no longer do is
+ * make a frame longer than the rig's own speed allows.
+ *
+ * ANYTHING THAT SIZES ITSELF AGAINST A FRAME MUST READ THIS, not `rigStepFor`.
+ * They are the same number today and they are not the same claim: one is how
+ * far walking moves you, the other is how far ANY input can, and it is the
+ * second one that decides how thin a wall may be.
+ */
+export function rigMaxTravelFor(speed: number): number {
+  return rigStepFor(speed);
+}
+
+/**
+ * Is this box thick enough that a frame cannot step across its centre?
+ *
+ * The city-wide statement of the rule above, so a scene can be checked against
+ * it rather than trusted: an obstacle whose thinner half-span does not exceed
+ * one frame's travel is a wall the rig can walk through on purpose.
+ */
+export function isTunnelProof(o: FpsObstacle, maxTravel: number, pad: number = OBSTACLE_PAD): boolean {
+  return Math.min(o.hx, o.hz) + pad > maxTravel;
+}
+
 function clampTo(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * Hold a ground-plane position inside the walls.
+ *
+ * THE BOUNDS WERE APPLIED TO THE PROPOSAL AND NOT TO THE RESULT. `stepMove`
+ * clamped the proposed (x,z) and then handed it to `resolveObstacles`, which
+ * pushes a body OUT to `centre ± (half + OBSTACLE_PAD)` — a face that is
+ * outside the bounds whenever a box straddles one. The Undercroft's outer
+ * cutting wall does exactly that: its outward face sits at -13.100 against a
+ * `minX` of -12.900, and 154 reachable cells stood 0.2 m past the drawn ground
+ * with nothing under them.
+ *
+ * So the clamp runs again after every resolution. It is applied LAST on
+ * purpose: a position outside the world is always wrong, while a position
+ * inside a box's PAD is merely close to a wall — the pad is air, not stone.
+ */
+function clampPos(p: GroundPos, bounds: FpsBounds | undefined): GroundPos {
+  if (!bounds) return p;
+  return { x: clampTo(p.x, bounds.minX, bounds.maxX), z: clampTo(p.z, bounds.minZ, bounds.maxZ) };
 }
 
 export interface StepRequest {
@@ -177,11 +241,16 @@ export interface StepResult {
  * 2. `y` CAME FROM THE PROPOSED POSITION TOO, so a body pushed along a wall
  *    stood at the height of the ground it had been refused. Now it comes from
  *    where the body ended up.
+ * 3. THE BOUNDS WERE CHECKED BEFORE THE PUSH AND NEVER AFTER IT. See
+ *    `clampPos`. A box that straddles a bound pushed the body straight through
+ *    the wall of the world, and nothing looked again.
  *
  * When `groundHeight` is absent — the street, the arcade, the bank, the
  * joinery, 0xSCADA, the cafe, every store interior — this is the old loop
- * statement for statement, and `fps-collision.test.ts` checks that
- * differentially rather than asserting it.
+ * statement for statement APART FROM that trailing clamp, and
+ * `fps-collision.test.ts` checks that differentially rather than asserting it:
+ * over a randomised sweep the only inputs on which old and new disagree are
+ * the ones the old loop answered with a position outside the bounds.
  */
 export function stepMove(req: StepRequest): StepResult {
   const { x, y, z, dx, dz, dy, eyeHeight, bounds, obstacles, groundHeight, maxGroundStep } = req;
@@ -199,7 +268,7 @@ export function stepMove(req: StepRequest): StepResult {
   }
 
   if (!groundHeight) {
-    const hit = resolveObstacles(nx, nz, ny, obstacles);
+    const hit = clampPos(resolveObstacles(nx, nz, ny, obstacles), bounds);
     return { x: hit.x, y: ny, z: hit.z, blocked: hit.x !== nx || hit.z !== nz };
   }
 
@@ -208,7 +277,7 @@ export function stepMove(req: StepRequest): StepResult {
   const g0 = groundHeight(x, z, y - eyeHeight);
   const y0 = g0 + eyeHeight;
 
-  const first = resolveObstacles(nx, nz, y0, obstacles);
+  const first = clampPos(resolveObstacles(nx, nz, y0, obstacles), bounds);
   const g1 = groundHeight(first.x, first.z, g0);
 
   if (maxGroundStep !== undefined && Math.abs(g1 - g0) > maxGroundStep) {
@@ -217,8 +286,13 @@ export function stepMove(req: StepRequest): StepResult {
 
   // Legal where it arrives, too. Without terrain this is the same call twice
   // and cannot refuse anything, which is why it is safe for every other scene.
+  //
+  // Clamped for the same reason `first` is, and for one more: an unclamped
+  // second pass would REFUSE every move out of a cell the first clamp had put
+  // the body in, which is a body frozen against the world wall rather than one
+  // held inside it.
   const y1 = g1 + eyeHeight;
-  const second = resolveObstacles(first.x, first.z, y1, obstacles);
+  const second = clampPos(resolveObstacles(first.x, first.z, y1, obstacles), bounds);
   if (second.x !== first.x || second.z !== first.z) {
     return { x, y: y0, z, blocked: true };
   }

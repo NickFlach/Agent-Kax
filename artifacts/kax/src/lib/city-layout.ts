@@ -102,6 +102,24 @@ export function monumentZFor(storeCount: number): number {
   return streetDepthFor(storeCount) + MONUMENT_Z_OFFSET;
 }
 
+/**
+ * The plaza at the street's far end, where the Arcade and the Bank flank the
+ * monument — and how far out from the centreline they stand.
+ *
+ * Here for the same reason `monumentZFor` is: the plaza moves with the street's
+ * end, and anything that has to stay clear of a plaza flank has to be able to
+ * ask where one IS. It was `const plazaZ = streetDepth - 8` inside the scene,
+ * so the Undercroft's north mouth — the only way down at the near end — could
+ * not see it, and at 0, 1 or 2 storefronts the Arcade came far enough up the
+ * street to swallow the mouth whole.
+ */
+export const PLAZA_Z_OFFSET = -8;
+export const PLAZA_FLANK_X = 12.5;
+
+export function plazaZFor(storeCount: number): number {
+  return streetDepthFor(storeCount) + PLAZA_Z_OFFSET;
+}
+
 /* ------------------------------------------------------------- back alleys */
 
 /**
