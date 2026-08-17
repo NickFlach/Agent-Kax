@@ -24,9 +24,15 @@ import { addressToFromSnapshot, type PrintifyClient } from "./printifyClient";
  *   press waits for the first one's answer instead of racing it.
  * - **`printify_order_id IS NOT NULL` is the double-submit guard** and
  *   `released_at IS NOT NULL` the double-release guard.
- * - **`status !== "paid"` refuses.** Charge first, then submit, always: a
- *   Stripe refund is one API call and unwinding a print run is not, and
- *   Printify charges the merchant's own card at submission.
+ * - **`status !== "paid"` refuses, in BOTH steps.** Charge first, then submit,
+ *   always: a Stripe refund is one API call and unwinding a print run is not,
+ *   and Printify charges the merchant's own card at submission. Release checks
+ *   it too, and that is not redundant — it is the only check standing between a
+ *   dispute and a print run. Submission and production are minutes apart by
+ *   design, `charge.dispute.created` lands inside that window, and an order
+ *   read as `paid` at submit is an order whose money may already have gone by
+ *   the time anything is manufactured. Release reads `status` under its OWN
+ *   lock, at its own moment, for exactly that reason.
  * - **A `PrintifyError` is allowed to propagate**, which rolls the transaction
  *   back, so an order the printer rejected keeps its `unfulfilled` state and
  *   its null id and can simply be submitted again once the reason is fixed.
@@ -57,6 +63,7 @@ export type SubmitOutcome =
 
 export type ReleaseOutcome =
   | { kind: "not_found" }
+  | { kind: "not_paid"; order: CommerceOrder }
   | { kind: "not_submitted"; order: CommerceOrder }
   | { kind: "already_released"; order: CommerceOrder }
   | { kind: "released"; order: CommerceOrder; releasedAt: Date; providerStatus: string | null };
@@ -148,6 +155,14 @@ export async function submitCommerceOrder(
  * pressed the button and a sentinel when the worker did; the column is a
  * varchar with no foreign key precisely so the second case does not have to
  * invent a user row to be recorded honestly.
+ *
+ * **`status` is re-read here and it is load-bearing.** Production is the step
+ * that spends money on manufacturing, and it happens minutes — the release hold
+ * — after the submission that checked `paid`. A `charge.dispute.created` or a
+ * `charge.refunded` delivery landing inside that window moves the row to
+ * `chargeback` or `refunded`, and this locked read is the only thing that
+ * notices. Without it the two-step's whole approval window is a window in which
+ * the money can leave and the parcel is printed anyway.
  */
 export async function releaseCommerceOrder(
   database: Db,
@@ -167,6 +182,15 @@ export async function releaseCommerceOrder(
     if (order.releasedAt) {
       return { kind: "already_released", order } as const;
     }
+
+    // Before the mechanics of the two-step, the question the two-step is FOR:
+    // is this still paid for? Checked ahead of `not_submitted` because it is
+    // the more fundamental refusal — an order whose money has been clawed back
+    // must not be manufactured whether or not it ever reached Printify.
+    if (order.status !== "paid") {
+      return { kind: "not_paid", order } as const;
+    }
+
     if (!order.printifyOrderId) {
       // Release is the second half of a two-step, and the first half has not
       // happened. Nothing to send to production, and inventing a submission

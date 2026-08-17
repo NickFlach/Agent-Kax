@@ -772,6 +772,19 @@ router.post("/admin/commerce-orders/:id/release", requirePrintifyEnabled, requir
       case "not_found":
         res.status(404).json({ error: "No such commerce order", reason: "order_not_found" });
         return;
+      case "not_paid":
+        // 409 and the same `not_paid` reason submit answers with, because it is
+        // the same refusal: the money is not there. Release had no such check
+        // until now, which meant an order that had gone to `refunded` or
+        // `chargeback` after submission could still be sent to production by
+        // hand — the manual path had the hole the worker had, and pressing a
+        // button is not a fact about whether the charge stuck.
+        res.status(409).json({
+          error: "That order has not been paid for",
+          reason: "not_paid",
+          orderStatus: outcome.order.status,
+        });
+        return;
       case "not_submitted":
         res.status(409).json({
           error: "That order has not been submitted to Printify yet",

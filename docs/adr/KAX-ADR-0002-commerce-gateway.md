@@ -724,13 +724,25 @@ routes against sibling tables and are never merged.
 6 and the sentence "Printify submission hangs off the paid webhook" under "Settlement is
 webhook-driven" are superseded with it. `POST /api/admin/commerce-orders/:id/submit` creates
 the order at Printify and `POST /api/admin/commerce-orders/:id/release` sends it to
-production; both are idempotent no-ops under `SELECT … FOR UPDATE`, and `submit` refuses
-anything whose `status` is not `paid` at the moment of that locked read. Two steps and not
+production; both are idempotent no-ops under `SELECT … FOR UPDATE`, and **both refuse
+anything whose `status` is not `paid` at the moment of that locked read**. Two steps and not
 one, because the window between them is where a human's eyeballs are simultaneously the
 address-validation backstop and the fraud check — which is what makes shipping v0.1 without
 an address-validation service a decision rather than an omission. The webhook keeps settling
 `commerce_orders.status`, `refunded` and `chargeback` included, so an order whose money has
 gone back stops being submittable.
+
+> **Corrected (#325 follow-up).** The sentence above originally said `submit` refused an
+> unpaid order and said nothing about `release`, and the code matched: `release` checked
+> `released_at` and `printify_order_id` and never read `status` at all. That is a hole and
+> not an omission in the prose. Submission and production are separated by a hold window
+> measured in minutes, `charge.dispute.created` and `charge.refunded` land inside windows
+> like that, and "the money has gone back" therefore has to be re-asked at the moment of
+> production and not inherited from the moment of submission. `release` now reads `status`
+> under its own `FOR UPDATE` and answers `not_paid` — 409 on the admin endpoint, a no-op
+> that burns no attempt in the worker. The clause `status = 'paid'` was added to the
+> worker's release claim query at the same time, but that one is only an optimiser: the
+> locked read is what decides, exactly as on the submit side.
 
 > **Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on.** The paragraph above stays true of
 > every deployment that has not set that flag, which is all of them by default. What it no
@@ -756,16 +768,46 @@ gone back stops being submittable.
 >
 > **The retry policy is the genuinely new decision.** `printifyClient.ts` never retries a
 > write, because a retried submission whose first attempt landed is a second parcel. The
-> worker earns each retry: 429 and 5xx back off exponentially from a minute to a six-hour
-> ceiling; **every other 4xx parks immediately**, because a rejected address is rejected
-> again tomorrow; and a **transport failure parks too**, because it is the one case where we
-> cannot know whether the order was created and only the answer lost, which makes it exactly
-> the case a machine must not retry. Parking sets `fulfillment_attempts` to the ceiling,
-> which every claim query filters on — the order leaves the worker's hands for good and
-> waits for the manual endpoints, which still work on it. Migration 0028 adds the four
-> columns this needs; `fulfillment_last_error` holds the provider's status and code and
-> **never a response body**, because Printify's 4xx bodies quote the offending field back and
-> on this path that field is the buyer's street.
+> worker earns each retry: **429 backs off exponentially** — 2, 4, 8, 16 and 32 minutes
+> between six attempts, so 62 minutes of retrying in total — and **every other 4xx parks
+> immediately**, because a rejected address is rejected again tomorrow. A **transport
+> failure parks too**: status 0 usually means the network is gone, in which case nothing
+> this process can do will resolve the order faster than a human will. Parking sets
+> `fulfillment_attempts` to the ceiling, which every claim query filters on — the order
+> leaves the worker's hands for good and waits for the manual endpoints, which still work on
+> it. Migration 0028 adds the four columns this needs; `fulfillment_last_error` holds the
+> provider's status and code, or one of a small set of fixed literals, and **never a
+> response body**, because Printify's 4xx bodies quote the offending field back and on this
+> path that field is the buyer's street.
+>
+> **Corrected (#325 follow-up): 5xx is not a retryable failure, it is an unknown.** The
+> paragraph above originally grouped 5xx with 429 and called a transport failure "the one
+> case where we cannot know whether the order was created". Both halves were wrong, and the
+> second was wrong in the expensive direction. A 5xx can just as easily come from a backend
+> that created the order and then failed to answer; and a **2xx carrying no order id** —
+> which `printifyClient.ts` raised as a 502 and the worker therefore read as a retryable
+> server error — is worse than unknown, because the request was accepted and the order
+> almost certainly EXISTS. Retrying either one posts a second order against one customer
+> payment: a second parcel, and a second charge to the merchant's own card.
+>
+> So ambiguity is now a first-class outcome and never a retry.
+> `PrintifyAmbiguousSubmissionError` is the signal for "the provider may have created this
+> order and we cannot name it", the no-id path raises it, and it can never satisfy
+> `isRetryable`. Before the worker would resubmit a paid order that still has no
+> `printify_order_id` and whose last marker is ambiguous, it calls
+> `findOrderByExternalId(client_reference)` — which is what `external_id` has been carrying
+> the order's `client_reference` FOR since the first version of this design, and which
+> nothing could read back until now. Found means adopt the id, mark the row submitted, charge
+> no attempt and post nothing. Definitively absent — a completed search that reached the end
+> of the list — means a resubmission creates one parcel rather than a second one. A search
+> that FAILED, including one that ran out of its page budget, resolves nothing: it charges an
+> attempt, keeps the ambiguous marker and looks again next tick, because "we could not look"
+> must never be read as "it is not there".
+>
+> The release pass is deliberately untouched by this. `sendToProduction` is called with an id
+> already on the row, so it cannot raise the ambiguous error, and re-sending an order that is
+> already in production manufactures nothing extra. Ambiguity is a property of naming the
+> order, and release begins by knowing the name.
 >
 > **`GET /api/admin/commerce-orders`** is added with it, because a retry ladder readable only
 > in logs is one nobody can answer "did that order ship?" about. It is `requireAdmin`, and it
@@ -886,6 +928,12 @@ page.**
 > must be idempotent under the order's key and must fail loudly enough to be redelivered; a
 > worker that reads `status = 'paid'` under a row lock on its own clock owes Stripe nothing,
 > retries on its own terms, and can be switched off without touching the settlement path.
+> That sentence describes **both** of the worker's passes and is the reason the release pass
+> was changed to make it true: until the #325 follow-up, `releaseCommerceOrder` never read
+> `status`, so the half of the worker that actually spends money on manufacturing was the
+> half that was not reading the settlement the webhook writes. Reading it under the lock is
+> what lets the worker stay indifferent to Stripe's delivery timing — a dispute that lands
+> at any point before production is seen by the next locked read, whenever that is.
 > The flag is off by default, both endpoints remain, and a deployment gets the manual path
 > unless it says otherwise. See "Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on" above for
 > the retry policy, the release hold window, and what the automation costs.
@@ -2003,7 +2051,9 @@ it and should be done first for that reason as well as for the safety one.
    the shipped handler at `webhooks.ts:156-163`.~~ **SUPERSEDED for the physical path
    (#287)** — see "Superseded for the physical path (#286)". Submission is a **manual
    two-step admin action**, `submit` then `release`, each idempotent under
-   `SELECT … FOR UPDATE` and `submit` gated on `status = 'paid'`. The manual window between
+   `SELECT … FOR UPDATE` and **each gated on `status = 'paid'` read under that lock** — the
+   second half of that gate arrived in the #325 follow-up; see the correction under
+   "Superseded for the physical path (#286)". The manual window between
    them is the fraud and address-validation backstop and is the whole rationale; making it a
    webhook side effect removes it. The webhook keeps settling `commerce_orders.status` —
    `paid` / `payment_failed` off `payment_intent.*`, `refunded` / `chargeback` off
@@ -2018,7 +2068,7 @@ it and should be done first for that reason as well as for the safety one.
 | derived print master | `native_pass` has no print master by definition — and both candidate v0.1 stickers are native passes (900 × 900 or 832 × 832 required against a measured 1024 × 1024), so whichever the operator picks, nothing on the path wants one |
 | `TaxProvider` interface | the ADR's own wording is "before public launch", and one transaction is not a public launch — Stripe Tax as configuration |
 | normalized commerce event | the `commerce_orders` row **is** the event; the event is its projection |
-| reconciliation engine | one order needs poll-on-read, not a drift engine |
+| reconciliation engine | one order needs poll-on-read, not a drift engine. Still cut: the #325 follow-up adds `findOrderByExternalId`, which is a lookup of ONE order by the key we submitted it under and is called only where the alternative is posting it twice. It reconciles nothing on a schedule and compares no state |
 | upscaling, object storage, multi-product | upload-by-URL removes the need, and a sticker needs no upscale at all; upscaling is what v0.2 buys the larger formats with |
 | **posters, and every format above the source's 1024 px** | not deferred by preference — **unreachable**. The smallest poster needs 2700 × 3300 and there is no larger original; 4 × 4 in stickers need 1113 px and miss by 8%. They return with upscaling in v0.2 |
 | trademark / likeness review | no producer exists; replaced by merchant indemnity + takedown |

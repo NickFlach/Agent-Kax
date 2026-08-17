@@ -565,6 +565,38 @@ describe("Printify fulfilment (#287)", () => {
       ).toHaveLength(1);
     });
 
+    it("refuses to release an order whose money has gone back, and calls nobody", async () => {
+      // Submission checks `paid`; release did not, and the two are a hold
+      // window apart. `charge.refunded` and `charge.dispute.*` land inside that
+      // window and move the row — so an operator pressing release on an order
+      // that was paid when they opened the page would manufacture a parcel
+      // against money that is no longer there. The button is not evidence about
+      // the charge, and the locked read is.
+      //
+      // Same 409 and same `not_paid` reason submit answers with, because it is
+      // the same refusal.
+      for (const status of ["refunded", "chargeback", "canceled"]) {
+        const order = await makeOrder();
+        await submit(order.id);
+        expect(outbound, `status ${status}: the submission itself`).toHaveLength(1);
+        await db
+          .update(commerceOrdersTable)
+          .set({ status })
+          .where(eq(commerceOrdersTable.id, order.id));
+
+        const res = await release(order.id);
+        expect(res.status, `status ${status}`).toBe(409);
+        expect(res.body.reason).toBe("not_paid");
+        expect(res.body.orderStatus).toBe(status);
+        expect(outbound, `a ${status} order was sent to production`).toHaveLength(1);
+
+        const after = (await reload(order.id))!;
+        expect(after.releasedAt).toBeNull();
+        expect(after.fulfillmentState).toBe("submitted");
+        outbound = [];
+      }
+    });
+
     it("leaves the release unrecorded when Printify refuses", async () => {
       const order = await makeOrder();
       await submit(order.id);
