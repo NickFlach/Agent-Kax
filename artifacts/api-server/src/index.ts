@@ -7,6 +7,7 @@ import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { startKannakaArtworkResponseScheduler } from "./lib/kannakaArtworkResponse";
 import { startCommerceFulfillmentWorker } from "./lib/commerceFulfillmentWorker";
+import { startCommerceFulfillmentStatusSync } from "./lib/commerceFulfillmentStatusSync";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
@@ -244,6 +245,15 @@ async function warmUpInBackground(): Promise<void> {
   // KAX_PRINTIFY_AUTO_FULFILL are set. The manual admin endpoints are the
   // default fulfilment path either way.
   await runStartupStep("startCommerceFulfillmentWorker", startCommerceFulfillmentWorker);
+  // The read half, and separately opt-in: KAX_PRINTIFY_ENABLED and
+  // KAX_PRINTIFY_STATUS_SYNC. It only ever asks Printify what it already did,
+  // and it is what makes `shipped` and `delivered` reachable at all — before it,
+  // those two states were declared with nothing in the system able to write
+  // either, so a posted parcel and one still on the press read identically.
+  await runStartupStep(
+    "startCommerceFulfillmentStatusSync",
+    startCommerceFulfillmentStatusSync,
+  );
   await runStartupStep("startConstellationBridge", startConstellationBridge);
   // Stripe: create the stripe-replit-sync schema, register the managed
   // webhook, and backfill existing Stripe data. Non-fatal like every other

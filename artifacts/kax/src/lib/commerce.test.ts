@@ -33,8 +33,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ACCOUNT_STATE_RECOURSE,
+  BUYER_STAGE_LABEL,
+  BUYER_STAGE_ORDER,
   CommerceError,
+  FULFILLMENT_LABEL,
+  ORDER_STATUS_LABEL,
   REFUSAL_ADVICE,
+  STALL_NOTE,
   fetchPhysicalOrders,
   fetchPhysicalProducts,
   formatMoney,
@@ -43,9 +48,13 @@ import {
   refusalAdvice,
   shouldReuseReference,
   showsFulfillment,
+  showsTimeline,
+  stageRows,
+  stallNote,
   stepFor,
   submitPurchase,
   type DigitalOrder,
+  type OrderTimeline,
   type PhysicalOrder,
 } from "./commerce";
 import { PURCHASING_STATE_COPY } from "./purchasing";
@@ -495,5 +504,150 @@ describe("the two halves of one history", () => {
     expect(showsFulfillment({ orderStatus: "payment_failed" })).toBe(false);
     expect(showsFulfillment({ orderStatus: "pending_payment" })).toBe(false);
     expect(showsFulfillment({ orderStatus: "canceled" })).toBe(false);
+  });
+});
+
+/**
+ * The stage timeline, client side.
+ *
+ * Two things are worth testing here and the rest is the server's:
+ *
+ * 1. **The words are the SAME words.** The timeline sits two centimetres from
+ *    the fulfilment line on the same card, and a parallel vocabulary would have
+ *    them say "Being printed" and "In production" about one order with nothing
+ *    failing a build. `BUYER_STAGE_LABEL` is assembled from the two existing
+ *    tables by reference, and the assertions below are identity checks against
+ *    those tables rather than against string literals — a test written against
+ *    literals would pass while the two drifted apart.
+ * 2. **Nothing a buyer is shown is a code.** The stall copy is keyed on a stage
+ *    id and interpolates nothing, and the payload it reads has no provider
+ *    status, no HTTP status and no error string in it to interpolate.
+ */
+describe("the stage timeline", () => {
+  function timeline(overrides: Partial<OrderTimeline> = {}): OrderTimeline {
+    return {
+      stages: [
+        { id: "paid", reached: true, at: "2026-08-10T10:00:00.000Z", current: false },
+        { id: "submitted", reached: true, at: "2026-08-10T10:05:00.000Z", current: true },
+        { id: "in_production", reached: false, at: null, current: false },
+        { id: "shipped", reached: false, at: null, current: false },
+        { id: "delivered", reached: false, at: null, current: false },
+      ],
+      current: "submitted",
+      progress: "moving",
+      stalledAt: null,
+      ...overrides,
+    };
+  }
+
+  it("calls each stage exactly what the rest of the page calls it", () => {
+    // Identity against the existing tables, not against literals. Reword
+    // FULFILLMENT_LABEL and the timeline rewords with it; introduce a second
+    // vocabulary and this fails.
+    expect(BUYER_STAGE_LABEL.paid).toBe(ORDER_STATUS_LABEL["paid"]);
+    expect(BUYER_STAGE_LABEL.submitted).toBe(FULFILLMENT_LABEL["submitted"]);
+    expect(BUYER_STAGE_LABEL.in_production).toBe(FULFILLMENT_LABEL["in_production"]);
+    expect(BUYER_STAGE_LABEL.shipped).toBe(FULFILLMENT_LABEL["shipped"]);
+    expect(BUYER_STAGE_LABEL.delivered).toBe(FULFILLMENT_LABEL["delivered"]);
+
+    // And every one of them is a real sentence rather than a column value that
+    // fell through.
+    for (const id of BUYER_STAGE_ORDER) {
+      expect(BUYER_STAGE_LABEL[id], id).toBeTruthy();
+      expect(BUYER_STAGE_LABEL[id], id).not.toContain("_");
+    }
+  });
+
+  it("orders the stages exactly as the server does", () => {
+    // Read out of the server's own source, the same way this file already
+    // checks the refusal vocabulary and the route paths. A stage added on one
+    // side and not the other is a timeline that renders in the wrong order.
+    const source = readServer("lib", "commerceFulfillmentStages.ts");
+    const declared = source.match(/export const BUYER_STAGES = \[([\s\S]*?)\] as const;/);
+    expect(declared, "BUYER_STAGES is no longer declared where this test reads it").not.toBeNull();
+    const serverOrder = [...declared![1]!.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+    expect(serverOrder).toEqual([...BUYER_STAGE_ORDER]);
+  });
+
+  it("renders every stage, marks the current one, and formats only real timestamps", () => {
+    const rows = stageRows(timeline(), (iso) => `formatted:${iso}`);
+
+    expect(rows.map((r) => r.id)).toEqual([...BUYER_STAGE_ORDER]);
+    expect(rows.filter((r) => r.current)).toHaveLength(1);
+    expect(rows.find((r) => r.id === "submitted")!.current).toBe(true);
+    expect(rows.find((r) => r.id === "paid")!.at).toBe("formatted:2026-08-10T10:00:00.000Z");
+    // No invented time on a stage that has not happened.
+    expect(rows.find((r) => r.id === "shipped")!.at).toBeNull();
+    expect(rows.find((r) => r.id === "shipped")!.reached).toBe(false);
+  });
+
+  it("marks the stalled stage on the ROW, not only in a sentence", () => {
+    // The requirement is that a parked order does not LOOK like an in-progress
+    // one. A note at the bottom of a card is not a difference somebody scanning
+    // a list can see, so the stage itself carries the flag.
+    const stalled = stageRows(timeline({ progress: "stalled", stalledAt: "submitted" }));
+    const moving = stageRows(timeline());
+
+    expect(stalled.find((r) => r.id === "submitted")!.stalled).toBe(true);
+    expect(moving.find((r) => r.id === "submitted")!.stalled).toBe(false);
+    // Exactly one, and only the one that stopped.
+    expect(stalled.filter((r) => r.stalled)).toHaveLength(1);
+  });
+
+  it("says where a stalled order stopped, in plain language and never in a code", () => {
+    const note = stallNote(timeline({ progress: "stalled", stalledAt: "paid" }));
+    expect(note).toBe("We could not send this to the printer yet — we are on it.");
+
+    // Every entry, checked for the things that must never be in one. The stored
+    // reason is "429:8251"; the panel's vocabulary contains no digits at all.
+    for (const id of BUYER_STAGE_ORDER) {
+      const copy = STALL_NOTE[id];
+      expect(copy, id).toBeTruthy();
+      expect(copy, id).not.toMatch(/\d/);
+      expect(copy.toLowerCase(), id).not.toContain("printify");
+      expect(copy.toLowerCase(), id).not.toContain("error");
+      expect(copy.toLowerCase(), id).not.toContain("http");
+      // Every one of them ends by saying a human has it, because a parked order
+      // waits for the manual endpoints. "Try again" would be advice that cannot
+      // help.
+      expect(copy.toLowerCase(), id).not.toContain("try again");
+    }
+  });
+
+  it("says nothing at all about an order that is moving normally", () => {
+    expect(stallNote(timeline())).toBeNull();
+    expect(stallNote(timeline({ progress: "stopped" }))).toBeNull();
+    expect(stallNote(null)).toBeNull();
+    expect(stallNote(undefined)).toBeNull();
+  });
+
+  it("still says something when the server reports a stall with no stage", () => {
+    // Defensive: a stalled order the server could not place must not render a
+    // silent card, which is the failure this whole feature replaces.
+    expect(stallNote(timeline({ progress: "stalled", stalledAt: null }))).toBeTruthy();
+  });
+
+  it("shows no timeline for an order with no parcel, and one for every order with a parcel", () => {
+    expect(showsTimeline(timeline({ progress: "none" }))).toBe(false);
+    expect(showsTimeline(timeline())).toBe(true);
+    expect(showsTimeline(timeline({ progress: "stalled" }))).toBe(true);
+    expect(showsTimeline(timeline({ progress: "stopped" }))).toBe(true);
+    // A tab left open across the deploy that added this gets no timeline and no
+    // crash — it falls back to the single fulfilment line it always had.
+    expect(showsTimeline(null)).toBe(false);
+    expect(showsTimeline(undefined)).toBe(false);
+    expect(stageRows(undefined)).toEqual([]);
+  });
+
+  it("renders a stage the payload omits as unreached rather than dropping it", () => {
+    // An older server, or a stage added later. Dropping the row would silently
+    // shorten the timeline; showing it unreached is honest.
+    const partial = timeline({
+      stages: [{ id: "paid", reached: true, at: "2026-08-10T10:00:00.000Z", current: true }],
+      current: "paid",
+    });
+    const rows = stageRows(partial);
+    expect(rows).toHaveLength(BUYER_STAGE_ORDER.length);
+    expect(rows.find((r) => r.id === "delivered")!.reached).toBe(false);
   });
 });

@@ -223,6 +223,39 @@ export interface PrintifyOrderRef {
   status: string | null;
 }
 
+/**
+ * One parcel, in the carrier's terms.
+ *
+ * `deliveredAt` is how delivery is learnt at all: Printify's order lifecycle has
+ * no `delivered` status, so a shipment carrying a `delivered_at` is the only
+ * evidence there is that the thing arrived.
+ */
+export interface PrintifyShipment {
+  carrier: string | null;
+  number: string | null;
+  url: string | null;
+  /** ISO 8601 as the provider sent it. Not parsed here. */
+  deliveredAt: string | null;
+}
+
+/**
+ * A submitted order, read back — and ONLY the four things we are allowed to
+ * keep.
+ *
+ * The live capture of a Printify order carries `address_to` in every projection,
+ * list and detail alike. It is not in this type, so no caller can be handed the
+ * buyer's street by this call and no later widening of a log line can acquire
+ * one: the reduction happens at the parse boundary in `readOrderState` and the
+ * rest of the response is dropped on the floor. `line_items`, `metadata` and the
+ * three money fields are not kept either — this adapter is asking one question.
+ */
+export interface PrintifyOrderState {
+  id: string;
+  /** Printify's own literal, verbatim. `in-production` is a real observed value. */
+  status: string | null;
+  shipments: PrintifyShipment[];
+}
+
 export interface PrintifyClient {
   /** The shop every call below is scoped to. Exposed so callers can report it. */
   readonly shopId: string;
@@ -241,6 +274,17 @@ export interface PrintifyClient {
    * request. See `readOrderPage`.
    */
   findOrderByExternalId(externalId: string): Promise<PrintifyOrderRef | null>;
+  /**
+   * Read one submitted order back, or `null` if Printify does not have it.
+   *
+   * `null` is returned for a 404 and for NOTHING else. That distinction is the
+   * same one `printifyFetch` draws everywhere in this file: a 404 is Printify
+   * answering "there is no such order", which is a fact, while a 429, a 500 or a
+   * dropped connection is Printify not answering at all — and a poller that read
+   * those as "no such order" would be inventing news about somebody's parcel. A
+   * failed read throws, and the caller changes nothing.
+   */
+  getOrder(printifyOrderId: string): Promise<PrintifyOrderState | null>;
 }
 
 /**
@@ -283,6 +327,19 @@ function toPrintifyError(status: number, rawBody: string): PrintifyError {
   return new PrintifyError(status, code, message);
 }
 
+/**
+ * One request to Printify.
+ *
+ * `method` is a parameter because this adapter now READS as well as writes —
+ * `getOrder` asks Printify about an order it already created. It used to be
+ * hard-coded to POST, with `body` in the third position, and the first version
+ * of `getOrder` therefore posted the string `"GET"` as a JSON body to an order
+ * URL. A test asserting the method actually put on the wire is what found that,
+ * which is why the assertion is on the wire and not on the call.
+ *
+ * A GET sends no body and no `Content-Type` — a Content-Type header on a
+ * bodyless request is a lie about a request that does not have one.
+ */
 async function printifyFetch(
   config: PrintifyConfig,
   path: string,
@@ -470,6 +527,69 @@ function readOrderPage(payload: unknown): {
 }
 
 /**
+ * One fetched order, reduced to the four values a status poller may keep.
+ *
+ * **It THROWS on a shape it cannot read rather than returning an empty one**,
+ * and that is the whole point of the function. Returning `{status: null,
+ * shipments: []}` for an unreadable body would hand the poller "no status and no
+ * shipments" — which is exactly what a legitimately unstarted order looks like —
+ * so a parse failure would be indistinguishable from real news, and it would be
+ * stamped onto the row as a successful check. A page we could not understand is
+ * a page we learnt nothing from.
+ *
+ * The captured live response carries exactly these keys per order: `id,
+ * app_order_id, shop_id, address_to, line_items, metadata, total_price,
+ * total_shipping, total_tax, status, shipping_method, created_at,
+ * sent_to_production_at, fulfilment_type, printify_connect,
+ * sales_channel_type_id`. Two of them are read. `address_to` is not one of the
+ * two, and it stops here.
+ *
+ * `shipments` is NOT in that capture — the order it was taken from was
+ * `in-production` and had not shipped — so it is treated as optional throughout:
+ * absent is the normal case and never an error. That is why its absence does not
+ * fail the shape check while a missing `id` does.
+ */
+function readOrderState(payload: unknown): PrintifyOrderState {
+  const obj = (typeof payload === "object" && payload !== null ? payload : {}) as {
+    id?: unknown;
+    status?: unknown;
+    shipments?: unknown;
+  };
+  const id =
+    typeof obj.id === "string" ? obj.id : typeof obj.id === "number" ? String(obj.id) : null;
+  if (id === null) {
+    // Deliberately says nothing about what WAS there. The body is not quoted
+    // back for the same reason `toPrintifyError` drops Printify's `errors`
+    // object: an order body is somebody's address.
+    throw new PrintifyError(502, null, "Printify order response was not in the expected shape");
+  }
+
+  const shipments: PrintifyShipment[] = [];
+  if (Array.isArray(obj.shipments)) {
+    for (const item of obj.shipments) {
+      const s = (typeof item === "object" && item !== null ? item : {}) as {
+        carrier?: unknown;
+        number?: unknown;
+        url?: unknown;
+        delivered_at?: unknown;
+      };
+      shipments.push({
+        carrier: typeof s.carrier === "string" ? s.carrier : null,
+        number: typeof s.number === "string" ? s.number : null,
+        url: typeof s.url === "string" ? s.url : null,
+        deliveredAt: typeof s.delivered_at === "string" ? s.delivered_at : null,
+      });
+    }
+  }
+
+  return {
+    id,
+    status: typeof obj.status === "string" ? obj.status : null,
+    shipments,
+  };
+}
+
+/**
  * A fresh Printify client.
  *
  * Not cached — the configuration is read on every call, the same way
@@ -551,6 +671,31 @@ export function getUncachablePrintifyClient(): PrintifyClient {
         null,
         "Printify order search hit its page budget without reaching the end of the list",
       );
+    },
+
+    async getOrder(printifyOrderId: string): Promise<PrintifyOrderState | null> {
+      // The ONE read in this adapter that is genuinely safe to repeat: it
+      // creates nothing, and the "writes are never retried" rule at the top of
+      // this file is about writes. It is still not retried in a loop here —
+      // the poller simply comes round again — because a provider that is
+      // refusing is a provider whose error budget we are already spending.
+      try {
+        const payload = await printifyFetch(
+          config,
+          `/shops/${config.shopId}/orders/${encodeURIComponent(printifyOrderId)}.json`,
+          "GET",
+        );
+        return readOrderState(payload);
+      } catch (err) {
+        // 404 is Printify ANSWERING: there is no such order in this shop. That
+        // is a fact worth reporting and it is the only failure that becomes
+        // `null`. Everything else — 429, 5xx, a transport failure, a body we
+        // could not parse — is Printify not answering, and is rethrown so the
+        // caller changes nothing about the order rather than inventing news
+        // about somebody's parcel.
+        if (err instanceof PrintifyError && err.status === 404) return null;
+        throw err;
+      }
     },
   };
 }

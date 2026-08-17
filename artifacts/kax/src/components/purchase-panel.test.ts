@@ -357,6 +357,26 @@ describe("the orders page", () => {
     expect(code(ORDERS_PAGE)).toContain("showsFulfillment(order)");
   });
 
+  it("renders the stage timeline, and gets its words from the shared tables", () => {
+    // The page is where the timeline is actually seen. Rendering the stages
+    // from a literal list here — rather than from `stageRows`, whose labels come
+    // from `FULFILLMENT_LABEL` — would put a second vocabulary two centimetres
+    // from the first one on the same card.
+    expect(code(ORDERS_PAGE)).toContain("stageRows(");
+    expect(code(ORDERS_PAGE)).toContain("showsTimeline(order.timeline)");
+    // And the stall sentence comes from the copy table rather than from the
+    // payload, because the payload deliberately has no sentence in it.
+    expect(code(ORDERS_PAGE)).toContain("stallNote(");
+  });
+
+  it("never renders a provider code, a status or an error string to a buyer", () => {
+    // `fulfillment_last_error` is "429:8251" and belongs to an admin. The buyer
+    // endpoint does not select it, and this page must not acquire a way to show
+    // one — including by rendering a raw `providerStatus` if somebody later adds
+    // it to the payload.
+    expect(code(ORDERS_PAGE)).not.toMatch(/lastError|providerStatus|printifyOrderId|fulfillmentAttempts/);
+  });
+
   it("never renders a shipping address", () => {
     // No endpoint on either path returns one, and this is the page that would
     // be the obvious place to add it. The `ship_to_*` snapshot stays on the row.

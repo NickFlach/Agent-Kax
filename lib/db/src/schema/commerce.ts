@@ -192,6 +192,53 @@ export const commerceOrdersTable = pgTable(
     /** When the worker may try again. NULL means "due now". */
     fulfillmentNextAttemptAt: timestamp("fulfillment_next_attempt_at", { withTimezone: true }),
 
+    // ── Printify status sync and the buyer's stage timeline (0030) ─────────
+    //
+    // Only `commerceFulfillmentStatusSync.ts` writes these. They are the second
+    // half of the conversation with the printer: until they existed KAX told
+    // Printify things and never once asked, so `shipped` and `delivered` were
+    // declared above with nothing in the system able to write either.
+
+    /**
+     * Printify's own status literal, verbatim and untranslated — `in-production`
+     * is a real observed value, hyphenated, and it is not a word this schema
+     * declares. Stored raw so a status we have never seen is RECORDED rather
+     * than discarded; the mapping onto `fulfillment_state` is a separate,
+     * revisable decision made in code.
+     *
+     * ADMIN-VISIBLE ONLY. No buyer-facing response carries this column.
+     */
+    providerStatus: varchar("provider_status"),
+    /** When `provider_status` last CHANGED. Not when it was last read. */
+    providerStatusAt: timestamp("provider_status_at", { withTimezone: true }),
+
+    /** The two stage stamps the buyer timeline had no way to show. */
+    shippedAt: timestamp("shipped_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+
+    /**
+     * The parcel in the carrier's terms. Populated together, because a Printify
+     * shipment carries all three in one object and two of the three renders a
+     * tracking line that cannot be followed. Not an address, and returned only
+     * to the account that paid for the order.
+     */
+    trackingCarrier: varchar("tracking_carrier"),
+    trackingNumber: varchar("tracking_number"),
+    trackingUrl: varchar("tracking_url"),
+
+    /**
+     * The positive signal, and the reason this column is separate from
+     * `provider_status_at`.
+     *
+     * Stamped on every completed check — including one that found no change and
+     * including one the provider refused — so that "we looked and it has not
+     * moved" stops being indistinguishable from "nothing has looked in three
+     * days". A worker failing silently once a minute reads exactly like a worker
+     * that was never switched on, and telling those two apart by hand is what
+     * this column exists to make unnecessary. NULL means never checked.
+     */
+    fulfillmentSyncedAt: timestamp("fulfillment_synced_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -207,6 +254,12 @@ export const commerceOrdersTable = pgTable(
     index("commerce_orders_fulfillment_due_idx")
       .on(t.fulfillmentNextAttemptAt)
       .where(sql`released_at is null`),
+    // The status poller's claim query. Partial on the same two predicates the
+    // query itself carries, so the index is guaranteed to imply it, and on
+    // `delivered_at IS NULL` so a delivered order leaves it permanently.
+    index("commerce_orders_status_sync_due_idx")
+      .on(t.fulfillmentSyncedAt)
+      .where(sql`printify_order_id is not null and delivered_at is null`),
   ],
 );
 
