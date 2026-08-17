@@ -30,6 +30,7 @@ import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
 import { streetDepthFor, monumentZFor, venueFootprint } from "@/lib/city-layout";
+import { DirectoryBoard, useCityRooms, BOARD_FOOTPRINT } from "@/components/directory-board";
 
 
 type SceneAgent = {
@@ -1249,6 +1250,7 @@ export default function Marketplace3D() {
   const overflowCount = Math.max(0, allSceneAgents.length - sceneAgents.length);
   const layout = useMemo(() => layoutFor(sceneAgents), [sceneAgents]);
   const [nearby, setNearby] = useState<SceneAgent | null>(null);
+  const cityRooms = useCityRooms();
   const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
   const streetDepth = streetDepthFor(sceneAgents.length);
   const towerZ = streetDepth - 20;
@@ -1256,6 +1258,10 @@ export default function Marketplace3D() {
     () => [
       ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
       { cx: 0, cz: towerZ, hx: 7.8, hz: 7.8 }, // Ghost Signals tower
+      // The directory boards. A sign you can walk through is scenery.
+      { cx: -3.6, cz: 15.5, ...BOARD_FOOTPRINT },
+      { cx: -6.2, cz: -12, hx: BOARD_FOOTPRINT.hz, hz: BOARD_FOOTPRINT.hx },
+      { cx: 6.2, cz: -30, hx: BOARD_FOOTPRINT.hz, hz: BOARD_FOOTPRINT.hx },
       // The monument reads its Z from the same helper the stone does, so the
       // shaft and the thing you walk into cannot drift apart again (#301).
       { cx: 0, cz: monumentZFor(sceneAgents.length), hx: 1.2, hz: 1.2 }, // monument shaft
@@ -1734,6 +1740,15 @@ export default function Marketplace3D() {
         ))}
         <FlaukowskiCafe position={[cafeX, 0.12, cafeZ]} rotation={0} phase={phase} onEnter={() => navigate("/cafe")} />
         <CityProps storeCount={sceneAgents.length} lit={phase.streetlightsOn} />
+
+        {/* Directory boards. The player spawns at z:18 facing 157 units of
+            street with the anchors 110 units away, and until now there was no
+            sign anywhere in the city — the only directory was screen-reader
+            only, which is an accessibility affordance, not a map (#305).
+            One at the mouth facing the walker, one at each cross street. */}
+        <DirectoryBoard position={[-3.6, 0, 15.5]} rotation={0} rooms={cityRooms} heading="KAX CITY" />
+        <DirectoryBoard position={[-6.2, 0, -12]} rotation={Math.PI / 2} rooms={cityRooms} heading="THIS WAY" />
+        <DirectoryBoard position={[6.2, 0, -30]} rotation={-Math.PI / 2} rooms={cityRooms} heading="THIS WAY" />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
         <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
         <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
