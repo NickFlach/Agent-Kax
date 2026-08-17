@@ -242,17 +242,29 @@ async function ensureStripeCustomer(
 }
 
 /**
- * The terms as served, with the digest the acceptance will be recorded under.
+ * The terms as served, with the digest the acceptance will be recorded under,
+ * and the destinations the settings form is allowed to offer.
  *
  * The hash comes out with the document deliberately: a client that shows the
  * words can show what they hash to, and the value it is told is the value the
  * server will write. Nothing it sends back can change either.
+ *
+ * `supportedCountries` rides along for the same reason and at no extra round
+ * trip, because the desk already has to fetch this before it can show the
+ * terms. The destination list is a server fact — `AddressBody` below refuses
+ * anything outside it and `derivePurchasingState` calls an address outside it
+ * `unsupported_destination` — and a client that hard-coded its own copy would
+ * either offer a country the PUT then rejects, or keep offering only `US` for
+ * as long as it took somebody to notice that this list had grown. It is the
+ * same constant both of those read, so the country a buyer can pick and the
+ * country we will accept cannot drift apart.
  */
 router.get("/me/purchasing/terms", requireAuth, (_req: Request, res: Response) => {
   res.json({
     version: CURRENT_STORED_CARD_TERMS_VERSION,
     sha256: STORED_CARD_TERMS_SHA256,
     markdown: STORED_CARD_TERMS_MARKDOWN,
+    supportedCountries: SUPPORTED_SHIP_TO_COUNTRIES,
   });
 });
 
@@ -492,7 +504,35 @@ const AddressBody = z.object({
       message: `We can only ship to ${SUPPORTED_SHIP_TO_COUNTRIES.join(", ")} for now`,
     }),
   phone: addressField(40).nullish(),
+  /**
+   * Whether the form that submitted this address had a validator say it was
+   * complete — for the settings desk, Stripe's Address Element reporting
+   * `complete: true` on its own change event.
+   *
+   * The BOOLEAN comes from the client; the NAME of the method does not, in the
+   * same way and for the same reason that `POST /consent` takes a version
+   * string and writes the server's own document hash. A client can only say
+   * "something checked this", never "this was checked by X" — otherwise the
+   * column would record whatever a request cared to claim, and
+   * `validation_method` exists precisely so that a later verification pass can
+   * tell one kind of check from another.
+   *
+   * Optional and defaulted to false, because absence is the honest answer. An
+   * address typed into a form with no validator behind it, or submitted by a
+   * client written before this field existed, is exactly what a null
+   * `validated_at` means: "the buyer typed it and nobody has confirmed it".
+   * Defaulting to true would make the column say the opposite about the same
+   * request.
+   */
+  validated: z.boolean().optional(),
 });
+
+/**
+ * What stamped `validation_method` when the settings desk says an address was
+ * checked. A constant here rather than a string from the request: see the
+ * `validated` field on `AddressBody`.
+ */
+const ADDRESS_VALIDATION_METHOD = "stripe_address_element";
 
 /**
  * An optional line that arrived empty is stored as absent. "" and null mean the
@@ -556,6 +596,13 @@ router.put("/me/purchasing/address", requireAuth, async (req: Request, res: Resp
         postalCode: address.postalCode,
         country: address.country,
         phone: optionalLine(address.phone),
+        // Both columns move together or neither does. A `validated_at` with no
+        // `validation_method` records that something checked the address
+        // without recording what, which is not a fact anyone can act on later;
+        // a method with no timestamp is worse, because it reads as validated
+        // to a query that only tests the method column.
+        validatedAt: address.validated ? now : null,
+        validationMethod: address.validated ? ADDRESS_VALIDATION_METHOD : null,
       });
     });
   } catch (err) {

@@ -49,6 +49,7 @@ export function FirstPersonRig({
   scrollStep = 2.2,
   spawn,
   groundHeight,
+  suspended = false,
 }: {
   eyeHeight?: number;
   speed?: number;
@@ -58,6 +59,22 @@ export function FirstPersonRig({
   scrollStep?: number;
   /** Optional spawn override — e.g. stepping out of the door you entered. */
   spawn?: FpsSpawn | null;
+  /**
+   * Stop the body while something else owns the visitor's attention.
+   *
+   * The checkout desk sets this for the whole of a charge, and the case it
+   * exists for is a bank's 3D Secure challenge: Stripe renders that in a
+   * cross-origin iframe over the canvas, and a player typing a one-time
+   * passcode must not walk out of the shop while doing it. `isTypingTarget()`
+   * now treats a focused IFRAME as typing, which stops the keystrokes being
+   * read as movement — but it cannot stop keys that were already HELD when the
+   * challenge opened, and it says nothing about the pointer. Both are closed
+   * here: held keys are dropped on the rising edge, and the drag is ended.
+   *
+   * Only the movement half stops. Look orientation is still written every
+   * frame, because the camera has to keep pointing where the player left it.
+   */
+  suspended?: boolean;
   /**
    * Optional terrain: ground elevation at (x,z). When provided the camera
    * stands eyeHeight above it every frame — this is what makes STAIRS work:
@@ -95,17 +112,52 @@ export function FirstPersonRig({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spawn, camera]);
 
+  /**
+   * The suspension, readable from the event listeners without re-binding them.
+   *
+   * The listener effect below is keyed on `gl` and the two speeds precisely so
+   * that it binds once for the life of the canvas. Adding `suspended` to its
+   * dependencies would tear down and re-attach every handler at the exact
+   * moment a payment starts, which is when the least should be moving.
+   */
+  const suspendedRef = useRef(suspended);
+  useEffect(() => {
+    suspendedRef.current = suspended;
+    if (!suspended) return;
+    // The rising edge, and everything mid-gesture with it. A key held when the
+    // challenge opened would otherwise still be held when it closes, and a
+    // pointer released over Stripe's own modal never reaches our `pointerup`.
+    keys.current = {};
+    dragging.current = false;
+    scrollMove.current = 0;
+  }, [suspended]);
+
   useEffect(() => {
     const el = gl.domElement;
     const down = (e: KeyboardEvent) => {
       if (isTypingTarget()) return;
+      // Nothing is latched while the body is suspended. `isTypingTarget()` is
+      // usually enough during a bank challenge, because Stripe's iframe holds
+      // focus — but one click on the payment shield (an ordinary div) moves
+      // focus to the body, and from then on a held W is recorded. `useFrame`
+      // early-returns so nothing moves at the time, and the avatar lurches
+      // across the shop the instant the charge finishes. Same reasoning that
+      // already clears `scrollMove` in the suspended branch.
+      if (suspendedRef.current) return;
       keys.current[e.code] = true;
     };
+    // `keyup` is deliberately unconditional: a key released DURING a suspension
+    // must still be cleared, or it is stranded as held when movement resumes.
     const up = (e: KeyboardEvent) => (keys.current[e.code] = false);
     const blur = () => (keys.current = {});
 
     const pDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      // A press that lands on the canvas while suspended must not start a
+      // look-drag. The panel puts a backdrop over the scene, so this is the
+      // second lock rather than the first — and the one that still holds if a
+      // caller suspends without covering anything.
+      if (suspendedRef.current) return;
       dragging.current = true;
       last.current = { x: e.clientX, y: e.clientY };
     };
@@ -155,7 +207,15 @@ export function FirstPersonRig({
       camera.position.y = groundHeight(camera.position.x, camera.position.z) + eyeHeight;
     }
 
-    // Move
+    // Move — unless something else owns the visitor right now.
+    if (suspendedRef.current) {
+      // Cleared rather than left to accumulate: a wheel turned during a bank
+      // challenge would otherwise dolly the camera the instant the charge
+      // finished, which reads as the room lurching on its own.
+      scrollMove.current = 0;
+      return;
+    }
+
     const k = keys.current;
     const fwd = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
     const strafe = (k["KeyD"] || k["ArrowRight"] ? 1 : 0) - (k["KeyA"] || k["ArrowLeft"] ? 1 : 0);

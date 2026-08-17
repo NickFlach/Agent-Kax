@@ -3,6 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import { useParams, useLocation, Link } from "wouter";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   useGetAgentStorefront,
   useGetAgentStorefrontListings,
@@ -13,14 +14,40 @@ import type { Artifact } from "@workspace/api-client-react";
 
 type WallItem = { work: Artifact; curatedBy: string | null };
 import { Button } from "@/components/ui/button";
-import { FirstPersonRig } from "@/components/first-person-rig";
+import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
+import {
+  ARCADE_SLOT_X,
+  ARCADE_Z,
+  BENCH_POSITIONS,
+  DESK_POSITION,
+  DESK_SPAWN,
+  PLANT_POSITIONS,
+  storeObstacles,
+} from "@/lib/room-geometry";
 import { NpcFigure } from "@/components/npc";
+import { TalkableNpc } from "@/components/talkable-npc";
+import { PurchasePanel } from "@/components/purchase-panel";
+import { useAuth } from "@/hooks/use-auth";
+import { isTypingTarget } from "@/lib/is-typing";
+import { fetchPhysicalProducts, formatMoney, type PhysicalProduct } from "@/lib/commerce";
 import { woodFloorTexture, galleryWallTexture, ceilingTexture, repeated } from "@/lib/city-textures";
 import { ArcadeCabinet, PlayOverlay, type PlayableApp } from "@/components/arcade-shared";
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 
 const MAX_WALL_WORKS = 16;
+
+/**
+ * The floor's measurements live in `lib/room-geometry.ts`, not here.
+ *
+ * They are arithmetic — where the desk stands, which boxes the rig collides
+ * against, how far away a clerk will still talk to you — and this module cannot
+ * be imported by the test runner, because everything above pulls in three.js
+ * and @react-three/fiber. Both of the bugs those numbers had (a proximity check
+ * in the wrong coordinate space, an obstacle list missing the arcade cabinets)
+ * were invisible in a render and provable in three lines of arithmetic, so they
+ * live where a Node test can reach them.
+ */
 
 function isImageish(t: string) {
   return t === "image" || t === "furniture";
@@ -461,6 +488,121 @@ function GalleryBench({ position }: { position: [number, number, number] }) {
   );
 }
 
+/**
+ * The checkout desk — the counter you walk up to, and the clerk behind it.
+ *
+ * Geometry modelled on the Joinery's sales desk (`furniture-hall.tsx`), because
+ * a city where two shops build a counter two different ways is a city that
+ * looks assembled. It is NOT the same component, and deliberately: the Joinery
+ * trades in play_credit through `POST /joinery/buy` and this counter charges a
+ * real card through `/api/commerce`. Two economies that look alike must not
+ * share a component, or the day one of them changes hands the other follows
+ * without anybody deciding that. The third desk is the one to extract.
+ *
+ * Nothing here holds a price or a card. The desk's whole job is to be visible,
+ * to be solid, and to say when the visitor is close enough to be served; the
+ * money is in `<PurchasePanel>`, which is plain DOM outside the `<Canvas>`.
+ */
+function CheckoutDesk({
+  position,
+  accent,
+  product,
+  promptLabel,
+  onRangeChange,
+  near,
+  active,
+  onOpen,
+}: {
+  position: [number, number, number];
+  accent: string;
+  /** The one thing on sale here, or null when this shop prints nothing. */
+  product: PhysicalProduct | null;
+  promptLabel: string;
+  onRangeChange: (inRange: boolean) => void;
+  /** True while the visitor is close enough to be served. */
+  near: boolean;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <group
+      position={position}
+      // No `rotation`. See DESK_OBSTACLE: the collision box has no rotation
+      // term, so the desk is square to the room and its box is honest.
+      onClick={(e: { stopPropagation?: () => void; delta?: number }) => {
+        // A look-drag that happened to end on the counter is not a click. The
+        // door and the video frames already guard this; a drag that opened a
+        // payment panel would be worse than either.
+        if ((e.delta ?? 0) > 5) return;
+        // Same proximity rule as the E key. A raycast has no distance limit, so
+        // without this the counter is clickable from the far end of the
+        // gallery — and the walk-away effect cannot undo it, because that only
+        // fires when `deskNear` CHANGES and it was already false.
+        if (!near) return;
+        e.stopPropagation?.();
+        onOpen();
+      }}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Counter body and top */}
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <boxGeometry args={[3.0, 1.1, 0.9]} />
+        <meshStandardMaterial color="#4a3521" roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 1.14, 0]}>
+        <boxGeometry args={[3.2, 0.08, 1.05]} />
+        <meshStandardMaterial color="#5c4530" roughness={0.4} />
+      </mesh>
+
+      {/* The clerk, behind the counter and facing the doors.
+          Addressable only when there is something to sell. A prompt that opens
+          a panel with no product in it would be the desk promising a purchase
+          the shop cannot make; a shop that prints nothing keeps the attendant
+          it has always had, standing where an attendant belongs. */}
+      {product ? (
+        <TalkableNpc
+          position={[0, 0, -1.1]}
+          rotation={Math.PI}
+          color={accent}
+          seed={7}
+          name="Checkout"
+          promptLabel={promptLabel}
+          onRangeChange={onRangeChange}
+          active={active}
+        />
+      ) : (
+        <group position={[0, 0, -1.1]} rotation={[0, Math.PI, 0]}>
+          <NpcFigure color={accent} seed={7} />
+        </group>
+      )}
+
+      {/* The board over the counter. The TITLE is here and the PRICE is not:
+          a price belongs where it re-renders when a fresh quote moves it, and
+          that is the DOM prompt beside the panel. */}
+      <mesh position={[0, 1.85, -0.1]} rotation={[-0.18, 0, 0]}>
+        <boxGeometry args={[2.6, 0.55, 0.06]} />
+        <meshStandardMaterial color="#f2ede2" roughness={0.9} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text
+          position={[0, 1.95, -0.02]}
+          rotation={[-0.18, 0, 0]}
+          fontSize={0.11}
+          color="#3a332c"
+          font={DISPLAY_FONT}
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={2.4}
+          textAlign="center"
+        >
+          {product ? `CHECKOUT\n${product.title.slice(0, 40)}` : "CHECKOUT\nNO PRINTS FROM THIS SHOP YET"}
+        </Text>
+      </Suspense>
+    </group>
+  );
+}
+
 export default function StoreInterior() {
   const { slug } = useParams<{ slug: string }>();
   const [, navigate] = useLocation();
@@ -499,6 +641,8 @@ export default function StoreInterior() {
   // Step up to a cabinet: the game takes over the screen in an arcade-chrome
   // overlay (the apps are self-contained HTML — they run right here). Esc or
   // STEP AWAY returns you to the store; keyboard goes to the game while open.
+  // Declared before the desk because the desk's E handler stands down while a
+  // game owns the screen.
   const [playing, setPlaying] = useState<PlayableApp | null>(null);
   useEffect(() => {
     if (!playing) return;
@@ -508,6 +652,147 @@ export default function StoreInterior() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [playing]);
+
+  // ── The checkout desk ──────────────────────────────────────────────────
+
+  const { purchasing } = useAuth();
+
+  /**
+   * The artifacts the desk could be selling prints of: the ones actually hung.
+   *
+   * `commerce_products` is keyed on an artifact, and there is no "products for
+   * this shop" endpoint — `GET /commerce/products/for-artifact/:id` is the only
+   * read there is. The walls are the right bound anyway: what is on display is
+   * what the clerk sells, and a print of a piece that is not in the room would
+   * be a thing the shop offers with nothing to point at.
+   */
+  const wallArtifactIds = useMemo(
+    () => wallItems.map((it) => Number(it.work.id)).filter((id) => Number.isInteger(id) && id > 0),
+    [wallItems],
+  );
+
+  /**
+   * What this shop can print, in the order the works hang.
+   *
+   * One batch when the walls settle, and one only. A failed probe resolves to
+   * "this piece has no print" rather than rejecting the batch: a single 500 on
+   * one artifact must not empty a counter that has something to sell, and
+   * `fetchPhysicalProducts` already turns the interesting failure — a 404,
+   * which is what the whole surface answers with commerce switched off — into
+   * an empty list.
+   */
+  const { data: deskProducts } = useQuery({
+    queryKey: ["commerce", "store-products", slug, wallArtifactIds],
+    queryFn: async () => {
+      const perArtifact = await Promise.all(
+        wallArtifactIds.map((id) => fetchPhysicalProducts(id).catch(() => [] as PhysicalProduct[])),
+      );
+      return perArtifact.flat();
+    },
+    enabled: wallArtifactIds.length > 0,
+    retry: false,
+    /**
+     * Never yank the counter out from under an open purchase.
+     *
+     * The app uses a bare `new QueryClient()`, so `refetchOnWindowFocus` is on
+     * and `staleTime` is 0 — and returning to this tab is precisely what a 3D
+     * Secure challenge and a trip to the settings tab both end with. Every
+     * probe is wrapped in `.catch(() => [])`, so one transient blip on the
+     * refetch resolves to an empty list, `deskProduct` becomes null and the
+     * panel mounted under it unmounts mid-charge.
+     *
+     * `keepPreviousData` covers the same window for a change of query KEY: the
+     * key carries `wallArtifactIds`, which moves whenever the walls resettle.
+     */
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+  });
+
+  /**
+   * The one SKU on the counter.
+   *
+   * v0.1 is one product, quantity one — variants and a cart are explicitly not
+   * being built — so the desk offers the first print of the first hung work
+   * that has one (the server orders an artifact's products cheapest first). A
+   * shop with two prints sells both from the 2D page, which is the surface with
+   * room for a list and the one a keyboard can reach.
+   */
+  const deskProduct = deskProducts?.[0] ?? null;
+
+  const [deskNear, setDeskNear] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  /**
+   * True from the moment the panel touches the network until it stops.
+   *
+   * Drives the rig's `suspended` prop and the backdrop below. The panel reports
+   * a superset of "a charge is in flight" on purpose — standing still for the
+   * extra half second a quote takes costs nothing, and a rig that resumed
+   * between two steps of one purchase would be the bug this exists to prevent.
+   */
+  const [paymentBusy, setPaymentBusy] = useState(false);
+
+  /**
+   * No panel on screen, no suspension. The second lock on the soft-lock.
+   *
+   * `paymentBusy` is otherwise written only by the panel's `onBusyChange`, so
+   * any path that unmounts the panel while it is true strands the rig
+   * `suspended` and the E handler dead with no way back but a reload. The
+   * panel now releases it on unmount itself; this holds even if some future
+   * caller forgets, because the condition is read from what is RENDERED rather
+   * than from the panel's cooperation.
+   */
+  useEffect(() => {
+    if (!(deskProduct && panelOpen)) setPaymentBusy(false);
+  }, [deskProduct, panelOpen]);
+
+  const buyable = purchasing?.state === "ready" || purchasing?.state === "card_expiring";
+  // The verb over the clerk's head. The server's derived state decides it and
+  // this page never computes one: an account that has to fix something is
+  // offered a checkout to fix it in, and only a ready account is promised a buy.
+  const promptLabel = buyable ? "[ E ] BUY" : "[ E ] CHECKOUT";
+
+  // E at the desk, in the city's one grammar for it. Same as the Joinery's:
+  // window keydown, typing wins, proximity gates it, and the browser's own
+  // meaning for the key is suppressed.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
+      // Never while money is moving. The panel is waiting on a bank or a poll,
+      // and E is a toggle — closing it would drop the reference that is the
+      // only thing keeping one press of Buy to one charge. Never over a game
+      // either: the arcade overlay owns the screen while it is up.
+      if (paymentBusy || playing) return;
+      if (e.code === "KeyE" && deskNear) {
+        e.preventDefault();
+        setPanelOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deskNear, paymentBusy, playing]);
+  // Walk away and the counter is behind you. A panel left hanging over the far
+  // end of the gallery is the thing that makes an overlay feel stuck to the
+  // screen rather than attached to the desk.
+  // `panelOpen` is a dependency as well as `deskNear`: keyed on the range alone
+  // this only fires when the range CHANGES, so a panel opened while already far
+  // away would never be closed by it.
+  useEffect(() => {
+    if (!deskNear) setPanelOpen(false);
+  }, [deskNear, panelOpen]);
+
+  // Coming back from sign-in: `?at=desk` puts the visitor where they were.
+  const [spawn, setSpawn] = useState<FpsSpawn | null>(null);
+  useEffect(() => {
+    if (spawn) return; // consume once
+    if (new URLSearchParams(window.location.search).get("at") !== "desk") return;
+    setSpawn(DESK_SPAWN);
+  }, [spawn]);
+
+  // Solid things now depend on the data — the arcade row only exists if this
+  // shop has apps — so the list is built per render count rather than frozen
+  // at module scope.
+  const obstacles = useMemo(() => storeObstacles(apps.length), [apps.length]);
 
   const floorTex = useMemo(() => repeated(woodFloorTexture(), 5, 8), []);
   const wallTex = useMemo(() => repeated(galleryWallTexture(), 6, 2), []);
@@ -554,7 +839,8 @@ export default function StoreInterior() {
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        WASD to walk · Drag to look · Click a piece · EXIT door to leave
+        WASD to walk · Drag to look · Click a piece{deskProduct ? " · E at the desk to buy" : ""} · EXIT door
+        to leave
       </div>
 
       <Canvas
@@ -576,11 +862,18 @@ export default function StoreInterior() {
         <AimedSpot position={[4.5, 7.4, -6]} target={[9.5, 3, -6]} angle={0.9} penumbra={0.7} intensity={70} color="#ffedcb" />
         <pointLight position={[0, 6.5, 4]} intensity={28} distance={26} color="#ffe9c8" />
 
-        {/* First-person: drag looks from where you stand, WASD walks. */}
+        {/* First-person: drag looks from where you stand, WASD walks.
+            `suspended` is the whole answer to a bank challenge in a WebGL
+            view: Stripe renders 3D Secure in a cross-origin iframe over this
+            canvas, and a player typing a one-time passcode must not strafe
+            across the shop while doing it. */}
         <FirstPersonRig
           eyeHeight={2.2}
           speed={8}
           bounds={{ minX: -8.8, maxX: 8.8, minZ: -13.8, maxZ: 8.6, minY: 1.7, maxY: 6.8 }}
+          obstacles={obstacles}
+          spawn={spawn}
+          suspended={paymentBusy}
         />
 
         {/* Floor — oak planks */}
@@ -705,26 +998,39 @@ export default function StoreInterior() {
           </Text>
         </Suspense>
 
-        {/* Furniture + greenery */}
-        <GalleryBench position={[0, 0, -6]} />
-        <GalleryBench position={[0, 0, -1]} />
-        <PottedPlant position={[-8.6, 0, -13.5]} />
-        <PottedPlant position={[8.6, 0, -13.5]} />
-        <PottedPlant position={[-8.6, 0, 8.2]} />
+        {/* Furniture + greenery. The benches are drawn from the same list the
+            rig collides against, so a bench that moves takes its box with it. */}
+        {BENCH_POSITIONS.map((p) => (
+          <GalleryBench key={`${p[0]}-${p[2]}`} position={p} />
+        ))}
+        {PLANT_POSITIONS.map((p) => (
+          <PottedPlant key={`${p[0]}-${p[2]}`} position={p} />
+        ))}
 
-        {/* The gallery attendant near the entrance */}
-        <group position={[3, 0, 6.5]} rotation={[0, -0.6, 0]}>
-          <NpcFigure color={accent} seed={7} />
-        </group>
+        {/* The counter, in line of sight from the doors. The attendant who used
+            to stand loose by the entrance is the clerk behind it. */}
+        <CheckoutDesk
+          position={DESK_POSITION}
+          accent={accent}
+          product={deskProduct}
+          promptLabel={promptLabel}
+          onRangeChange={setDeskNear}
+          near={deskNear}
+          active={panelOpen}
+          onOpen={() => setPanelOpen(true)}
+        />
 
         {/* The arcade corner — the store's live apps as playable cabinets,
             lined up along the front wall flanking the entrance. Clicking one
             starts the game right here (overlay), not the artifact page. */}
-        {apps.map((a, i) => (
+        {/* Drawn from the same slot list the collision pass reads, and capped
+            by it: a cabinet with no slot would be a machine standing where
+            nothing is solid. */}
+        {apps.slice(0, ARCADE_SLOT_X.length).map((a, i) => (
           <ArcadeCabinet
             key={a.id}
             app={{ id: Number(a.id), title: a.title, creatorName: a.creatorName ?? null, thumbnailUrl: a.thumbnailUrl ?? null }}
-            position={[[-7.2, -5.4, 7.2, 5.4][i] ?? -7.2 + i * 1.9, 0, 8.1]}
+            position={[ARCADE_SLOT_X[i]!, 0, ARCADE_Z]}
             rotation={Math.PI}
             seed={i}
             onPlay={(w) => setPlaying(w)}
@@ -769,6 +1075,55 @@ export default function StoreInterior() {
           </Suspense>
         )}
       </Canvas>
+
+      {/* The desk's own prompt, and the PRICE.
+          In the DOM rather than in the sprite over the clerk's head: the sprite
+          is a canvas texture painted when its words change, which is right for
+          a verb and wrong for a number that a fresh quote can move. Here it is
+          ordinary text that re-renders, can be read aloud, and can be selected. */}
+      {deskProduct && deskNear && !panelOpen && !playing && (
+        <div
+          className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 pointer-events-none kax3d-hud px-4 py-2 text-center"
+          data-testid="text-desk-prompt"
+        >
+          <p className="text-[11px] uppercase tracking-[0.3em] text-primary font-bold">
+            {promptLabel} — {formatMoney(deskProduct.totalCents, deskProduct.currency)}
+          </p>
+          <p className="text-[9px] uppercase tracking-widest text-muted-foreground mt-1">
+            {deskProduct.title}
+          </p>
+        </div>
+      )}
+
+      {/* The purchase itself — plain DOM, OUTSIDE the Canvas, a sibling to the
+          arcade overlay. The same component the 2D artifact page mounts: the
+          desk is a second door into one flow, never a second flow.
+
+          The player does not leave this route at any point. `newTab` sends the
+          settings and orders links to a new tab so the room survives the trip,
+          and the panel re-reads the account on `visibilitychange` and `focus`
+          so tabbing back turns Checkout into Buy without a reload. */}
+      {deskProduct && panelOpen && (
+        <>
+          {/* While money is moving: a shield over the scene. The rig is already
+              suspended, so this is not what stops the avatar — it is what stops
+              a click meant for a bank's iframe landing on a painting behind it,
+              and what makes the room read as having stepped back. */}
+          {paymentBusy && (
+            <div className="absolute inset-0 z-30 bg-black/80" aria-hidden="true" data-testid="overlay-payment-shield" />
+          )}
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 w-[min(30rem,92vw)]">
+            <PurchasePanel
+              product={deskProduct}
+              signInReturnTo={`/s/${slug}/room?at=desk`}
+              onBusyChange={setPaymentBusy}
+              onClose={() => setPanelOpen(false)}
+              newTab
+              className="kax3d-hud"
+            />
+          </div>
+        </>
+      )}
 
       {/* Click a cabinet → the game plays right here via the frame proxy. */}
       {playing && (

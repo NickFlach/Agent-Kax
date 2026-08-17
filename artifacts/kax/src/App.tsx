@@ -166,6 +166,7 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
                   { href: "/proposals", label: "Proposals", badge: proposalsPending },
                   { href: "/harvester", label: "Harvester" },
                   { href: "/vault", label: "Vault" },
+                  { href: "/orders", label: "Orders" },
                   ...(isAdmin ? [{ href: "/admin/users", label: "Users" }] : []),
                   { href: "/marketplace", label: "Marketplace" },
                   { href: "/floor", label: "Floor" },
@@ -185,6 +186,7 @@ function AdminChrome({ children }: { children: React.ReactNode }) {
             <NavLink href="/proposals" badge={proposalsPending}>Proposals</NavLink>
             <NavLink href="/harvester">Harvester</NavLink>
             <NavLink href="/vault">Vault</NavLink>
+            <NavLink href="/orders">Orders</NavLink>
             {isAdmin && <NavLink href="/admin/users">Users</NavLink>}
             <div className="w-px h-4 bg-border mx-2" />
             <NavLink href="/marketplace">Marketplace</NavLink>
@@ -227,6 +229,7 @@ const AgentsList = lazy(() => import("@/pages/agents-list"));
 const AgentDetail = lazy(() => import("@/pages/agent-detail"));
 const StorefrontSettings = lazy(() => import("@/pages/storefront-settings"));
 const Inbox = lazy(() => import("@/pages/inbox"));
+const Orders = lazy(() => import("@/pages/orders"));
 const Proposals = lazy(() => import("@/pages/proposals"));
 const BotsPage = lazy(() => import("@/pages/bots"));
 
@@ -320,6 +323,9 @@ function AdminRoutes() {
         <Route path="/vault">
           <RequireAuth><Vault /></RequireAuth>
         </Route>
+        <Route path="/orders">
+          <RequireAuth><Orders /></RequireAuth>
+        </Route>
         <Route path="/admin/users">
           <RequireAuth adminOnly><AdminUsers /></RequireAuth>
         </Route>
@@ -342,6 +348,11 @@ const ADMIN_PATHS = [
   "/proposals",
   "/harvester",
   "/vault",
+  // `/orders` is a signed-in receipts page, so it wears the admin chrome and
+  // sits behind RequireAuth like the rest of them. Omitting it here would leave
+  // the route matching in the public switch, where it would fall through to
+  // NotFound.
+  "/orders",
   "/admin",
 ];
 

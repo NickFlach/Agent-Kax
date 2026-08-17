@@ -53,6 +53,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { db } from "@workspace/db";
 import {
+  artifactsTable,
   commerceOrdersTable,
   commerceProductsTable,
   userPaymentMethodsTable,
@@ -60,7 +61,7 @@ import {
   userShippingAddressesTable,
   usersTable,
 } from "@workspace/db/schema";
-import { and, eq, isNull, like, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/authMiddleware";
 import { CURRENT_STORED_CARD_TERMS_VERSION } from "../lib/purchasingState";
 import { STORED_CARD_TERMS_SHA256 } from "../lib/storedCardTerms";
@@ -321,6 +322,8 @@ describe("physical commerce purchase (#286)", () => {
   let sku: string;
   const userIds: string[] = [];
   const sids: string[] = [];
+  /** Artifacts seeded so a product can point at one. Cleared in afterEach. */
+  const artifactIds: number[] = [];
 
   beforeEach(async () => {
     lastError = null;
@@ -358,6 +361,12 @@ describe("physical commerce purchase (#286)", () => {
     // Orders cascade from users; products do not belong to anyone.
     await cleanupAuthTestData({ userIds: userIds.splice(0), sids: sids.splice(0) });
     await db.delete(commerceProductsTable).where(like(commerceProductsTable.sku, "kax-test-%"));
+    // After the products, though `artifact_id` is ON DELETE SET NULL either
+    // way — a product row that outlived its artifact is exactly the state the
+    // column is nullable for, and it must not be left behind in the dev DB.
+    if (artifactIds.length > 0) {
+      await db.delete(artifactsTable).where(inArray(artifactsTable.id, artifactIds.splice(0)));
+    }
   });
 
   /** An account with everything on file: address, card, consent, Customer. */
@@ -468,6 +477,11 @@ describe("physical commerce purchase (#286)", () => {
         () => request(app).post("/commerce/quote").send({ sku }),
         () => request(app).post("/commerce/purchase").send({ quoteId: "x", clientReference: randomUUID() }),
         () => request(app).get(`/commerce/orders/${randomUUID()}`),
+        () => request(app).get("/commerce/orders"),
+        // The one route with no `requireAuth` behind the gate. Without the
+        // gate covering it, a deployment with commerce off would still publish
+        // its price list — and this is the case that would not fail as a 401.
+        () => request(app).get("/commerce/products/for-artifact/1"),
       ];
       for (const attempt of attempts) {
         expect((await attempt()).status, "anonymous caller").toBe(404);
@@ -1393,6 +1407,189 @@ describe("physical commerce purchase (#286)", () => {
       for (const secret of [ADDRESS.name, ADDRESS.line1, ADDRESS.line2, ADDRESS.city, ADDRESS.phone]) {
         expect(body, `${secret} must not leave the server`).not.toContain(secret);
       }
+    });
+  });
+
+  describe("GET /commerce/orders", () => {
+    /**
+     * The list `/orders` reads. `GET /commerce/orders/:ref` can only answer
+     * about a reference the caller already holds, and a buyer who closed the
+     * tab holds none — so without this endpoint a settled physical order is
+     * unreachable from the application that placed it.
+     */
+    it("lists the caller's own orders, newest first, and nobody else's", async () => {
+      // Owner scope is the whole security property of a list endpoint: the
+      // WHERE clause is the only thing between this response and every order in
+      // the table. Drop it and the second expectation below becomes a body
+      // containing the stranger's reference.
+      const buyer = await readyBuyer();
+      const other = await readyBuyer();
+
+      const older = await seedOrder(buyer.id, {
+        createdAt: new Date(Date.now() - 60 * 60 * 1000),
+      });
+      const newer = await seedOrder(buyer.id, { status: "payment_failed" });
+      const strangers = await seedOrder(other.id);
+
+      const res = await request(app).get("/commerce/orders").set("Cookie", buyer.cookie);
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+
+      const refs = (res.body.orders as Array<{ orderRef: string }>).map((o) => o.orderRef);
+      expect(refs).toEqual([newer.clientReference, older.clientReference]);
+      expect(refs, "another account's order").not.toContain(strangers.clientReference);
+
+      // Both vocabularies, because the page renders one and switches on the
+      // other: `orderStatus` is what happened, `status` is what the tab does.
+      expect(res.body.orders[0]).toMatchObject({
+        orderStatus: "payment_failed",
+        status: "failed",
+        fulfillmentState: "unfulfilled",
+        totalCents: TOTAL_CENTS,
+      });
+    });
+
+    it("returns nothing about where any parcel is going", async () => {
+      // The widest read on this router — every order an account has ever
+      // placed. A `SELECT *` here publishes the whole address snapshot of all
+      // of them at once, which is why the columns are named one at a time.
+      const buyer = await readyBuyer();
+      await seedOrder(buyer.id);
+
+      const res = await request(app).get("/commerce/orders").set("Cookie", buyer.cookie);
+      const body = JSON.stringify(res.body);
+      for (const secret of [ADDRESS.name, ADDRESS.line1, ADDRESS.city, ADDRESS.postalCode]) {
+        expect(body, `${secret} must not leave the server`).not.toContain(secret);
+      }
+      // Anti-vacuity: the response really did carry the order, so the absences
+      // above are absences from something rather than from an empty body.
+      expect(res.body.orders).toHaveLength(1);
+    });
+
+    it("refuses an anonymous caller", async () => {
+      const res = await request(app).get("/commerce/orders");
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe("GET /commerce/products/for-artifact/:artifactId", () => {
+    /**
+     * The discovery read both buying surfaces need. `commerce_products` is keyed
+     * on a SKU, so without this the SKU would have to be a constant in the
+     * client — the same string in two repositories, and a `product_unavailable`
+     * the day an operator renames one.
+     */
+    async function seedArtifact(): Promise<number> {
+      const [artifact] = await db
+        .insert(artifactsTable)
+        .values({
+          externalId: makeTestId("commerce-art"),
+          title: "Commerce Test Piece",
+          creatorName: "Selfheal",
+          publicUrl: "https://example.invalid/piece",
+          artifactType: "image",
+        })
+        .returning({ id: artifactsTable.id });
+      artifactIds.push(artifact!.id);
+      return artifact!.id;
+    }
+
+    it("lists a published product at the same total the quote will charge", async () => {
+      // The shop window and the till have to agree. Both go through
+      // `priceProduct`, and a second sum computed here would be the drift this
+      // asserts against.
+      const artifactId = await seedArtifact();
+      await db
+        .update(commerceProductsTable)
+        .set({ artifactId })
+        .where(eq(commerceProductsTable.sku, sku));
+
+      const res = await request(app).get(`/commerce/products/for-artifact/${artifactId}`);
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(res.body.products).toHaveLength(1);
+      expect(res.body.products[0]).toMatchObject({
+        sku,
+        itemCents: ITEM_CENTS,
+        shippingCents: SHIPPING_CENTS,
+        taxCents: 0,
+        totalCents: TOTAL_CENTS,
+        shipToCountries: ["US"],
+      });
+
+      const buyer = await readyBuyer();
+      const quote = await request(app).post("/commerce/quote").set("Cookie", buyer.cookie).send({ sku });
+      expect(quote.body.totalCents).toBe(res.body.products[0].totalCents);
+    });
+
+    it("is readable without a session", async () => {
+      // `/s/:slug/artifacts/:id` and `/s/:slug/room` are public routes, so a
+      // signed-out visitor has to be able to see that a print exists before
+      // being asked to sign in for it. A `requireAuth` here would make the
+      // panel invisible to exactly the buyer it is trying to recruit.
+      const artifactId = await seedArtifact();
+      await db
+        .update(commerceProductsTable)
+        .set({ artifactId })
+        .where(eq(commerceProductsTable.sku, sku));
+
+      const res = await request(app).get(`/commerce/products/for-artifact/${artifactId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.products).toHaveLength(1);
+    });
+
+    it("hides an unpublished product exactly as the quote refuses one", async () => {
+      // `published` is the only thing that makes a row sellable and it defaults
+      // to false — migration 0026 seeds the sticker unpublished on purpose. A
+      // window that showed it would offer a Buy button the quote then answers
+      // `product_unavailable` to.
+      const artifactId = await seedArtifact();
+      await db
+        .update(commerceProductsTable)
+        .set({ artifactId, published: false })
+        .where(eq(commerceProductsTable.sku, sku));
+
+      const res = await request(app).get(`/commerce/products/for-artifact/${artifactId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.products).toEqual([]);
+
+      const buyer = await readyBuyer();
+      const quote = await request(app).post("/commerce/quote").set("Cookie", buyer.cookie).send({ sku });
+      expect(quote.status).toBe(409);
+      expect(quote.body.reason).toBe("product_unavailable");
+    });
+
+    it("does not answer for an artifact the product is not wired to", async () => {
+      // The seeded product has a null `artifact_id` until an operator wires it.
+      // A filter that fell back to "everything" would print every artifact's
+      // page with somebody else's poster on it.
+      const artifactId = await seedArtifact();
+      const res = await request(app).get(`/commerce/products/for-artifact/${artifactId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.products).toEqual([]);
+    });
+
+    it("never publishes the supplier's identifiers", async () => {
+      // Printify's product and variant ids are our keys for our own catalogue.
+      // They are what an admin endpoint submits an order with, and they have no
+      // business in a public response.
+      const artifactId = await seedArtifact();
+      await db
+        .update(commerceProductsTable)
+        .set({ artifactId, printifyProductId: "kax-test-printify-product", printifyVariantId: "12345" })
+        .where(eq(commerceProductsTable.sku, sku));
+
+      const res = await request(app).get(`/commerce/products/for-artifact/${artifactId}`);
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain("kax-test-printify-product");
+      expect(body).not.toContain("12345");
+      // Anti-vacuity: the product was in the response, so the absences are
+      // absences from something.
+      expect(res.body.products).toHaveLength(1);
+    });
+
+    it("refuses an artifact id that is not one", async () => {
+      // `Number("nonsense")` is NaN, and a NaN reaching a WHERE clause is a 500.
+      const res = await request(app).get("/commerce/products/for-artifact/nonsense");
+      expect(res.status).toBe(400);
     });
   });
 

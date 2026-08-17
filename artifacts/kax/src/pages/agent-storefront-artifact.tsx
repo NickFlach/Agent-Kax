@@ -1,5 +1,6 @@
 import { useParams, Link } from "wouter";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useStorefrontSeo } from "@/lib/storefront-seo";
 import {
   useGetAgentStorefront,
@@ -16,6 +17,8 @@ import { ArtifactCover } from "@/components/artifact-cover";
 import { ShareButtons } from "@/components/share-buttons";
 import { EditionBadge } from "@/components/edition-badge";
 import { StorefrontTheme } from "@/components/storefront-theme";
+import { PurchasePanel } from "@/components/purchase-panel";
+import { fetchPhysicalProducts, physicalProductsQueryKey } from "@/lib/commerce";
 
 export default function AgentStorefrontArtifact() {
   const { slug, id: idStr } = useParams<{ slug: string; id: string }>();
@@ -34,11 +37,41 @@ export default function AgentStorefrontArtifact() {
   const { data: listingsResp } = useGetAgentStorefrontListings(slug, {
     query: { queryKey: getGetAgentStorefrontListingsQueryKey(slug) },
   });
+
+  /**
+   * The physical products printed from this piece, if any.
+   *
+   * This is the accessible purchase path. The 3D room is not keyboard-navigable
+   * — `pages/marketplace-3d.tsx` carries a skip link and a whole storefront
+   * `<nav>` for exactly that reason — so the in-city checkout desk cannot be the
+   * only way to buy a poster. `<PurchasePanel>` below is the same component the
+   * desk mounts; there is one purchase flow and two doors into it.
+   *
+   * `retry: false` because the only interesting failure is a 404, which means
+   * `KAX_COMMERCE_ENABLED` is off and `fetchPhysicalProducts` has already
+   * turned it into an empty list — a page with nothing physical on it, not a
+   * page that failed to load.
+   */
+  const { data: physicalProducts } = useQuery({
+    queryKey: physicalProductsQueryKey(id),
+    queryFn: () => fetchPhysicalProducts(id),
+    enabled: !!id,
+    retry: false,
+  });
   const listing = listingsResp?.listings?.find(
     (l) => l.artifact?.id === id && typeof l.price === "number" && l.price > 0,
   );
   const { toast } = useToast();
   const [buying, setBuying] = useState(false);
+  /**
+   * The DIGITAL path, unchanged.
+   *
+   * A listing sells the file, and it does that through hosted Stripe Checkout
+   * on `routes/store-checkout.ts` — a separate table, a separate Stripe object
+   * and a separate webhook branch from the physical path below. It is a working
+   * flow and this work does not widen it; the two orders are joined nowhere but
+   * on `/orders`, for display.
+   */
   const buy = async () => {
     if (!listing || buying) return;
     setBuying(true);
@@ -169,6 +202,21 @@ export default function AgentStorefrontArtifact() {
             >
               {buying ? "Opening checkout…" : `Buy — $${listing.price!.toFixed(2)}`}
             </button>
+          )}
+          {/* The physical half. One panel per published product — a piece can be
+              a sticker and a poster, and each is its own SKU with its own price
+              and its own shipping. Nothing here spends credits or touches the
+              Joinery: `<PurchasePanel>` talks to `/api/commerce` and to nothing
+              else. */}
+          {(physicalProducts ?? []).length > 0 && (
+            <div className="mt-6 space-y-3">
+              <h3 className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                Take one home
+              </h3>
+              {(physicalProducts ?? []).map((product) => (
+                <PurchasePanel key={product.sku} product={product} />
+              ))}
+            </div>
           )}
           <div className="mt-6">
             <ShareButtons
