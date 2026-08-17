@@ -42,6 +42,16 @@ interface UnifiedStorefront {
   publishedDropCount: number;
   artifactCount: number;
   latestPublishedAt: string | null;
+  /**
+   * When this storefront last INGESTED a work, as opposed to published a
+   * drop. Null on constellation rows, which do not ingest.
+   *
+   * The two are different questions and the street needs the second one: a
+   * store can publish nothing for a year while its agent posts daily, and
+   * `latestPublishedAt` would call it dormant. Every dormancy-keyed decision
+   * downstream reads this instead.
+   */
+  latestIngestAt: string | null;
   claimed: boolean;
   // Constellation-specific extras (null on obc rows)
   phi: number | null;
@@ -72,6 +82,7 @@ router.get("/marketplace/combined", async (_req, res) => {
     publishedDropCount: e.publishedDropCount,
     artifactCount: e.artifactCount,
     latestPublishedAt: e.latestPublishedAt?.toISOString() ?? null,
+    latestIngestAt: e.latestIngestAt?.toISOString() ?? null,
     claimed: e.claimed,
     phi: null,
     consciousnessLevel: null,
@@ -111,6 +122,9 @@ router.get("/marketplace/combined", async (_req, res) => {
       publishedDropCount: 0,
       artifactCount: 0,
       latestPublishedAt: null,
+      // Explicitly null rather than omitted: a missing key and a null key
+      // are different answers, and only one of them survives JSON.
+      latestIngestAt: null,
       claimed: false,
       phi: r.phi,
       consciousnessLevel: r.consciousnessLevel,
