@@ -236,27 +236,50 @@ describe("physical-commerce schema", () => {
     });
   });
 
-  it("seeds the sticker unpublished, at the price the design fixed", async () => {
+  it("prices the sticker as 0027 corrected it, and publishes it only once it can ship", async () => {
+    // This case used to assert 1564 and unpublished, which was the state 0026
+    // seeded and NOT the state the chain leaves. 0027 corrected both, and it
+    // was right to: 1564 was never an item price, it was the all-in retail
+    // figure, so charging it alongside 509 shipping billed $20.73 for a sticker
+    // priced at $15.64. The migration split it 1055 + 509 = 1564, and this
+    // reads the migrations rather than the memory of them.
     const r = await db.execute(sql`
-      SELECT item_cents, shipping_cents, published, printify_product_id, ship_to_countries
+      SELECT item_cents, shipping_cents, published, printify_product_id,
+             printify_variant_id, artifact_id, ship_to_countries
       FROM commerce_products WHERE sku = 'kax-sticker-3.5in'`);
     const row = r.rows[0] as {
       item_cents: number;
       shipping_cents: number;
       published: boolean;
       printify_product_id: string | null;
+      printify_variant_id: string | null;
+      artifact_id: number | null;
       ship_to_countries: string[];
     } | undefined;
     expect(row, "the sticker product was not seeded").toBeDefined();
-    expect(row?.item_cents).toBe(1564);
+    expect(row?.item_cents, "0027 repriced the item line to 1055").toBe(1055);
     expect(row?.shipping_cents).toBe(509);
+    expect(
+      (row?.item_cents ?? 0) + (row?.shipping_cents ?? 0),
+      "the buyer pays the all-in figure the design fixed, once",
+    ).toBe(1564);
     expect(row?.printify_product_id).toBe("6a81f8c84b2b4c5db504b97f");
+    expect(row?.printify_variant_id, "0027 pinned the 3.5in square vinyl variant").toBe("65212");
     expect(row?.ship_to_countries).toEqual(["US"]);
-    // Unpublished on purpose: nothing is sellable until an operator has wired
-    // the artifact up and checked these amounts against a live Printify quote.
-    // A seed that shipped `published = true` would put a real product on sale
-    // the moment KAX_COMMERCE_ENABLED was set.
-    expect(row?.published, "the seeded product is on sale").toBe(false);
+
+    // Publication is CONDITIONAL in 0027, not unconditional, and the condition
+    // is what this asserts: a product with no artwork cannot be quoted and one
+    // with no variant cannot be fulfilled, so the migration publishes only once
+    // both are set. On a database built from the migrations alone there is no
+    // `artifacts` row to point at, so the sticker stays unpublished — and on one
+    // that has the artwork it goes on sale. Asserting either literal would be
+    // asserting which database you happened to run against.
+    expect(
+      row?.published,
+      row?.artifact_id === null
+        ? "a product with no artwork was put on sale"
+        : "the artwork and variant are both wired and the product is still not on sale",
+    ).toBe(row?.artifact_id !== null);
   });
 
   it("defaults a new order to pending_payment and unfulfilled", async () => {

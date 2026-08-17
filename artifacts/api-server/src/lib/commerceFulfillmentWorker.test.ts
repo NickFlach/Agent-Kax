@@ -118,6 +118,94 @@ interface StubResponse {
   textRejects?: string;
 }
 
+/**
+ * One row of `GET /shops/{id}/orders.json`, in the shape a live response
+ * actually has.
+ *
+ * Captured from the real API, and the important thing about it is what is NOT
+ * here: there is **no top-level `external_id`**. Printify does not return one,
+ * in this projection or in `GET /orders/{id}.json`. The value we POST as
+ * `external_id` comes back inside `metadata`, as `shop_order_label`. Fixtures
+ * that invented a top-level `external_id` are what let a lookup which read
+ * `row.external_id` pass every test while matching nothing in production —
+ * where it answered "definitively absent" and authorised a second parcel.
+ *
+ * `externalId` is an OPTIONAL extra here, used only by the case that proves the
+ * fallback still works if a plan or an API version starts sending one.
+ */
+function printifyOrderRow(opts: {
+  id: string;
+  label: string;
+  status?: string;
+  externalId?: string;
+}): Record<string, unknown> {
+  return {
+    id: opts.id,
+    app_order_id: null,
+    shop_id: Number(TEST_SHOP_ID),
+    // A full buyer address on every row, which is why `readOrderPage` lifts
+    // three fields and drops the rest at the parse boundary. On a reconcile
+    // scan most of these belong to OTHER buyers.
+    address_to: {
+      first_name: "Someone",
+      last_name: "Else",
+      country: "US",
+      region: "NY",
+      address1: "500 Not Our Street",
+      city: "New York",
+      zip: "10001",
+    },
+    line_items: [{ variant_id: 65212, quantity: 1 }],
+    metadata: {
+      order_type: "external",
+      shop_order_id: 987654321,
+      shop_order_label: opts.label,
+    },
+    total_price: 354,
+    total_shipping: 509,
+    total_tax: 0,
+    status: opts.status ?? "on-hold",
+    shipping_method: 1,
+    created_at: "2026-08-14 18:02:11+00:00",
+    sent_to_production_at: null,
+    fulfilment_type: "ordinary",
+    printify_connect: { url: null, id: null },
+    sales_channel_type_id: 1,
+    ...(opts.externalId !== undefined ? { external_id: opts.externalId } : {}),
+  };
+}
+
+/**
+ * One page of the order list, envelope and all.
+ *
+ * The envelope is the real one: `current_page`, `last_page` and `total` are the
+ * fields `readOrderPage` now requires as positive evidence that it is looking at
+ * a page it understands, so a fixture that omits them is a fixture asserting the
+ * unparseable-page behaviour whether it meant to or not.
+ */
+function orderListPage(
+  rows: Array<Record<string, unknown>>,
+  opts: { currentPage?: number; lastPage?: number; total?: number } = {},
+): Record<string, unknown> {
+  const currentPage = opts.currentPage ?? 1;
+  const lastPage = opts.lastPage ?? 1;
+  return {
+    current_page: currentPage,
+    data: rows,
+    first_page_url: "https://api.printify.com/v1/shops/x/orders.json?page=1",
+    from: rows.length === 0 ? null : 1,
+    last_page: lastPage,
+    last_page_url: `https://api.printify.com/v1/shops/x/orders.json?page=${lastPage}`,
+    links: [],
+    next_page_url: currentPage < lastPage ? `...page=${currentPage + 1}` : null,
+    path: "https://api.printify.com/v1/shops/x/orders.json",
+    per_page: 50,
+    prev_page_url: currentPage > 1 ? `...page=${currentPage - 1}` : null,
+    to: rows.length === 0 ? null : rows.length,
+    total: opts.total ?? rows.length,
+  };
+}
+
 let outbound: OutboundCall[] = [];
 /** What a submit or a send-to-production (POST) is answered with. */
 let nextResponse: StubResponse = { status: 200, body: "{}" };
@@ -128,7 +216,7 @@ let nextResponse: StubResponse = { status: 200, body: "{}" };
  */
 let nextLookupResponse: StubResponse = {
   status: 200,
-  body: JSON.stringify({ data: [], last_page: 1 }),
+  body: JSON.stringify(orderListPage([])),
 };
 
 function respondWith(status: number, body: unknown): void {
@@ -140,11 +228,19 @@ function respondToLookupWith(status: number, body: unknown): void {
 }
 
 /** One page of Printify's order list holding exactly this order, and nothing else. */
-function lookupFinds(externalId: string, printifyOrderId: string): void {
-  respondToLookupWith(200, {
-    data: [{ id: printifyOrderId, external_id: externalId, status: "on-hold" }],
-    last_page: 1,
-  });
+function lookupFinds(clientReference: string, printifyOrderId: string): void {
+  respondToLookupWith(
+    200,
+    orderListPage([printifyOrderRow({ id: printifyOrderId, label: clientReference })]),
+  );
+}
+
+/** A completed page of somebody else's orders: a genuine, provable absence. */
+function lookupFindsSomebodyElse(): void {
+  respondToLookupWith(
+    200,
+    orderListPage([printifyOrderRow({ id: "printify_order_someone_else", label: randomUUID() })]),
+  );
 }
 
 /** The next POST fails on the body read rather than on the wire or the status. */
@@ -217,7 +313,7 @@ describe("automatic Printify fulfilment", () => {
   beforeEach(async () => {
     outbound = [];
     respondWith(200, { id: "printify_order_1", status: "on-hold" });
-    respondToLookupWith(200, { data: [], last_page: 1 });
+    respondToLookupWith(200, orderListPage([]));
     installFetchStub();
 
     for (const key of ENV_KEYS) priorEnv.set(key, process.env[key]);
@@ -382,8 +478,12 @@ describe("automatic Printify fulfilment", () => {
       const order = await makeOrder();
       await runFulfillmentTickOnce();
 
-      expect(outbound).toHaveLength(1);
-      const call = outbound[0];
+      // Two calls, in this order: the reconcile lookup that proves Printify does
+      // not already have this order, and then the submission.
+      expect(outbound).toHaveLength(2);
+      expect(outbound[0].method).toBe("GET");
+      expect(submitCalls()).toHaveLength(1);
+      const call = submitCalls()[0];
       expect(call.method).toBe("POST");
       expect(call.url).toBe(`https://api.printify.com/v1/shops/${TEST_SHOP_ID}/orders.json`);
       expect(call.authorization).toBe(`Bearer ${TEST_TOKEN}`);
@@ -443,7 +543,10 @@ describe("automatic Printify fulfilment", () => {
 
       const result = await runFulfillmentTickOnce();
       expect(result.parked).toBe(1);
-      expect(outbound).toHaveLength(0);
+      // The reconcile lookup runs first and costs a GET; nothing is POSTED,
+      // which is the property that matters. An unprintable order reaches the
+      // printer not at all.
+      expect(submitCalls()).toHaveLength(0);
 
       const after = (await reload(order.id))!;
       expect(after.fulfillmentAttempts).toBe(MAX_FULFILLMENT_ATTEMPTS);
@@ -460,7 +563,7 @@ describe("automatic Printify fulfilment", () => {
 
       const first = await runFulfillmentTickOnce();
       expect(first.retryScheduled).toBe(1);
-      expect(outbound).toHaveLength(1);
+      expect(submitCalls()).toHaveLength(1);
 
       const afterFailure = (await reload(order.id))!;
       expect(afterFailure.fulfillmentAttempts).toBe(1);
@@ -528,7 +631,7 @@ describe("automatic Printify fulfilment", () => {
       const first = await runFulfillmentTickOnce();
       expect(first.parked).toBe(1);
       expect(first.retryScheduled).toBe(0);
-      expect(outbound).toHaveLength(1);
+      expect(submitCalls()).toHaveLength(1);
 
       const afterFailure = (await reload(order.id))!;
       expect(afterFailure.fulfillmentAttempts).toBe(MAX_FULFILLMENT_ATTEMPTS);
@@ -610,7 +713,9 @@ describe("automatic Printify fulfilment", () => {
 
       const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
       expect(second.reconciled).toBe(1);
-      expect(lookupCalls()).toHaveLength(1);
+      // Two lookups across two ticks: every submission is preceded by one, so
+      // the first tick asked as well and was told the order was not there yet.
+      expect(lookupCalls()).toHaveLength(2);
       expect(submitCalls(), "the same order was posted to Printify twice").toHaveLength(1);
 
       const after = (await reload(order.id))!;
@@ -659,16 +764,14 @@ describe("automatic Printify fulfilment", () => {
       expect(submitCalls()).toHaveLength(1);
 
       // A page of somebody else's orders, and the end of the list.
-      respondToLookupWith(200, {
-        data: [{ id: "printify_order_someone_else", external_id: randomUUID(), status: "on-hold" }],
-        last_page: 1,
-      });
+      lookupFindsSomebodyElse();
       respondWith(200, { id: "printify_order_2", status: "on-hold" });
 
       const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
       expect(second.reconciled).toBe(0);
       expect(second.submitted).toBe(1);
-      expect(lookupCalls()).toHaveLength(1);
+      // One per submission attempt, across both ticks.
+      expect(lookupCalls()).toHaveLength(2);
       expect(submitCalls()).toHaveLength(2);
       expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_2");
     });
@@ -689,7 +792,7 @@ describe("automatic Printify fulfilment", () => {
       const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
       expect(second.reconciled).toBe(0);
       expect(second.retryScheduled).toBe(1);
-      expect(lookupCalls()).toHaveLength(1);
+      expect(lookupCalls()).toHaveLength(2);
       expect(submitCalls(), "resubmitted after a search that answered nothing").toHaveLength(1);
 
       const after = (await reload(order.id))!;
@@ -711,10 +814,13 @@ describe("automatic Printify fulfilment", () => {
       expect(submitCalls()).toHaveLength(1);
 
       // Every page full of other people's orders, and the list never ends.
-      respondToLookupWith(200, {
-        data: [{ id: "printify_order_someone_else", external_id: randomUUID(), status: "on-hold" }],
-        last_page: 999,
-      });
+      respondToLookupWith(
+        200,
+        orderListPage(
+          [printifyOrderRow({ id: "printify_order_someone_else", label: randomUUID() })],
+          { lastPage: 999, total: 49_950 },
+        ),
+      );
       respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
 
       const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
@@ -724,7 +830,7 @@ describe("automatic Printify fulfilment", () => {
       expect((await reload(order.id))!.fulfillmentLastError).toBe("submission_ambiguous");
     });
 
-    it("matches external_id exactly and adopts nobody else's order", async () => {
+    it("matches the label exactly and adopts nobody else's order", async () => {
       // The adopted id is written onto a paid customer's row and is what every
       // later step acts on. A prefix or case-insensitive match here would send
       // somebody else's parcel to production against this buyer's money.
@@ -732,20 +838,214 @@ describe("automatic Printify fulfilment", () => {
       respondWith(200, { status: "on-hold" });
       await runFulfillmentTickOnce();
 
-      respondToLookupWith(200, {
-        data: [
-          { id: "printify_order_prefix", external_id: order.clientReference.slice(0, 8) },
-          { id: "printify_order_upper", external_id: order.clientReference.toUpperCase() },
-          { id: "printify_order_suffixed", external_id: `${order.clientReference}-2` },
-        ],
-        last_page: 1,
-      });
+      respondToLookupWith(
+        200,
+        orderListPage([
+          printifyOrderRow({ id: "printify_order_prefix", label: order.clientReference.slice(0, 8) }),
+          printifyOrderRow({ id: "printify_order_upper", label: order.clientReference.toUpperCase() }),
+          printifyOrderRow({ id: "printify_order_suffixed", label: `${order.clientReference}-2` }),
+        ]),
+      );
       respondWith(200, { id: "printify_order_2", status: "on-hold" });
 
       await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
 
       const after = (await reload(order.id))!;
       expect(after.printifyOrderId, "adopted an order that was not ours").toBe("printify_order_2");
+    });
+
+    it("finds the order by metadata.shop_order_label, which is the only place it comes back", async () => {
+      // BLOCKER 1, stated as a test. The lookup used to read `row.external_id`,
+      // which no Printify response carries: every row yielded null, no page ever
+      // matched, the scan reached the declared last page and the function
+      // answered `null` — "definitively absent" — to the one caller whose next
+      // move was to post the order again. The guard against a duplicate was the
+      // thing guaranteeing one.
+      //
+      // The row below is built by `printifyOrderRow`, which has no top-level
+      // `external_id` key at all. Read `external_id` first and this order is
+      // never found; the submit count goes to two and the customer gets two
+      // stickers on one payment.
+      const order = await makeOrder();
+      respondWith(200, { status: "on-hold" });
+      await runFulfillmentTickOnce();
+      expect(submitCalls()).toHaveLength(1);
+
+      const page = orderListPage([
+        printifyOrderRow({ id: "printify_order_by_label", label: order.clientReference }),
+      ]);
+      expect(
+        (page["data"] as Array<Record<string, unknown>>)[0],
+        "the fixture invented a field Printify does not send",
+      ).not.toHaveProperty("external_id");
+      respondToLookupWith(200, page);
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
+      expect(second.reconciled).toBe(1);
+      expect(submitCalls(), "matched on a field Printify never returns").toHaveLength(1);
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_by_label");
+    });
+
+    it("still matches a top-level external_id if one is ever sent", async () => {
+      // The fallback. No observed response carries `external_id`, but another
+      // Printify plan or a later API version might, and a lookup that ignored it
+      // would miss an order that was right there. Cheap to keep, and the cost of
+      // missing is a second parcel.
+      const order = await makeOrder();
+      respondWith(200, { status: "on-hold" });
+      await runFulfillmentTickOnce();
+
+      respondToLookupWith(
+        200,
+        orderListPage([
+          {
+            ...printifyOrderRow({ id: "printify_order_by_external_id", label: "some-other-label" }),
+            external_id: order.clientReference,
+          },
+        ]),
+      );
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
+      expect(second.reconciled).toBe(1);
+      expect(submitCalls()).toHaveLength(1);
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_by_external_id");
+    });
+
+    it("does not read a page it could not parse as an absence", async () => {
+      // BLOCKER 2. `Array.isArray(obj.data) ? obj.data : []` turned every
+      // envelope the adapter did not recognise — a bare array, a `{}`, an
+      // unexpected wrapper — into a page with no entries, which the pager then
+      // read as the end of the list and reported as "definitively absent".
+      //
+      // Note the contradiction that produced: the SAME empty `{}` raises the
+      // ambiguous error on the POST ("we cannot tell, do not resubmit") and used
+      // to mean "certainly not there, resubmit" on the GET.
+      //
+      // Each shape below is answered to the lookup and must leave the order
+      // unsubmitted, because the only honest answer to a page we cannot read is
+      // that we still do not know.
+      for (const shape of [
+        {},
+        [],
+        { orders: [] },
+        { data: [] },
+        { data: [], last_page: 1 },
+        { data: "nope", current_page: 1, last_page: 1, total: 0 },
+        "<html>502 Bad Gateway</html>",
+      ]) {
+        outbound = [];
+        // A readable, empty page for the FIRST tick, so that the ambiguous
+        // submission below is reached the ordinary way and the unreadable page
+        // is the only thing this iteration changes.
+        respondToLookupWith(200, orderListPage([]));
+        const order = await makeOrder();
+        respondWith(200, { status: "on-hold" });
+        await runFulfillmentTickOnce();
+        expect(submitCalls(), `${JSON.stringify(shape)}: the first submission`).toHaveLength(1);
+
+        respondToLookupWith(200, shape);
+        respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+        const second = await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
+        expect(second.reconciled, `${JSON.stringify(shape)}`).toBe(0);
+        expect(
+          submitCalls(),
+          `an unreadable page (${JSON.stringify(shape)}) was read as an absence`,
+        ).toHaveLength(1);
+
+        const after = (await reload(order.id))!;
+        expect(after.printifyOrderId, `${JSON.stringify(shape)}`).toBeNull();
+        expect(after.fulfillmentLastError, `${JSON.stringify(shape)}`).toBe("submission_ambiguous");
+        // Cleared so the next iteration's order is the only claimable row.
+        await db.delete(commerceOrdersTable).where(eq(commerceOrdersTable.id, order.id));
+      }
+    });
+
+    it("reconciles before a submission even when the row looks untouched", async () => {
+      // BLOCKER 3, and it is the one the marker could never cover. The ambiguity
+      // marker is written AFTER the POST returns, so the failures it exists for
+      // — a crash inside the POST window, an OOM, a pod replaced mid-deploy, a
+      // database that blinked — are exactly the failures that stop it being
+      // written. What is left behind is a row that looks like it was never
+      // tried: null id, zero attempts, null error.
+      //
+      // This is that row, and Printify already has the order. A guard that only
+      // looked when the marker said to would post a second parcel here and
+      // report a clean success.
+      const order = await makeOrder();
+      const before = (await reload(order.id))!;
+      expect(before.printifyOrderId, "the row must look pristine, or this proves nothing").toBeNull();
+      expect(before.fulfillmentAttempts).toBe(0);
+      expect(before.fulfillmentLastError).toBeNull();
+
+      lookupFinds(order.clientReference, "printify_order_from_lost_post");
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const result = await runFulfillmentTickOnce();
+      expect(result.reconciled).toBe(1);
+      expect(result.submitted).toBe(0);
+      expect(lookupCalls(), "submitted without asking whether Printify already had it").toHaveLength(1);
+      expect(submitCalls(), "a lost POST became a second parcel").toHaveLength(0);
+
+      const after = (await reload(order.id))!;
+      expect(after.printifyOrderId).toBe("printify_order_from_lost_post");
+      expect(after.fulfillmentState).toBe("submitted");
+    });
+
+    it("still submits a clean order, having looked first", async () => {
+      // The positive control for the case above: reconciling unconditionally
+      // must not mean submitting nothing. A fresh paid order gets one lookup,
+      // which completes and proves absence, and then exactly one submission —
+      // in that order, which is the assertion.
+      const order = await makeOrder();
+
+      const result = await runFulfillmentTickOnce();
+
+      expect(result.submitted).toBe(1);
+      expect(lookupCalls()).toHaveLength(1);
+      expect(submitCalls()).toHaveLength(1);
+      expect(outbound[0].method, "posted before asking").toBe("GET");
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_1");
+    });
+
+    it("does not submit a never-tried order when the lookup itself fails", async () => {
+      // The cost of reconciling unconditionally, stated honestly: while
+      // Printify's list endpoint is unwell, nothing is submitted at all. That is
+      // the safe direction — a delayed parcel is recoverable and a duplicate one
+      // is not — and the marker says so in plain words rather than claiming an
+      // ambiguity that never happened, because nothing was posted.
+      const order = await makeOrder();
+      respondToLookupWith(503, { code: 503, message: "Service unavailable" });
+
+      const result = await runFulfillmentTickOnce();
+      expect(result.retryScheduled).toBe(1);
+      expect(submitCalls()).toHaveLength(0);
+
+      const after = (await reload(order.id))!;
+      expect(after.printifyOrderId).toBeNull();
+      expect(after.fulfillmentAttempts).toBe(1);
+      expect(after.fulfillmentLastError).toBe("reconcile_unavailable");
+    });
+
+    it("does not let a failed lookup erase an ambiguity it cannot resolve", async () => {
+      // The marker-overwrite hole, from the other side. A row that already says
+      // "a submission may be sitting at Printify" must not be downgraded to
+      // "we could not look" by a lookup that failed — the second is a weaker
+      // claim, and an operator reading it would act on the wrong one.
+      const order = await makeOrder();
+      respondWith(200, { status: "on-hold" });
+      await runFulfillmentTickOnce();
+      expect((await reload(order.id))!.fulfillmentLastError).toBe("submission_ambiguous");
+
+      respondToLookupWith(503, { code: 503, message: "Service unavailable" });
+      await runFulfillmentTickOnce(new Date(Date.now() + 10 * MINUTE_MS));
+
+      expect(
+        (await reload(order.id))!.fulfillmentLastError,
+        "a real ambiguity was overwritten by a weaker marker",
+      ).toBe("submission_ambiguous");
     });
   });
 

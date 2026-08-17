@@ -8,7 +8,11 @@ import {
   PrintifyNotConfiguredError,
   type PrintifyClient,
 } from "./printifyClient";
-import { releaseCommerceOrder, submitCommerceOrder } from "./commerceFulfillment";
+import {
+  reconcileCommerceOrderSubmission,
+  releaseCommerceOrder,
+  submitCommerceOrder,
+} from "./commerceFulfillment";
 import { logger } from "./logger";
 
 /**
@@ -68,14 +72,25 @@ import { logger } from "./logger";
  * Treating those two as ordinary retryable failures is how one customer payment
  * becomes several parcels and several charges to the merchant's own card.
  *
- * So an ambiguous marker never leads to a resubmission. It leads to a
- * RECONCILIATION: `printify.findOrderByExternalId(clientReference)`, using the
- * `external_id` every submission already carries for precisely this purpose.
- * Found means the order exists — adopt its id, mark the row submitted, charge
- * no attempt and post nothing. Definitively absent means resubmitting is safe.
- * A lookup that FAILED means we still do not know, so it charges an attempt,
- * keeps the ambiguous marker and tries the lookup again next time — a failed
- * lookup is never grounds for a resubmission.
+ * So a submission never happens without a RECONCILIATION first:
+ * `printify.findOrderByExternalId(clientReference)`, using the `external_id`
+ * every submission already carries for precisely this purpose. Found means the
+ * order exists — adopt its id, mark the row submitted, charge no attempt and
+ * post nothing. Definitively absent means submitting is safe. A lookup that
+ * FAILED means we still do not know, so it charges an attempt and tries the
+ * lookup again next time — a failed lookup is never grounds for a submission.
+ *
+ * **That reconciliation runs before EVERY submission, not only before one whose
+ * marker looks ambiguous.** The marker is written after the POST returns, so
+ * the failures it exists for — a crash inside the POST window, an OOM, a
+ * rolling deploy, a database blip — are the failures that stop it being
+ * written. A row that lost its process mid-POST looks untouched (null id, zero
+ * attempts, null error), and a guard keyed on the marker would wave it straight
+ * through to a second parcel. Reconciling unconditionally also closes the
+ * marker-overwrite hole: a marker later replaced by an unrelated failure, or
+ * cleared by an operator, can no longer hide an order that exists, because
+ * nothing reads the marker to decide whether to look. `isAmbiguousMarker`
+ * survives only to tell an OPERATOR what a row means — see `routes/admin.ts`.
  *
  * A transport failure still parks rather than reconciling, and that is a
  * deliberate difference of degree: status 0 usually means the network itself is
@@ -214,7 +229,26 @@ const AMBIGUOUS_SUBMISSION_REASON = "submission_ambiguous";
 const INTERNAL_ERROR_REASON = "internal_error";
 
 /**
+ * What it holds when the pre-submission lookup could not be completed.
+ *
+ * A distinct literal from `AMBIGUOUS_SUBMISSION_REASON`, because it states a
+ * different fact: nothing was posted, so nothing is in doubt at Printify — we
+ * simply declined to post until we could check. Writing the ambiguity literal
+ * here would tell an operator (and `isAmbiguousMarker`) that a submission might
+ * be sitting at Printify when none was ever made, which is a lie in a column
+ * whose whole job is to be believed. It also must not ERASE a real ambiguity,
+ * so `markerAfterFailedLookup` keeps an existing ambiguous marker instead.
+ */
+const RECONCILE_UNAVAILABLE_REASON = "reconcile_unavailable";
+
+/**
  * Does this stored marker mean "we do not know whether Printify has it"?
+ *
+ * **Nothing in the submit path consults this any more.** Reconciliation happens
+ * unconditionally, precisely because the marker cannot be trusted to have been
+ * written; this function's remaining jobs are telling an operator what a row
+ * means at `POST /admin/commerce-orders/:id/submit`, and deciding which marker
+ * survives a failed lookup.
  *
  * Read off `fulfillment_last_error`, which is the only memory the worker keeps
  * between ticks. Three shapes count, and each is here for a reason:
@@ -231,7 +265,7 @@ const INTERNAL_ERROR_REASON = "internal_error";
  * Anything else — `400:8251`, `product_not_printable`, `internal_error` from a
  * pass that never reached the provider, or no error at all — is not ambiguous.
  */
-function isAmbiguousMarker(lastError: string | null): boolean {
+export function isAmbiguousMarker(lastError: string | null): boolean {
   if (lastError === null) return false;
   if (lastError === AMBIGUOUS_SUBMISSION_REASON) return true;
   return /^(0|5\d\d):/.test(lastError);
@@ -458,120 +492,84 @@ async function recordFailure(
   return "park";
 }
 
-/** What a reconciliation pass concluded about one order. */
-type ReconcileOutcome =
-  /** No ambiguous submission to reconcile. Carry on and submit. */
-  | "not_needed"
-  /** Somebody else resolved it first. Post nothing, and count nothing. */
-  | "already_resolved"
-  /** The order was at Printify and its id is now on the row. Post nothing. */
-  | "adopted"
-  /** Proven absent. Nothing was created, so submitting is safe. */
-  | "absent"
-  /** We still do not know. An attempt was charged; do NOT submit. */
-  | "unresolved";
-
 /**
- * Before resubmitting an order whose last attempt was ambiguous, find out.
+ * Which marker a row should carry after a lookup that could not be completed.
  *
- * This is the guard that H1 and H2 come down to. `external_id` has carried the
- * order's `client_reference` since the first submission for exactly this
- * moment, and until now nothing read it back — so "the submission can be found
- * by name" was true of Printify's UI and of no code path at all.
- *
- * The row is re-read rather than trusted from the claim, because the claim's
- * row lock was released when that short transaction committed and another
- * instance may have submitted or reconciled it since. The adoption itself takes
- * a fresh `FOR UPDATE` and re-checks `printify_order_id IS NULL` under it, so
- * two instances that both looked the order up still write one id between them.
+ * A failed lookup adds no information, so it must not destroy any. If the row
+ * already said "a submission may be sitting at Printify", it goes on saying so;
+ * only a row with nothing to lose gets the honest `reconcile_unavailable`.
+ * Overwriting an ambiguity marker with the weaker literal would be the
+ * marker-overwrite hole reopened by the code that closes it.
  */
-async function reconcileAmbiguousSubmission(
-  printify: PrintifyClient,
-  orderId: number,
-  now: Date,
-): Promise<ReconcileOutcome> {
-  const [order] = await db
-    .select({
-      clientReference: commerceOrdersTable.clientReference,
-      printifyOrderId: commerceOrdersTable.printifyOrderId,
-      fulfillmentLastError: commerceOrdersTable.fulfillmentLastError,
-    })
+async function markerAfterFailedLookup(orderId: number): Promise<string> {
+  const [row] = await db
+    .select({ fulfillmentLastError: commerceOrdersTable.fulfillmentLastError })
     .from(commerceOrdersTable)
     .where(eq(commerceOrdersTable.id, orderId))
     .limit(1);
-  if (!order) return "not_needed";
-  // An id already present means somebody — another instance, an operator —
-  // resolved this while we were queued behind them. `submitCommerceOrder`'s own
-  // guard would catch it too; this just saves a pointless provider call.
-  if (order.printifyOrderId !== null) return "already_resolved";
-  if (!isAmbiguousMarker(order.fulfillmentLastError)) return "not_needed";
+  const current = row?.fulfillmentLastError ?? null;
+  return isAmbiguousMarker(current) ? current! : RECONCILE_UNAVAILABLE_REASON;
+}
 
-  let found: Awaited<ReturnType<PrintifyClient["findOrderByExternalId"]>>;
+/**
+ * Ask Printify whether it already has this order. Returns false when the caller
+ * must NOT submit — either because there is nothing to submit, or because we
+ * could not find out.
+ *
+ * The lookup itself and the adoption live in `commerceFulfillment.ts`, shared
+ * with the manual admin endpoint, because the manual endpoint has exactly the
+ * same hole and a second copy of this reasoning is the copy that drifts. What
+ * belongs to the worker, and stays here, is the accounting: which outcome
+ * charges an attempt, which restores the budget, and which literal lands in
+ * `fulfillment_last_error`.
+ */
+async function reconcileBeforeSubmit(
+  printify: PrintifyClient,
+  orderId: number,
+  now: Date,
+  result: FulfillmentTickResult,
+): Promise<boolean> {
+  let outcome: Awaited<ReturnType<typeof reconcileCommerceOrderSubmission>>;
   try {
-    found = await printify.findOrderByExternalId(order.clientReference);
+    outcome = await reconcileCommerceOrderSubmission(db, printify, orderId, now);
   } catch (err) {
     if (err instanceof PrintifyNotConfiguredError) throw err;
-    // The lookup failed, so the submission it was going to reconcile is exactly
-    // as unreconciled as it was a moment ago. The one thing that must not
-    // happen is submitting on the strength of a search that did not finish, so
-    // the marker is kept, an attempt is charged, and the next due tick looks
+    // The lookup failed, so whatever was true a moment ago is still true and
+    // nothing new is known. The one thing that must not happen is submitting on
+    // the strength of a search that did not finish, so an attempt is charged,
+    // the row's marker is preserved if it had one, and the next due tick looks
     // again. Six failed lookups park the row for a human, which is the right
-    // end for an order this process cannot resolve.
-    await recordRetry(orderId, AMBIGUOUS_SUBMISSION_REASON, now);
+    // end for an order this process cannot resolve — including the case where
+    // Printify's list endpoint is down and NOTHING here can safely submit.
+    await recordRetry(orderId, await markerAfterFailedLookup(orderId), now);
     logger.warn(
       { orderId, reason: err instanceof PrintifyError ? errorTag(err) : INTERNAL_ERROR_REASON },
-      "Could not reconcile an ambiguous Printify submission — not resubmitting",
+      "Could not check Printify for an existing order — not submitting",
     );
-    return "unresolved";
+    result.retryScheduled += 1;
+    return false;
   }
 
-  if (found === null) {
-    // A completed search that found nothing. Printify does not have this order,
-    // so the earlier attempt created nothing and submitting again creates one
-    // parcel rather than a second one.
-    return "absent";
+  switch (outcome.kind) {
+    case "absent":
+      // A completed search that found nothing. Printify does not have this
+      // order, so submitting creates one parcel rather than a second one.
+      return true;
+    case "adopted":
+      // Loudly, and with the ids only. This line is how an operator learns that
+      // a parcel was NOT printed twice.
+      logger.warn(
+        { orderId, printifyOrderId: outcome.printifyOrderId },
+        "Adopted an existing Printify order instead of submitting again",
+      );
+      result.reconciled += 1;
+      return false;
+    case "already_submitted":
+    case "not_found":
+      // Somebody else resolved it, or the row went, between the claim and here.
+      // Nothing to post and nothing to count.
+      return false;
   }
-
-  const adopted = await db.transaction(async (tx) => {
-    const [locked] = await tx
-      .select({ printifyOrderId: commerceOrdersTable.printifyOrderId })
-      .from(commerceOrdersTable)
-      .where(eq(commerceOrdersTable.id, orderId))
-      .limit(1)
-      .for("update");
-    // Lost the race between the lookup and the lock. The winner wrote the same
-    // id we were about to write; there is nothing left to do and nothing to
-    // count, and above all nothing to post.
-    if (!locked || locked.printifyOrderId !== null) return false;
-    await tx
-      .update(commerceOrdersTable)
-      .set({
-        printifyOrderId: found.id,
-        fulfillmentState: "submitted",
-        // The provider's clock is not ours to read, so the hold window starts
-        // from the moment we LEARNED the order exists. That is the conservative
-        // direction: it can only delay production, never bring it forward.
-        submittedAt: now,
-        // The submission that was in doubt is no longer in doubt, so the row
-        // gets its budget back exactly as a clean submission would.
-        fulfillmentAttempts: 0,
-        fulfillmentLastError: null,
-        fulfillmentLastAttemptAt: now,
-        fulfillmentNextAttemptAt: null,
-        updatedAt: now,
-      })
-      .where(eq(commerceOrdersTable.id, orderId));
-    return true;
-  });
-
-  if (!adopted) return "already_resolved";
-  // Loudly, and with the ids only. This line is how an operator learns that a
-  // parcel was NOT printed twice.
-  logger.warn(
-    { orderId, printifyOrderId: found.id },
-    "Adopted an existing Printify order for an ambiguous submission instead of submitting again",
-  );
-  return "adopted";
 }
 
 async function submitPass(
@@ -581,21 +579,13 @@ async function submitPass(
 ): Promise<void> {
   for (const orderId of await claimSubmittable(now, BATCH_SIZE)) {
     try {
-      // Reconcile BEFORE submitting, never after. Everything downstream of this
+      // Reconcile BEFORE submitting, never after, and for every order rather
+      // than only for one that looks doubtful. Everything downstream of this
       // line assumes the order is not already at Printify under a name we
       // failed to write down, and that assumption is only true because of it.
-      const reconciled = await reconcileAmbiguousSubmission(printify, orderId, now);
-      if (reconciled === "adopted") {
-        result.reconciled += 1;
-        continue;
-      }
-      if (reconciled === "unresolved") {
-        // The attempt was charged inside the reconciliation, which is where the
-        // decision not to submit was taken.
-        result.retryScheduled += 1;
-        continue;
-      }
-      if (reconciled === "already_resolved") continue;
+      // Counting and attempt-charging for every outcome but "go ahead" happen
+      // inside, which is where the decision not to submit is taken.
+      if (!(await reconcileBeforeSubmit(printify, orderId, now, result))) continue;
 
       const outcome = await submitCommerceOrder(db, printify, orderId);
       switch (outcome.kind) {

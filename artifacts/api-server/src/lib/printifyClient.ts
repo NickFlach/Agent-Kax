@@ -37,10 +37,27 @@ import { createRateLimiter } from "./rateLimit";
  * The sentence above was true and unreachable: `external_id` was written on
  * every submission and nothing in this adapter could read it back, so "look it
  * up in Printify's UI" was the only way to act on it and only a human could.
- * `findOrderByExternalId` pages the shop's order list and matches `external_id`
+ * `findOrderByExternalId` pages the shop's order list and matches that value
  * exactly, which turns "the order may exist and we cannot name it" from a dead
  * end into a question with an answer. `commerceFulfillmentWorker.ts` asks it
- * before it would otherwise resubmit; see `PrintifyAmbiguousSubmissionError`.
+ * before every submission; see `PrintifyAmbiguousSubmissionError`.
+ *
+ * **What it matches on is `metadata.shop_order_label`, and that is not a
+ * detail.** A live response was captured from `GET /v1/shops/{id}/orders.json`
+ * and there is no top-level `external_id` in it — not in the list projection
+ * and not in the detail projection either. The keys each listed order actually
+ * carries are `id, app_order_id, shop_id, address_to, line_items, metadata,
+ * total_price, total_shipping, total_tax, status, shipping_method, created_at,
+ * sent_to_production_at, fulfilment_type, printify_connect,
+ * sales_channel_type_id`. The value we POST as `external_id` comes back inside
+ * `metadata`, as `shop_order_label`. An earlier version of this function read
+ * `row.external_id`, which is `undefined` on every row Printify returns — so
+ * every page yielded no match, the scan ran to the declared last page, and the
+ * function answered `null`, meaning "definitively absent", to a caller whose
+ * next step was to POST the order again. That did not reduce the chance of a
+ * duplicate parcel; it made one certain, and reported success while doing it.
+ * `external_id` is still read as a FALLBACK, because it costs nothing and
+ * another Printify plan or a future API version may populate it.
  *
  * It is a read, so it may be retried freely — but a lookup that FAILS answers
  * nothing, and a caller must never treat a failed lookup as "not there".
@@ -217,6 +234,11 @@ export interface PrintifyClient {
    * search that could not be completed throws instead, because "we did not
    * find it" and "we could not look" must never collapse into the same value
    * on a path whose next step is deciding whether to submit again.
+   *
+   * "Could not be completed" includes a page this adapter could not PARSE. A
+   * page it cannot read is a page it learnt nothing from, and inferring an
+   * absence from one is the same false negative as inferring it from a failed
+   * request. See `readOrderPage`.
    */
   findOrderByExternalId(externalId: string): Promise<PrintifyOrderRef | null>;
 }
@@ -341,50 +363,110 @@ function readOrderRef(payload: unknown, fallbackId?: string): PrintifyOrderRef {
 /**
  * Pages of the shop's order list read before `findOrderByExternalId` gives up.
  *
- * The lookup exists to find a submission made minutes ago, and the list is
- * returned newest first, so the match is on the first page in every case this
- * is called for. The budget is a bound on a pathological loop, not a search
- * depth anybody is expected to need — which is why exhausting it THROWS rather
- * than returning "absent". An absence inferred from a search that stopped early
- * is exactly the false negative that gets a second parcel printed.
+ * The lookup exists to find a submission made minutes ago, and the shop's list
+ * is ASSUMED to be returned newest first — which would put the match on the
+ * first page in every case this is called for. That assumption has not been
+ * verified: the captured response carries `current_page`/`last_page` and no
+ * documented sort order, and nothing here or in the tests establishes one. It
+ * is recorded as an assumption on purpose, because if it is wrong the only
+ * consequence is a deeper scan, and the code below is written so that a deeper
+ * scan is slow rather than wrong: the budget is a bound on a pathological loop,
+ * not a search depth anybody is expected to need, and exhausting it THROWS
+ * rather than returning "absent". An absence inferred from a search that
+ * stopped early is exactly the false negative that gets a second parcel
+ * printed. Do not narrow this budget on the strength of the ordering claim
+ * until somebody has actually checked it.
  */
 const FIND_ORDER_MAX_PAGES = 20;
 const FIND_ORDER_PAGE_SIZE = 50;
 
-/** One page of `GET /shops/{id}/orders.json`, reduced to what we match on. */
+/** One listed order, reduced to the three things this adapter is allowed to keep. */
+interface OrderPageEntry {
+  id: string;
+  /** `metadata.shop_order_label` — where the value we POST as `external_id` comes back. */
+  label: string | null;
+  /** A top-level `external_id`, which Printify does not currently send. Fallback only. */
+  externalId: string | null;
+  status: string | null;
+}
+
+/**
+ * One page of `GET /shops/{id}/orders.json`, reduced to what we match on.
+ *
+ * **This function THROWS rather than returning an empty page, and that is the
+ * whole point of it.** Its previous shape was `Array.isArray(obj.data) ?
+ * obj.data : []`, which turned every unexpected envelope — a bare array, a
+ * `{"orders": …}`, an HTML error page that happened to parse, a 200 with `{}` —
+ * into a page with no entries. `findOrderByExternalId` then read "no entries"
+ * as the end of the list and answered `null`: definitively absent. So a page we
+ * could not understand became proof that Printify does not have the order, on
+ * the one path whose next step is posting it again.
+ *
+ * Worse, it contradicted the adapter's own reading of the same value elsewhere:
+ * an empty `{}` from the submission POST raises `PrintifyAmbiguousSubmissionError`
+ * — "we cannot tell, do not resubmit" — while the same empty `{}` from this GET
+ * used to mean "certainly not there, resubmit". One of those had to be wrong,
+ * and it was this one.
+ *
+ * So absence is now only ever concluded from POSITIVE evidence of a well-formed
+ * page: `data` an array, and the three pagination fields the live envelope
+ * really carries (`current_page`, `last_page`, `total`) all present as numbers.
+ * Anything else is a failed read and is reported as one.
+ */
 function readOrderPage(payload: unknown): {
-  entries: Array<{ id: string; externalId: string | null; status: string | null }>;
-  lastPage: number | null;
+  entries: OrderPageEntry[];
+  currentPage: number;
+  lastPage: number;
+  total: number;
 } {
   const obj = (typeof payload === "object" && payload !== null ? payload : {}) as {
     data?: unknown;
+    current_page?: unknown;
     last_page?: unknown;
+    total?: unknown;
   };
-  const raw = Array.isArray(obj.data) ? obj.data : [];
-  const entries: Array<{ id: string; externalId: string | null; status: string | null }> = [];
-  for (const item of raw) {
-    // Each listed order carries a full `address_to` — the buyer's street. Three
-    // fields are lifted out here and the rest of the entry is dropped on the
-    // floor, so no caller can be handed an address it did not ask for and no
-    // log line can acquire one by widening a field later.
+  const currentPage = typeof obj.current_page === "number" ? obj.current_page : null;
+  const lastPage = typeof obj.last_page === "number" ? obj.last_page : null;
+  const total = typeof obj.total === "number" ? obj.total : null;
+  if (!Array.isArray(obj.data) || currentPage === null || lastPage === null || total === null) {
+    // Deliberately says nothing about what WAS there. The body is not quoted
+    // back for the same reason `toPrintifyError` drops Printify's `errors`
+    // object: an order list is a page of other buyers' addresses.
+    throw new PrintifyError(
+      502,
+      null,
+      "Printify order list page was not in the expected shape",
+    );
+  }
+
+  const entries: OrderPageEntry[] = [];
+  for (const item of obj.data) {
+    // Each listed order carries a full `address_to` — the buyer's street, and
+    // on a reconcile scan it is mostly OTHER buyers' streets. Three values are
+    // lifted out here and the rest of the entry is dropped on the floor, so no
+    // caller can be handed an address it did not ask for and no log line can
+    // acquire one by widening a field later. `metadata` is likewise not kept:
+    // one string is read out of it and the object itself does not escape.
     const entry = (typeof item === "object" && item !== null ? item : {}) as {
       id?: unknown;
       external_id?: unknown;
+      metadata?: unknown;
       status?: unknown;
     };
     const id =
       typeof entry.id === "string" ? entry.id : typeof entry.id === "number" ? String(entry.id) : null;
     if (id === null) continue;
+    const metadata = (typeof entry.metadata === "object" && entry.metadata !== null
+      ? entry.metadata
+      : {}) as { shop_order_label?: unknown };
     entries.push({
       id,
+      label: typeof metadata.shop_order_label === "string" ? metadata.shop_order_label : null,
       externalId: typeof entry.external_id === "string" ? entry.external_id : null,
       status: typeof entry.status === "string" ? entry.status : null,
     });
   }
-  return {
-    entries,
-    lastPage: typeof obj.last_page === "number" ? obj.last_page : null,
-  };
+  return { entries, currentPage, lastPage, total };
 }
 
 /**
@@ -438,8 +520,13 @@ export function getUncachablePrintifyClient(): PrintifyClient {
 
     async findOrderByExternalId(externalId: string): Promise<PrintifyOrderRef | null> {
       // Matched with `===` and never with a prefix, a case fold or a
-      // "startsWith": `external_id` is a UUID we minted, and a fuzzy match here
+      // "startsWith": the value is a UUID we minted, and a fuzzy match here
       // would adopt somebody else's Printify order onto this row.
+      //
+      // `shop_order_label` first because it is where Printify actually echoes
+      // the value back, then a top-level `external_id` which no observed
+      // response carries — kept so that a plan or an API version that does
+      // populate it is matched rather than missed.
       for (let page = 1; page <= FIND_ORDER_MAX_PAGES; page += 1) {
         const payload = await printifyFetch(
           config,
@@ -448,12 +535,16 @@ export function getUncachablePrintifyClient(): PrintifyClient {
         );
         const { entries, lastPage } = readOrderPage(payload);
         for (const entry of entries) {
-          if (entry.externalId === externalId) return { id: entry.id, status: entry.status };
+          if (entry.label === externalId || entry.externalId === externalId) {
+            return { id: entry.id, status: entry.status };
+          }
         }
-        // An empty page and the declared last page are both real ends of the
-        // list, and reaching either is a genuine, complete "not there".
-        if (entries.length === 0) return null;
-        if (lastPage !== null && page >= lastPage) return null;
+        // The DECLARED end of the list, and only that. An empty `data` used to
+        // end the scan too, which meant a page whose shape we had misread ended
+        // it as well — `readOrderPage` now refuses to produce one of those, and
+        // a genuinely empty shop still arrives here with `last_page = 1` and
+        // gets the same answer by the honest route.
+        if (page >= lastPage) return null;
       }
       throw new PrintifyError(
         502,

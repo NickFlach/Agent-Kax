@@ -813,6 +813,79 @@ gone back stops being submittable.
 > in logs is one nobody can answer "did that order ship?" about. It is `requireAdmin`, and it
 > does **not** carry the `ship_to_*` columns — the address leaves this server exactly once,
 > addressed to the printer, and a listing page finding it convenient is not a second reason.
+>
+> **Corrected again (#327): the guard above was written against an API that does not
+> exist, and inferred absence from three things that are not one.** A live response was
+> captured from `GET /v1/shops/{id}/orders.json` and checked against the code. Four
+> corrections follow, and each of them turned a guard against a duplicate parcel into a
+> cause of one.
+>
+> 1. **There is no top-level `external_id` in a Printify order.** Not in the list
+>    projection and not in `GET /orders/{id}.json`. The keys a listed order carries are
+>    `id, app_order_id, shop_id, address_to, line_items, metadata, total_price,
+>    total_shipping, total_tax, status, shipping_method, created_at,
+>    sent_to_production_at, fulfilment_type, printify_connect, sales_channel_type_id`. The
+>    value we POST as `external_id` comes back inside `metadata`, as `shop_order_label`.
+>    `findOrderByExternalId` read `row.external_id`, which is `undefined` on every row: no
+>    page ever matched, the scan ran to the declared last page, and the function answered
+>    `null` — "definitively absent" — to the one caller whose next step was to post the
+>    order again. It now matches `metadata.shop_order_label`, with the top-level field kept
+>    as a fallback in case a plan or an API version ever populates it. Every fixture was
+>    rebuilt from the captured shape, because fixtures that invented the field are what let
+>    the bug pass a test suite.
+> 2. **A page that could not be parsed is not an empty page.** `Array.isArray(obj.data) ?
+>    obj.data : []` turned a bare array, an unexpected envelope, or a 200 with `{}` into a
+>    page with no entries, which the pager read as the end of the list and reported as
+>    absence. It also contradicted the adapter's own reading of the same value: an empty
+>    `{}` from the submission POST raises the ambiguous error — "we cannot tell, do not
+>    resubmit" — while the same `{}` from the GET meant "certainly not there, resubmit".
+>    Absence is now concluded only from positive evidence of a well-formed page: `data` an
+>    array and `current_page`, `last_page` and `total` all present as numbers. Anything else
+>    throws, consistent with the interface's own contract that a search which could not be
+>    completed throws rather than answering.
+> 3. **Reconciliation runs before EVERY submission, not only before an ambiguous-looking
+>    one.** The marker is written after the POST returns, so the failures it exists for — a
+>    crash inside the POST window, an OOM, a pod replaced by a rolling deploy, a database
+>    blip — are precisely the failures that stop it being written. What is left behind is a
+>    row that looks untried: null id, zero attempts, null error. The guard was keyed on the
+>    one piece of state the failure it guards against destroys. A durable pre-POST intent
+>    write would close it too, but it costs a transaction on every submission to record
+>    something one GET can settle, and it would still have to be reconciled against Printify
+>    to be acted on. Reconciling unconditionally is cheaper, is one path instead of two, and
+>    closes the marker-overwrite hole in the same motion — a marker later replaced or
+>    cleared can no longer hide an existing order, because nothing consults it to decide
+>    whether to look. The cost is one GET per submission against a 600/minute ceiling, on a
+>    shop that submits a handful of orders a day; the cost of a failed lookup is that
+>    nothing is submitted until it succeeds, which is the safe direction.
+> 4. **`POST /admin/commerce-orders/:id/submit` reconciles too.** That endpoint is where an
+>    order the worker could not resolve is ROUTED to a human, and it posted blind: no
+>    lookup, no look at the marker. The most likely place in the system to print a second
+>    parcel was the button pressed by the one person who had been told the order needed
+>    attention. It now runs the same reconcile — adopting an order Printify already has and
+>    reporting `reconciled: true` — and answers **409 `reconcile_unavailable`** when the
+>    lookup could not be completed AND the row says a submission may already exist, which
+>    `{"acknowledgeDuplicateRisk": true}` overrides for an operator who has just checked
+>    Printify's own UI. A failed lookup on a row with nothing in doubt is deliberately NOT a
+>    409: the manual route is the only path to a fulfilled order proven in production, and
+>    refusing there would take it away every time Printify's list endpoint was unwell. The
+>    reconcile is also skipped entirely for an order that is not paid, not there, or already
+>    submitted — those refuse without a provider call, and spending a lookup to reach the
+>    same refusal would put outbound traffic on paths that had none.
+>
+> **On search depth: the claim that the order list is newest-first is an ASSUMPTION and has
+> not been verified.** The captured envelope carries `current_page` and `last_page` and
+> documents no sort order, and nothing in the code or the tests establishes one. It is
+> recorded as an assumption rather than a fact because the code is written so that being
+> wrong about it is slow rather than dangerous: the page budget bounds a pathological loop,
+> exhausting it throws, and absence is only ever concluded from the declared last page. Do
+> not narrow the budget on the strength of the ordering claim until somebody has checked it.
+>
+> **Adjacent, found while fixing the above:** `ensureCriticalSchema.ts` re-seeded the sticker
+> at `item_cents = 1564`, which is 0026's figure and not 0027's. An applied migration never
+> re-runs, so a rebuilt `commerce_products` would have come back carrying the double-counted
+> total 0027 exists to remove — $20.73 for a sticker priced at $15.64 — on the quietest
+> possible path, a table repair nobody watched. The seed now carries 1055 + 509 and the
+> variant id, and the schema test asserts the migrated state rather than the remembered one.
 
 **The purchase endpoints are deliberately off the OpenAPI contract, and the settings
 endpoints are deliberately on it.** This is a recorded split rather than an accident of

@@ -21,7 +21,7 @@
  * helper, or a shop id pinned as a literal in a script, is exactly as damaging.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -227,5 +227,213 @@ describe("addressToFromSnapshot", () => {
     const addressTo = addressToFromSnapshot({ ...SNAPSHOT_ADDRESS, shipToName: "Prince" });
     expect(addressTo.first_name).toBe("Prince");
     expect(addressTo.last_name).toBe("Prince");
+  });
+});
+
+/**
+ * `findOrderByExternalId`, attacked directly.
+ *
+ * This is the function whose `null` authorises a submission. The route and
+ * worker suites prove what the callers do with the answer; these prove the
+ * answer itself, with no Postgres in the way — the same reason the config cases
+ * above live here rather than behind a `beforeEach` that needs a database.
+ *
+ * The rule the whole thing rests on: `null` means a COMPLETED search over pages
+ * this adapter understood. Everything else throws.
+ */
+describe("findOrderByExternalId", () => {
+  const priorEnv = new Map<string, string | undefined>();
+  let pages: Array<{ status: number; body: unknown }> = [];
+  let requested: string[] = [];
+
+  /** One listed order, in the shape the live API returns — no `external_id`. */
+  function row(id: string, label: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      app_order_id: null,
+      shop_id: Number(TEST_SHOP_ID),
+      address_to: {
+        first_name: "Someone",
+        last_name: "Else",
+        country: "US",
+        region: "NY",
+        address1: "500 Not Our Street",
+        city: "New York",
+        zip: "10001",
+      },
+      line_items: [{ variant_id: 65212, quantity: 1 }],
+      metadata: { order_type: "external", shop_order_id: 987654321, shop_order_label: label },
+      total_price: 354,
+      total_shipping: 509,
+      total_tax: 0,
+      status: "in-production",
+      shipping_method: 1,
+      created_at: "2026-08-14 18:02:11+00:00",
+      sent_to_production_at: "2026-08-14 18:17:40+00:00",
+      fulfilment_type: "ordinary",
+      printify_connect: { url: null, id: null },
+      sales_channel_type_id: 1,
+      ...extra,
+    };
+  }
+
+  function page(rows: unknown[], opts: { currentPage?: number; lastPage?: number } = {}) {
+    const currentPage = opts.currentPage ?? 1;
+    const lastPage = opts.lastPage ?? 1;
+    return {
+      current_page: currentPage,
+      data: rows,
+      first_page_url: "https://api.printify.com/v1/shops/x/orders.json?page=1",
+      from: rows.length === 0 ? null : 1,
+      last_page: lastPage,
+      last_page_url: "https://api.printify.com/v1/shops/x/orders.json?page=" + lastPage,
+      links: [],
+      next_page_url: currentPage < lastPage ? "..." : null,
+      path: "https://api.printify.com/v1/shops/x/orders.json",
+      per_page: 50,
+      prev_page_url: currentPage > 1 ? "..." : null,
+      to: rows.length === 0 ? null : rows.length,
+      total: rows.length,
+    };
+  }
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) priorEnv.set(key, process.env[key]);
+    process.env["KAX_PRINTIFY_ENABLED"] = "1";
+    process.env["KAX_PRINTIFY_API_TOKEN"] = TEST_TOKEN;
+    process.env["KAX_PRINTIFY_SHOP_ID"] = TEST_SHOP_ID;
+    pages = [];
+    requested = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        requested.push(String(input));
+        // The last page queued keeps answering, so a case that wants "every
+        // page looks like this" queues one and a case that wants a sequence
+        // queues several.
+        const next = pages.length > 1 ? pages.shift()! : pages[0];
+        return {
+          ok: next.status >= 200 && next.status < 300,
+          status: next.status,
+          text: async () =>
+            typeof next.body === "string" ? next.body : JSON.stringify(next.body),
+        } as unknown as Response;
+      }),
+    );
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      const prior = priorEnv.get(key);
+      if (prior === undefined) delete process.env[key];
+      else process.env[key] = prior;
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("matches metadata.shop_order_label, which is where Printify echoes it", async () => {
+    // BLOCKER 1. The captured response has NO top-level `external_id`, in this
+    // projection or in the detail one. Reading `row.external_id` yields
+    // `undefined` on every row: nothing matches, the scan reaches the declared
+    // last page, and `null` — "definitively absent" — goes back to a caller
+    // whose next move is to post the order again. The guard against a duplicate
+    // was the thing guaranteeing one.
+    const ref = "ce703bd3-407c-4136-aae4-0eadac65b90f";
+    const listed = row("68f0e4a2b1c3d40001a2b3c4", ref);
+    expect(listed, "the fixture invented a field Printify does not send").not.toHaveProperty(
+      "external_id",
+    );
+    pages = [{ status: 200, body: page([row("other", "not-ours"), listed]) }];
+
+    await expect(getUncachablePrintifyClient().findOrderByExternalId(ref)).resolves.toEqual({
+      id: "68f0e4a2b1c3d40001a2b3c4",
+      status: "in-production",
+    });
+  });
+
+  it("falls back to a top-level external_id if one is ever sent", async () => {
+    // No observed response carries one, but another plan or a later API version
+    // might, and missing an order that was right there costs a second parcel.
+    const ref = "ce703bd3-407c-4136-aae4-0eadac65b90f";
+    pages = [
+      {
+        status: 200,
+        body: page([row("with-external-id", "some-other-label", { external_id: ref })]),
+      },
+    ];
+
+    await expect(getUncachablePrintifyClient().findOrderByExternalId(ref)).resolves.toMatchObject({
+      id: "with-external-id",
+    });
+  });
+
+  it("matches exactly, never by prefix or case", async () => {
+    // The id it returns is written onto a paying customer's row and is what
+    // every later step acts on, so a fuzzy match would send somebody else's
+    // parcel to production against this buyer's money.
+    const ref = "ce703bd3-407c-4136-aae4-0eadac65b90f";
+    pages = [
+      {
+        status: 200,
+        body: page([
+          row("prefix", ref.slice(0, 8)),
+          row("upper", ref.toUpperCase()),
+          row("suffixed", ref + "-2"),
+        ]),
+      },
+    ];
+
+    await expect(getUncachablePrintifyClient().findOrderByExternalId(ref)).resolves.toBeNull();
+  });
+
+  it("answers null for a completed search over a well-formed empty page", async () => {
+    // The positive control. Without it every "throws" case below would pass
+    // against a function that had simply stopped answering — and a real absence
+    // has to be reportable, or nothing is ever submitted at all.
+    pages = [{ status: 200, body: page([]) }];
+    await expect(getUncachablePrintifyClient().findOrderByExternalId("nope")).resolves.toBeNull();
+  });
+
+  it("THROWS on a page it could not parse instead of calling it an absence", async () => {
+    // BLOCKER 2. `Array.isArray(obj.data) ? obj.data : []` turned every one of
+    // these into a page with no entries — which the pager read as the end of
+    // the list and reported as "definitively absent", on the one code path
+    // whose next step is posting the order again.
+    //
+    // Note the contradiction it produced: the SAME `{}` raises the ambiguous
+    // error on the submission POST — "we cannot tell, do not resubmit" — and
+    // used to mean "certainly not there, resubmit" on this GET.
+    for (const body of [
+      {},
+      [],
+      { orders: [] },
+      { data: [] },
+      { data: [], last_page: 1 },
+      { data: [], current_page: 1, last_page: 1 },
+      { data: "nope", current_page: 1, last_page: 1, total: 0 },
+      "<html>502 Bad Gateway</html>",
+    ]) {
+      pages = [{ status: 200, body }];
+      await expect(
+        getUncachablePrintifyClient().findOrderByExternalId("ref"),
+        JSON.stringify(body) + " was read as a page",
+      ).rejects.toThrow(/not in the expected shape|not JSON/);
+    }
+  });
+
+  it("THROWS rather than returning absent when the request itself fails", async () => {
+    pages = [{ status: 503, body: { code: 503, message: "Service unavailable" } }];
+    await expect(getUncachablePrintifyClient().findOrderByExternalId("ref")).rejects.toThrow();
+  });
+
+  it("THROWS when it runs out of pages before the end of the list", async () => {
+    // A pager that gives up and says "not found" is a pager that authorises a
+    // duplicate. The budget bounds a pathological loop; it is not a depth at
+    // which an absence may be inferred.
+    pages = [{ status: 200, body: page([row("other", "not-ours")], { lastPage: 999 }) }];
+    await expect(getUncachablePrintifyClient().findOrderByExternalId("ref")).rejects.toThrow(
+      /page budget/,
+    );
+    expect(requested.length, "the pager stopped after one page").toBeGreaterThan(1);
   });
 });
