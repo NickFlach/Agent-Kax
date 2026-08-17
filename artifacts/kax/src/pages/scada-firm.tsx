@@ -123,7 +123,7 @@ export default function ScadaFirm() {
   const right = works.filter((_, i) => i % 2 === 1).slice(0, 4);
 
   return (
-    <div className="marketplace-3d-root">
+    <div className="relative h-screen w-full bg-[#10161b] overflow-hidden kax3d-font">
       <div className="absolute top-0 left-0 right-0 p-4 z-20 flex items-center gap-4 pointer-events-none">
         <Link
           href="/city?from=__scada__"
