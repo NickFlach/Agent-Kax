@@ -96,12 +96,84 @@ interface OutboundCall {
   body: Record<string, unknown>;
 }
 
+/**
+ * One row of `GET /shops/{id}/orders.json`, in the shape a live response really
+ * has — captured from the API, not imagined.
+ *
+ * There is deliberately **no top-level `external_id`**: Printify does not send
+ * one. What we POST as `external_id` comes back as `metadata.shop_order_label`,
+ * which is what the lookup matches on.
+ */
+function printifyOrderRow(opts: { id: string; label: string; status?: string }): Record<string, unknown> {
+  return {
+    id: opts.id,
+    app_order_id: null,
+    shop_id: Number(TEST_SHOP_ID),
+    address_to: {
+      first_name: "Someone",
+      last_name: "Else",
+      country: "US",
+      region: "NY",
+      address1: "500 Not Our Street",
+      city: "New York",
+      zip: "10001",
+    },
+    line_items: [{ variant_id: 65212, quantity: 1 }],
+    metadata: { order_type: "external", shop_order_id: 987654321, shop_order_label: opts.label },
+    total_price: 354,
+    total_shipping: 509,
+    total_tax: 0,
+    status: opts.status ?? "on-hold",
+    shipping_method: 1,
+    created_at: "2026-08-14 18:02:11+00:00",
+    sent_to_production_at: null,
+    fulfilment_type: "ordinary",
+    printify_connect: { url: null, id: null },
+    sales_channel_type_id: 1,
+  };
+}
+
+/** The list envelope, with the three pagination fields the adapter requires. */
+function orderListPage(rows: Array<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    current_page: 1,
+    data: rows,
+    first_page_url: "https://api.printify.com/v1/shops/x/orders.json?page=1",
+    from: rows.length === 0 ? null : 1,
+    last_page: 1,
+    last_page_url: "https://api.printify.com/v1/shops/x/orders.json?page=1",
+    links: [],
+    next_page_url: null,
+    path: "https://api.printify.com/v1/shops/x/orders.json",
+    per_page: 50,
+    prev_page_url: null,
+    to: rows.length === 0 ? null : rows.length,
+    total: rows.length,
+  };
+}
+
 let outbound: OutboundCall[] = [];
 let nextResponse: { status: number; body: string } = { status: 200, body: "{}" };
+/**
+ * What the pre-submission reconcile lookup (the only GET) is answered with.
+ *
+ * Answered separately from the POSTs because it is a different question with a
+ * different shape, and because the default has to be the SAFE one: a completed,
+ * empty page — "Printify does not have this order" — so that a case which does
+ * not care about reconciliation submits exactly as it always did.
+ */
+let nextLookupResponse: { status: number; body: string } = {
+  status: 200,
+  body: JSON.stringify(orderListPage([])),
+};
 let lastError: string | null = null;
 
 function respondWith(status: number, body: unknown): void {
   nextResponse = { status, body: typeof body === "string" ? body : JSON.stringify(body) };
+}
+
+function respondToLookupWith(status: number, body: unknown): void {
+  nextLookupResponse = { status, body: typeof body === "string" ? body : JSON.stringify(body) };
 }
 
 function installFetchStub(): void {
@@ -109,13 +181,14 @@ function installFetchStub(): void {
     "fetch",
     vi.fn(async (input: unknown, init: Record<string, unknown> = {}) => {
       const headers = (init["headers"] ?? {}) as Record<string, string>;
+      const method = String(init["method"] ?? "GET");
       outbound.push({
         url: String(input),
-        method: String(init["method"] ?? "GET"),
+        method,
         authorization: headers["Authorization"],
         body: init["body"] ? (JSON.parse(String(init["body"])) as Record<string, unknown>) : {},
       });
-      const { status, body } = nextResponse;
+      const { status, body } = method === "GET" ? nextLookupResponse : nextResponse;
       return {
         ok: status >= 200 && status < 300,
         status,
@@ -123,6 +196,25 @@ function installFetchStub(): void {
       } as unknown as Response;
     }),
   );
+}
+
+/**
+ * The calls that cost money, separated from the one that does not.
+ *
+ * `submit` now asks Printify whether it already has the order before it posts
+ * one, so a bare `outbound.length` counts a read that prints nothing. The
+ * counts that decide whether a buyer gets one parcel or two are these.
+ */
+function submitCalls(): OutboundCall[] {
+  return outbound.filter((c) => c.method === "POST" && c.url.endsWith("/orders.json"));
+}
+
+function lookupCalls(): OutboundCall[] {
+  return outbound.filter((c) => c.method === "GET");
+}
+
+function productionCalls(): OutboundCall[] {
+  return outbound.filter((c) => c.url.includes("send_to_production"));
 }
 
 /**
@@ -169,6 +261,7 @@ describe("Printify fulfilment (#287)", () => {
     lastError = null;
     outbound = [];
     respondWith(200, { id: "printify_order_1", status: "on-hold" });
+    respondToLookupWith(200, orderListPage([]));
     installFetchStub();
     app = buildApp();
 
@@ -346,8 +439,12 @@ describe("Printify fulfilment (#287)", () => {
       const res = await submit(order.id);
 
       expect(res.status, `reached: ${lastError}`).toBe(200);
-      expect(outbound).toHaveLength(1);
-      const call = outbound[0];
+      // Two calls and in this order: the reconcile lookup that proves Printify
+      // does not already have this order, then the submission itself.
+      expect(outbound).toHaveLength(2);
+      expect(outbound[0].method, "posted before asking").toBe("GET");
+      expect(submitCalls()).toHaveLength(1);
+      const call = submitCalls()[0];
       expect(call.method).toBe("POST");
       expect(call.url).toBe(`https://api.printify.com/v1/shops/${TEST_SHOP_ID}/orders.json`);
       expect(call.authorization, "the token is sent, and only here").toBe(`Bearer ${TEST_TOKEN}`);
@@ -381,7 +478,7 @@ describe("Printify fulfilment (#287)", () => {
       await db.insert(userShippingAddressesTable).values({ userId: buyerId, ...LIVE_ADDRESS });
 
       expect((await submit(order.id)).status, `reached: ${lastError}`).toBe(200);
-      const addressTo = outbound[0].body["address_to"] as Record<string, unknown>;
+      const addressTo = submitCalls()[0].body["address_to"] as Record<string, unknown>;
 
       expect(addressTo).toMatchObject({
         first_name: "Ada",
@@ -413,7 +510,10 @@ describe("Printify fulfilment (#287)", () => {
 
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
-      expect(outbound, "the second press reached nobody").toHaveLength(1);
+      expect(submitCalls(), "the second press posted a second order").toHaveLength(1);
+      // …and it did not even look: an id already on the row answers the
+      // question without a provider call of any kind.
+      expect(lookupCalls(), "the second press spent a lookup on a settled question").toHaveLength(1);
       expect(second.body.printifyOrderId).toBe("printify_order_1");
       expect(second.body.alreadySubmitted).toBe(true);
       expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_1");
@@ -432,7 +532,7 @@ describe("Printify fulfilment (#287)", () => {
 
       expect(a.status, `reached: ${lastError}`).toBe(200);
       expect(b.status, `reached: ${lastError}`).toBe(200);
-      expect(outbound, "two operators, one print run").toHaveLength(1);
+      expect(submitCalls(), "two operators, one print run").toHaveLength(1);
       expect(
         [a.body.alreadySubmitted, b.body.alreadySubmitted].filter(Boolean),
         "exactly one press did the work and the other found it done",
@@ -454,7 +554,10 @@ describe("Printify fulfilment (#287)", () => {
       const res = await submit(order.id);
       expect(res.status).toBe(409);
       expect(res.body.reason).toBe("product_not_printable");
-      expect(outbound).toHaveLength(0);
+      // The order is paid and unsubmitted, so the reconcile lookup runs and
+      // costs a GET. Nothing is POSTED, which is the property this case is
+      // about: no half-made line item reaches the printer.
+      expect(submitCalls()).toHaveLength(0);
     });
 
     it("leaves the order submittable when Printify refuses, and leaks neither token nor address", async () => {
@@ -496,6 +599,183 @@ describe("Printify fulfilment (#287)", () => {
     });
   });
 
+  // ── The button, when the order may already be at Printify ────────────────
+  //
+  // This endpoint is where an order the worker could NOT resolve gets routed to
+  // a human. That made it the most dangerous button in the system: an operator
+  // told "this order needs attention" pressed submit, and submit posted blind —
+  // no lookup, no look at what the row said — so the second parcel was printed
+  // by the one person who had been warned about it.
+
+  describe("submitting by hand asks Printify first", () => {
+    /** The state the worker parks an unresolvable ambiguous order in. */
+    async function makeAmbiguousOrder() {
+      const order = await makeOrder();
+      await db
+        .update(commerceOrdersTable)
+        .set({ fulfillmentLastError: "submission_ambiguous", fulfillmentAttempts: 6 })
+        .where(eq(commerceOrdersTable.id, order.id));
+      return order;
+    }
+
+    it("adopts the order Printify already has instead of posting a second one", async () => {
+      // The whole point. Printify has the order, under the label we submitted it
+      // with; the operator presses submit; nothing is manufactured and the id is
+      // written onto the row. Without the lookup this is a 200, a second parcel
+      // and a second charge to the merchant's card — indistinguishable from
+      // success in every observable except the count below.
+      const order = await makeAmbiguousOrder();
+      respondToLookupWith(
+        200,
+        orderListPage([printifyOrderRow({ id: "printify_order_existing", label: order.clientReference })]),
+      );
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const res = await submit(order.id);
+
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(submitCalls(), "the manual button printed a second parcel").toHaveLength(0);
+      expect(res.body.printifyOrderId).toBe("printify_order_existing");
+      expect(res.body.alreadySubmitted).toBe(true);
+      expect(res.body.reconciled, "the operator was not told what happened").toBe(true);
+
+      const after = (await reload(order.id))!;
+      expect(after.printifyOrderId).toBe("printify_order_existing");
+      expect(after.fulfillmentState).toBe("submitted");
+      // The doubt the row recorded is the doubt that was just resolved.
+      expect(after.fulfillmentLastError).toBeNull();
+      expect(after.fulfillmentAttempts).toBe(0);
+    });
+
+    it("409s an ambiguous order when it cannot check, rather than posting blind", async () => {
+      // "We could not look" is not "it is not there". On a row that already says
+      // a submission may exist, the honest answer is to stop and let a human
+      // read Printify's own UI — which is exactly the thing the operator can do
+      // and this process cannot.
+      const order = await makeAmbiguousOrder();
+      respondToLookupWith(503, { code: 503, message: "Service unavailable" });
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const res = await submit(order.id);
+
+      expect(res.status).toBe(409);
+      expect(res.body.reason).toBe("reconcile_unavailable");
+      expect(submitCalls(), "posted an order that may already exist").toHaveLength(0);
+      expect((await reload(order.id))!.printifyOrderId).toBeNull();
+      // Nothing about the refusal quotes a provider body or an address.
+      const serialized = JSON.stringify(res.body);
+      expect(serialized).not.toContain(TEST_TOKEN);
+      expect(serialized).not.toContain(SNAPSHOT_ADDRESS.shipToLine1);
+    });
+
+    it("posts anyway when the operator acknowledges the risk in the request", async () => {
+      // The escape hatch, and it has to exist: an operator who has just looked
+      // the order up in Printify and found nothing knows something this process
+      // does not, and a refusal they cannot override would strand a paid order.
+      // It is an explicit `true` in the body and never a truthy string.
+      const order = await makeAmbiguousOrder();
+      respondToLookupWith(503, { code: 503, message: "Service unavailable" });
+      respondWith(200, { id: "printify_order_after_ack", status: "on-hold" });
+
+      const refused = await request(app)
+        .post(`/admin/commerce-orders/${order.id}/submit`)
+        .set("x-test-user", adminId)
+        .send({ acknowledgeDuplicateRisk: "yes" });
+      expect(refused.status, "a truthy string was taken for an acknowledgement").toBe(409);
+      expect(submitCalls()).toHaveLength(0);
+
+      const res = await request(app)
+        .post(`/admin/commerce-orders/${order.id}/submit`)
+        .set("x-test-user", adminId)
+        .send({ acknowledgeDuplicateRisk: true });
+
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(submitCalls()).toHaveLength(1);
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_after_ack");
+    });
+
+    it("still submits a clean order when the lookup fails, because nothing is in doubt", async () => {
+      // The other side of the 409, and it is the one that protects the ONLY
+      // proven path to a fulfilled order. A row with no marker carries no
+      // evidence that a submission was ever made, blind posting is what this
+      // endpoint has always done in that state, and refusing would take the
+      // manual path away every time Printify's list endpoint was unwell.
+      const order = await makeOrder();
+      respondToLookupWith(503, { code: 503, message: "Service unavailable" });
+
+      const res = await submit(order.id);
+
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(submitCalls()).toHaveLength(1);
+      expect(res.body.reconciled).toBe(false);
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_1");
+    });
+
+    it("treats a page it cannot parse as a failed lookup and not as an absence", async () => {
+      // `readOrderPage` used to coerce any unexpected envelope to an empty page,
+      // which the pager read as the end of the list and reported as
+      // "definitively absent". Here that would mean posting an order that may
+      // already exist — so an unparseable page must reach this endpoint as the
+      // same refusal a 503 does.
+      const order = await makeAmbiguousOrder();
+      respondToLookupWith(200, { orders: [] });
+      respondWith(200, { id: "printify_order_DUPLICATE", status: "on-hold" });
+
+      const res = await submit(order.id);
+
+      expect(res.status).toBe(409);
+      expect(res.body.reason).toBe("reconcile_unavailable");
+      expect(submitCalls(), "an unreadable page was read as an absence").toHaveLength(0);
+    });
+
+    it("matches metadata.shop_order_label, the only place Printify echoes it", async () => {
+      // The captured response has no top-level `external_id` — not in the list
+      // and not in the detail projection. Reading one gives `undefined` on every
+      // row, which matches nothing, which reads as absent, which posts again.
+      // The row below is the real shape; nothing else about this case changes.
+      const order = await makeAmbiguousOrder();
+      const row = printifyOrderRow({ id: "printify_order_labelled", label: order.clientReference });
+      expect(row, "the fixture invented a field Printify does not send").not.toHaveProperty(
+        "external_id",
+      );
+      respondToLookupWith(200, orderListPage([row]));
+
+      const res = await submit(order.id);
+
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(res.body.printifyOrderId).toBe("printify_order_labelled");
+      expect(submitCalls()).toHaveLength(0);
+    });
+
+    it("does not adopt somebody else's order", async () => {
+      // A page of other people's orders is a completed search that found
+      // nothing, so this submits — one parcel, not a stranger's id written onto
+      // a paying customer's row.
+      const order = await makeAmbiguousOrder();
+      respondToLookupWith(
+        200,
+        orderListPage([
+          printifyOrderRow({ id: "printify_order_someone_else", label: randomUUID() }),
+          printifyOrderRow({
+            id: "printify_order_prefix",
+            label: order.clientReference.slice(0, 8),
+          }),
+          printifyOrderRow({
+            id: "printify_order_upper",
+            label: order.clientReference.toUpperCase(),
+          }),
+        ]),
+      );
+
+      const res = await submit(order.id);
+
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+      expect(submitCalls()).toHaveLength(1);
+      expect(res.body.reconciled).toBe(false);
+      expect((await reload(order.id))!.printifyOrderId).toBe("printify_order_1");
+    });
+  });
+
   // ── Release, the second half of a manual approval ────────────────────────
 
   describe("POST /admin/commerce-orders/:id/release", () => {
@@ -519,10 +799,13 @@ describe("Printify fulfilment (#287)", () => {
 
       const res = await release(order.id);
       expect(res.status, `reached: ${lastError}`).toBe(200);
-      expect(outbound).toHaveLength(2);
-      expect(outbound[1].url).toBe(
+      expect(productionCalls()).toHaveLength(1);
+      expect(productionCalls()[0].url).toBe(
         `https://api.printify.com/v1/shops/${TEST_SHOP_ID}/orders/printify_order_1/send_to_production.json`,
       );
+      // Release never reconciles: the order's name is already ours, which is the
+      // one thing the reconcile exists to recover.
+      expect(lookupCalls(), "release went looking for an order it already had").toHaveLength(1);
 
       const after = (await reload(order.id))!;
       expect(after.releasedAt).not.toBeNull();
@@ -543,7 +826,8 @@ describe("Printify fulfilment (#287)", () => {
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
       expect(second.body.alreadyReleased).toBe(true);
-      expect(outbound, "one submit, one release, and no more").toHaveLength(2);
+      expect(productionCalls(), "the second press manufactured again").toHaveLength(1);
+      expect(submitCalls()).toHaveLength(1);
       expect(second.body.releaseActor).toBe(adminId);
     });
 
@@ -558,11 +842,44 @@ describe("Printify fulfilment (#287)", () => {
 
       expect(a.status, `reached: ${lastError}`).toBe(200);
       expect(b.status, `reached: ${lastError}`).toBe(200);
-      expect(outbound, "one submit, one release, and no more").toHaveLength(2);
+      expect(productionCalls(), "two operators, one print run").toHaveLength(1);
+      expect(submitCalls()).toHaveLength(1);
       expect(
         [a.body.alreadyReleased, b.body.alreadyReleased].filter(Boolean),
         "exactly one press did the work and the other found it done",
       ).toHaveLength(1);
+    });
+
+    it("refuses to release an order whose money has gone back, and calls nobody", async () => {
+      // Submission checks `paid`; release did not, and the two are a hold
+      // window apart. `charge.refunded` and `charge.dispute.*` land inside that
+      // window and move the row — so an operator pressing release on an order
+      // that was paid when they opened the page would manufacture a parcel
+      // against money that is no longer there. The button is not evidence about
+      // the charge, and the locked read is.
+      //
+      // Same 409 and same `not_paid` reason submit answers with, because it is
+      // the same refusal.
+      for (const status of ["refunded", "chargeback", "canceled"]) {
+        const order = await makeOrder();
+        await submit(order.id);
+        expect(submitCalls(), `status ${status}: the submission itself`).toHaveLength(1);
+        await db
+          .update(commerceOrdersTable)
+          .set({ status })
+          .where(eq(commerceOrdersTable.id, order.id));
+
+        const res = await release(order.id);
+        expect(res.status, `status ${status}`).toBe(409);
+        expect(res.body.reason).toBe("not_paid");
+        expect(res.body.orderStatus).toBe(status);
+        expect(productionCalls(), `a ${status} order was sent to production`).toHaveLength(0);
+
+        const after = (await reload(order.id))!;
+        expect(after.releasedAt).toBeNull();
+        expect(after.fulfillmentState).toBe("submitted");
+        outbound = [];
+      }
     });
 
     it("leaves the release unrecorded when Printify refuses", async () => {

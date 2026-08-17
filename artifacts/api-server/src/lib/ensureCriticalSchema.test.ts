@@ -415,15 +415,22 @@ describe("ensureCriticalSchema", () => {
       | { item_cents: number; shipping_cents: number; published: boolean }
       | undefined;
     expect(row, "the sticker product was not re-seeded").toBeDefined();
-    expect(row?.item_cents).toBe(1564);
+    // 0027's split, not 0026's. This seed is the only thing that decides what a
+    // rebuilt table comes back holding — an applied migration never re-runs —
+    // so a repair that restored 1564 would restore the double-counted total
+    // 0027 exists to remove, and charge $20.73 for a $15.64 sticker.
+    expect(row?.item_cents, "the repair seed drifted from the migrations").toBe(1055);
     expect(row?.shipping_cents).toBe(509);
+    expect((row?.item_cents ?? 0) + (row?.shipping_cents ?? 0)).toBe(1564);
     expect(row?.published).toBe(false);
 
     // try/finally, not a trailing statement. An assertion that throws between
     // the edit and the restore would leave 999 in the database for the rest of
-    // the run AND the next one, where commerceSchema.test.ts's "seeds the
-    // sticker unpublished, at the price the design fixed" asserts 1564 — a
-    // cascading false failure in a file that changed nothing.
+    // the run AND the next one, where commerceSchema.test.ts asserts the
+    // migrated price — a cascading false failure in a file that changed
+    // nothing. This whole case is why the restore below must be the MIGRATED
+    // value: it drops and rebuilds the table, so whatever it leaves behind is
+    // what every later file in the run sees.
     try {
       await db.execute(sql`
         UPDATE commerce_products SET item_cents = 999 WHERE sku = 'kax-sticker-3.5in'`);
@@ -436,7 +443,7 @@ describe("ensureCriticalSchema", () => {
       ).toBe(999);
     } finally {
       await db.execute(sql`
-        UPDATE commerce_products SET item_cents = 1564 WHERE sku = 'kax-sticker-3.5in'`);
+        UPDATE commerce_products SET item_cents = 1055 WHERE sku = 'kax-sticker-3.5in'`);
     }
 
     // The case the name promises, and which nothing tested: publishing is the

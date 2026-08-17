@@ -29,7 +29,12 @@ import {
   PrintifyNotConfiguredError,
   type PrintifyClient,
 } from "../lib/printifyClient";
-import { releaseCommerceOrder, submitCommerceOrder } from "../lib/commerceFulfillment";
+import {
+  reconcileCommerceOrderSubmission,
+  releaseCommerceOrder,
+  submitCommerceOrder,
+} from "../lib/commerceFulfillment";
+import { isAmbiguousMarker } from "../lib/commerceFulfillmentWorker";
 
 const router: IRouter = Router();
 
@@ -545,7 +550,14 @@ router.post("/admin/seed-music-drop", requireAdmin, async (req, res) => {
 // inside that lock deliberately — a second press waits for the first one's
 // answer rather than racing it — and `external_id` carries the order's
 // `client_reference` so that even a submission whose response was lost can be
-// found by name in Printify rather than guessed at.
+// found by name in Printify rather than guessed at. Printify echoes that value
+// back as `metadata.shop_order_label` and not as a top-level `external_id`,
+// which is what `findOrderByExternalId` matches on.
+//
+// Those guards protect against a SECOND submission from this database. They say
+// nothing about an order that reached Printify while the row that would have
+// recorded it did not survive the request — so `submit` reconciles against
+// Printify before it posts, exactly as the worker does. See the handler.
 //
 // Nothing here returns or logs a `ship_to_*` column. The address leaves this
 // server exactly once, addressed to the printer, built by
@@ -694,13 +706,127 @@ router.get("/admin/commerce-orders", requireAdmin, async (req, res) => {
   res.json({ orders, limit });
 });
 
+/**
+ * Did the operator say, in the request, that they know what they are risking?
+ *
+ * Nothing is inferred from a truthy string or a `1`: an acknowledgement that a
+ * second parcel may be printed is worth having only if it was deliberate, and
+ * `"false"` is truthy.
+ */
+function acknowledgesDuplicateRisk(body: unknown): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { acknowledgeDuplicateRisk?: unknown }).acknowledgeDuplicateRisk === true
+  );
+}
+
+/**
+ * The two facts that decide whether this request could end in a POST, plus the
+ * marker used to explain a refusal.
+ *
+ * Read WITHOUT a lock and used only to decide whether to spend a lookup: every
+ * decision that matters is made again under `FOR UPDATE` inside
+ * `submitCommerceOrder`, which is where a row that changed underneath us is
+ * caught. Its purpose is to keep the reconcile off the paths that cannot post —
+ * an unpaid order, a missing row, one that already has an id — so that pressing
+ * submit on an order that was never going to be manufactured still reaches
+ * Printify not at all.
+ *
+ * `fulfillment_last_error` is read only to decide what to TELL the operator when
+ * the lookup could not run. It is never used to decide whether to LOOK — see the
+ * worker's header for why a marker cannot be trusted for that.
+ */
+async function readSubmitPreflight(
+  orderId: number,
+): Promise<{ mayPost: boolean; marker: string | null }> {
+  const [row] = await db
+    .select({
+      status: commerceOrdersTable.status,
+      printifyOrderId: commerceOrdersTable.printifyOrderId,
+      fulfillmentLastError: commerceOrdersTable.fulfillmentLastError,
+    })
+    .from(commerceOrdersTable)
+    .where(eq(commerceOrdersTable.id, orderId))
+    .limit(1);
+  return {
+    mayPost: row !== undefined && row.status === "paid" && row.printifyOrderId === null,
+    marker: row?.fulfillmentLastError ?? null,
+  };
+}
+
+/**
+ * Submit by hand — and ask Printify first, exactly as the worker does.
+ *
+ * This endpoint is where an order the worker could not resolve gets ROUTED to a
+ * human: a row whose submission was ambiguous, or whose lookup kept failing,
+ * parks and waits for this button. It posted blind — no lookup, no look at the
+ * marker — which made the button the most likely place in the whole system to
+ * print a second parcel, pressed by the one person who had been told the order
+ * needed attention.
+ *
+ * The happy path is deliberately unchanged. A clean paid order reconciles to
+ * `absent` and is submitted, with the same response body it has always had; the
+ * manual route is the only path to a fulfilled order that has been proven in
+ * production, and this must not be the change that breaks it. Two things are
+ * new and both only fire when there is a real reason:
+ *
+ * - the order was ALREADY at Printify — adopted, `reconciled: true`, nothing
+ *   posted;
+ * - the lookup could not be completed AND the row says a submission may already
+ *   exist — 409, so the operator decides rather than the network deciding for
+ *   them. `{"acknowledgeDuplicateRisk": true}` presses on anyway, which is the
+ *   escape hatch for an operator who has just looked at Printify's own UI.
+ *
+ * A lookup that fails on a row with nothing in doubt is NOT a 409: there is no
+ * evidence of a prior submission, blind posting is what this endpoint has always
+ * done in that state, and refusing would take the proven manual path away
+ * whenever Printify's list endpoint was unwell.
+ */
 router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, requireAdmin, async (req, res) => {
   const printify = printifyForRequest(res);
   if (!printify) return;
   const id = parseCommerceOrderId(req.params["id"], res);
   if (id === null) return;
 
+  let reconciled = false;
   try {
+    const preflight = await readSubmitPreflight(id);
+    try {
+      // Only when this request could actually end in a POST. An order that is
+      // not paid, not there, or already submitted is refused by
+      // `submitCommerceOrder` without a provider call, and spending a lookup to
+      // arrive at the same refusal would put outbound traffic on paths that had
+      // none.
+      if (preflight.mayPost) {
+        const found = await reconcileCommerceOrderSubmission(db, printify, id);
+        // `adopted` writes the id onto the row, so the submit below finds it and
+        // returns `already_submitted` without calling Printify. That is the
+        // whole mechanism: the parcel is not printed twice because there is
+        // nothing left to post.
+        if (found.kind === "adopted") reconciled = true;
+      }
+    } catch (err) {
+      if (err instanceof PrintifyNotConfiguredError) throw err;
+      if (!(err instanceof PrintifyError)) throw err;
+      const marker = preflight.marker;
+      if (isAmbiguousMarker(marker) && !acknowledgesDuplicateRisk(req.body)) {
+        res.status(409).json({
+          error:
+            "This order may already exist at Printify and we could not check. " +
+            "Look it up in Printify by the order's reference before submitting again.",
+          reason: "reconcile_unavailable",
+          fulfillmentLastError: marker,
+          printifyStatus: err.status,
+          printifyCode: err.code,
+          // Named in the response so the operator does not have to find it in
+          // a document to act on the refusal.
+          acknowledgeWith: { acknowledgeDuplicateRisk: true },
+        });
+        return;
+      }
+    }
+
     // The row lock, the two guards, the `paid` precondition and the rollback
     // all live in `lib/commerceFulfillment.ts` now, because the automatic
     // worker presses the same button and a second copy of that reasoning is
@@ -735,6 +861,10 @@ router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, require
           fulfillmentState: outcome.order.fulfillmentState,
           submittedAt: outcome.order.submittedAt,
           alreadySubmitted: true,
+          // True only when THIS request found the order at Printify and adopted
+          // it. An operator seeing this learns that the button they pressed did
+          // not print anything, and why.
+          reconciled,
         });
         return;
       case "submitted":
@@ -746,6 +876,7 @@ router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, require
           fulfillmentState: "submitted",
           submittedAt: outcome.submittedAt,
           alreadySubmitted: false,
+          reconciled: false,
         });
         return;
     }
@@ -771,6 +902,19 @@ router.post("/admin/commerce-orders/:id/release", requirePrintifyEnabled, requir
     switch (outcome.kind) {
       case "not_found":
         res.status(404).json({ error: "No such commerce order", reason: "order_not_found" });
+        return;
+      case "not_paid":
+        // 409 and the same `not_paid` reason submit answers with, because it is
+        // the same refusal: the money is not there. Release had no such check
+        // until now, which meant an order that had gone to `refunded` or
+        // `chargeback` after submission could still be sent to production by
+        // hand — the manual path had the hole the worker had, and pressing a
+        // button is not a fact about whether the charge stuck.
+        res.status(409).json({
+          error: "That order has not been paid for",
+          reason: "not_paid",
+          orderStatus: outcome.order.status,
+        });
         return;
       case "not_submitted":
         res.status(409).json({

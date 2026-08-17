@@ -519,14 +519,25 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
      * DO NOTHING on the sku, so a rebuild never overwrites an operator's price,
      * artifact or published state — and in particular never re-publishes a
      * product somebody deliberately took down.
+     *
+     * **1055, which is 0027's price and not 0026's.** This seed mirrored the
+     * original 1564 and kept mirroring it after 0027 corrected the split — and
+     * an applied migration never re-runs, so a `commerce_products` rebuilt by
+     * this path would come back at 1055 + 509 only if this literal says so.
+     * With 1564 here the row returns carrying the double-counted total the
+     * migration exists to remove: $20.73 charged for a sticker priced at
+     * $15.64, on the quietest possible path — a table repair nobody watched.
+     * The variant is seeded too, for the same reason: 0027 pinned it and will
+     * not pin it again, and a product with no variant cannot be fulfilled.
      */
     label: "commerce_products sticker seed",
     sql: sql.raw(`
       INSERT INTO commerce_products
-        (sku, title, item_cents, shipping_cents, published, printify_product_id, ship_to_countries)
+        (sku, title, item_cents, shipping_cents, published, printify_product_id,
+         printify_variant_id, ship_to_countries)
       VALUES
-        ('kax-sticker-3.5in', 'KAX Sticker · 3.5in vinyl', 1564, 509, false,
-         '6a81f8c84b2b4c5db504b97f', '{US}')
+        ('kax-sticker-3.5in', 'KAX Sticker · 3.5in vinyl', 1055, 509, false,
+         '6a81f8c84b2b4c5db504b97f', '65212', '{US}')
       ON CONFLICT (sku) DO NOTHING`),
   },
 ];

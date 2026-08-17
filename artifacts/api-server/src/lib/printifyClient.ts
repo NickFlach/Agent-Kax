@@ -32,6 +32,36 @@ import { createRateLimiter } from "./rateLimit";
  * carries the order's `client_reference` precisely so that a submission whose
  * response was lost can still be found by name on Printify's side.
  *
+ * ## …and `findOrderByExternalId` is what makes "found by name" a call
+ *
+ * The sentence above was true and unreachable: `external_id` was written on
+ * every submission and nothing in this adapter could read it back, so "look it
+ * up in Printify's UI" was the only way to act on it and only a human could.
+ * `findOrderByExternalId` pages the shop's order list and matches that value
+ * exactly, which turns "the order may exist and we cannot name it" from a dead
+ * end into a question with an answer. `commerceFulfillmentWorker.ts` asks it
+ * before every submission; see `PrintifyAmbiguousSubmissionError`.
+ *
+ * **What it matches on is `metadata.shop_order_label`, and that is not a
+ * detail.** A live response was captured from `GET /v1/shops/{id}/orders.json`
+ * and there is no top-level `external_id` in it — not in the list projection
+ * and not in the detail projection either. The keys each listed order actually
+ * carries are `id, app_order_id, shop_id, address_to, line_items, metadata,
+ * total_price, total_shipping, total_tax, status, shipping_method, created_at,
+ * sent_to_production_at, fulfilment_type, printify_connect,
+ * sales_channel_type_id`. The value we POST as `external_id` comes back inside
+ * `metadata`, as `shop_order_label`. An earlier version of this function read
+ * `row.external_id`, which is `undefined` on every row Printify returns — so
+ * every page yielded no match, the scan ran to the declared last page, and the
+ * function answered `null`, meaning "definitively absent", to a caller whose
+ * next step was to POST the order again. That did not reduce the chance of a
+ * duplicate parcel; it made one certain, and reported success while doing it.
+ * `external_id` is still read as a FALLBACK, because it costs nothing and
+ * another Printify plan or a future API version may populate it.
+ *
+ * It is a read, so it may be retried freely — but a lookup that FAILS answers
+ * nothing, and a caller must never treat a failed lookup as "not there".
+ *
  * ## The buyer's address
  *
  * `addressToFromSnapshot` takes the order's `ship_to_*` snapshot and nothing
@@ -82,6 +112,17 @@ export class PrintifyNotConfiguredError extends Error {
  * `body` field on purpose — see `toPrintifyError`.
  */
 export class PrintifyError extends Error {
+  /**
+   * Whether this failure leaves it UNKNOWN whether the provider created the
+   * order. False for an ordinary refusal — a 400 means nothing was made — and
+   * the flag exists so a caller can ask the question structurally rather than
+   * by pattern-matching a status code it may not have thought of.
+   *
+   * A retry policy must never treat an ambiguous failure as retryable: retrying
+   * an order that already exists is a second parcel. See the subclass below.
+   */
+  public readonly ambiguous: boolean = false;
+
   constructor(
     public readonly status: number,
     public readonly code: number | null,
@@ -89,6 +130,31 @@ export class PrintifyError extends Error {
   ) {
     super(message);
     this.name = "PrintifyError";
+  }
+}
+
+/**
+ * The provider may have created this order, and we cannot name it.
+ *
+ * This is not "the request failed". It is the strictly worse case where the
+ * request may well have SUCCEEDED and only the identifier was lost — which is
+ * precisely the case where posting the same order again prints a second parcel
+ * and charges the merchant's card a second time, against one customer payment.
+ *
+ * The only correct answer is to find out, by asking Printify for the order
+ * under the `external_id` we sent — `findOrderByExternalId`. So this error is
+ * deliberately NOT retryable in the sense a 429 is retryable: a caller that
+ * catches it may reconcile, and may then submit only if reconciliation proves
+ * the order is absent. `commerceFulfillmentWorker.isRetryable` refuses it by
+ * name, and the 502 status is not what that refusal hangs on — a genuine 502
+ * from Printify is a different fact from this one.
+ */
+export class PrintifyAmbiguousSubmissionError extends PrintifyError {
+  public override readonly ambiguous = true;
+
+  constructor(status: number, code: number | null, message: string) {
+    super(status, code, message);
+    this.name = "PrintifyAmbiguousSubmissionError";
   }
 }
 
@@ -162,6 +228,19 @@ export interface PrintifyClient {
   readonly shopId: string;
   submitOrder(input: PrintifySubmitOrderInput): Promise<PrintifyOrderRef>;
   sendToProduction(printifyOrderId: string): Promise<PrintifyOrderRef>;
+  /**
+   * Find an order by the `external_id` we submitted it under, or prove it is
+   * not there. `null` means DEFINITIVELY absent within the pages searched; a
+   * search that could not be completed throws instead, because "we did not
+   * find it" and "we could not look" must never collapse into the same value
+   * on a path whose next step is deciding whether to submit again.
+   *
+   * "Could not be completed" includes a page this adapter could not PARSE. A
+   * page it cannot read is a page it learnt nothing from, and inferring an
+   * absence from one is the same false negative as inferring it from a failed
+   * request. See `readOrderPage`.
+   */
+  findOrderByExternalId(externalId: string): Promise<PrintifyOrderRef | null>;
 }
 
 /**
@@ -207,7 +286,8 @@ function toPrintifyError(status: number, rawBody: string): PrintifyError {
 async function printifyFetch(
   config: PrintifyConfig,
   path: string,
-  body: unknown,
+  method: "GET" | "POST",
+  body?: unknown,
 ): Promise<unknown> {
   if (!outboundLimiter.hit(OUTBOUND_KEY)) {
     throw new PrintifyError(429, null, "Printify request budget for this minute is spent");
@@ -216,23 +296,29 @@ async function printifyFetch(
   let res: Response;
   try {
     res = await fetch(`${PRINTIFY_API_BASE}${path}`, {
-      method: "POST",
+      method,
       // Bound the call so a hung connection cannot hold the row lock the
       // caller took out over this submission for the rest of the process's
       // life.
       signal: AbortSignal.timeout(20_000),
       headers: {
         Authorization: `Bearer ${config.token}`,
-        "Content-Type": "application/json",
+        ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
         Accept: "application/json",
       },
-      body: JSON.stringify(body),
+      ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
     });
   } catch (err) {
     // A transport failure is genuinely ambiguous on a write: the order may
     // have been created and only the answer lost. Saying so is the whole
     // value of this branch — it is why the operator checks Printify before
     // pressing the button a second time.
+    //
+    // On a GET it is merely a failed read, and the caller is expected to treat
+    // it as such — but status 0 is left the same on both so that a stored
+    // `"0:none"` on an order that never got an id is read as ambiguous no
+    // matter which call produced it. Under-claiming certainty is free here;
+    // over-claiming it costs a parcel.
     throw new PrintifyError(
       0,
       null,
@@ -257,11 +343,130 @@ function readOrderRef(payload: unknown, fallbackId?: string): PrintifyOrderRef {
   };
   const id = typeof obj.id === "string" ? obj.id : typeof obj.id === "number" ? String(obj.id) : fallbackId;
   if (!id) {
-    // Without an id there is nothing to write on the row, and an order we
-    // cannot name is an order we would submit again. Fail loudly instead.
-    throw new PrintifyError(502, null, "Printify accepted the order without returning an id");
+    // We are PAST `res.ok` here, and on the empty-body path we are past it
+    // having been handed `{}`. So Printify accepted the request — the order
+    // very likely exists — and the one thing we needed back is missing.
+    //
+    // This is the ambiguous error and not a plain 502, because the difference
+    // decides what happens next: a 502 is a refusal a machine may retry, and
+    // retrying THIS is posting an order that already exists. The caller
+    // reconciles by `external_id` instead.
+    throw new PrintifyAmbiguousSubmissionError(
+      502,
+      null,
+      "Printify accepted the order without returning an id",
+    );
   }
   return { id, status: typeof obj.status === "string" ? obj.status : null };
+}
+
+/**
+ * Pages of the shop's order list read before `findOrderByExternalId` gives up.
+ *
+ * The lookup exists to find a submission made minutes ago, and the shop's list
+ * is ASSUMED to be returned newest first — which would put the match on the
+ * first page in every case this is called for. That assumption has not been
+ * verified: the captured response carries `current_page`/`last_page` and no
+ * documented sort order, and nothing here or in the tests establishes one. It
+ * is recorded as an assumption on purpose, because if it is wrong the only
+ * consequence is a deeper scan, and the code below is written so that a deeper
+ * scan is slow rather than wrong: the budget is a bound on a pathological loop,
+ * not a search depth anybody is expected to need, and exhausting it THROWS
+ * rather than returning "absent". An absence inferred from a search that
+ * stopped early is exactly the false negative that gets a second parcel
+ * printed. Do not narrow this budget on the strength of the ordering claim
+ * until somebody has actually checked it.
+ */
+const FIND_ORDER_MAX_PAGES = 20;
+const FIND_ORDER_PAGE_SIZE = 50;
+
+/** One listed order, reduced to the three things this adapter is allowed to keep. */
+interface OrderPageEntry {
+  id: string;
+  /** `metadata.shop_order_label` — where the value we POST as `external_id` comes back. */
+  label: string | null;
+  /** A top-level `external_id`, which Printify does not currently send. Fallback only. */
+  externalId: string | null;
+  status: string | null;
+}
+
+/**
+ * One page of `GET /shops/{id}/orders.json`, reduced to what we match on.
+ *
+ * **This function THROWS rather than returning an empty page, and that is the
+ * whole point of it.** Its previous shape was `Array.isArray(obj.data) ?
+ * obj.data : []`, which turned every unexpected envelope — a bare array, a
+ * `{"orders": …}`, an HTML error page that happened to parse, a 200 with `{}` —
+ * into a page with no entries. `findOrderByExternalId` then read "no entries"
+ * as the end of the list and answered `null`: definitively absent. So a page we
+ * could not understand became proof that Printify does not have the order, on
+ * the one path whose next step is posting it again.
+ *
+ * Worse, it contradicted the adapter's own reading of the same value elsewhere:
+ * an empty `{}` from the submission POST raises `PrintifyAmbiguousSubmissionError`
+ * — "we cannot tell, do not resubmit" — while the same empty `{}` from this GET
+ * used to mean "certainly not there, resubmit". One of those had to be wrong,
+ * and it was this one.
+ *
+ * So absence is now only ever concluded from POSITIVE evidence of a well-formed
+ * page: `data` an array, and the three pagination fields the live envelope
+ * really carries (`current_page`, `last_page`, `total`) all present as numbers.
+ * Anything else is a failed read and is reported as one.
+ */
+function readOrderPage(payload: unknown): {
+  entries: OrderPageEntry[];
+  currentPage: number;
+  lastPage: number;
+  total: number;
+} {
+  const obj = (typeof payload === "object" && payload !== null ? payload : {}) as {
+    data?: unknown;
+    current_page?: unknown;
+    last_page?: unknown;
+    total?: unknown;
+  };
+  const currentPage = typeof obj.current_page === "number" ? obj.current_page : null;
+  const lastPage = typeof obj.last_page === "number" ? obj.last_page : null;
+  const total = typeof obj.total === "number" ? obj.total : null;
+  if (!Array.isArray(obj.data) || currentPage === null || lastPage === null || total === null) {
+    // Deliberately says nothing about what WAS there. The body is not quoted
+    // back for the same reason `toPrintifyError` drops Printify's `errors`
+    // object: an order list is a page of other buyers' addresses.
+    throw new PrintifyError(
+      502,
+      null,
+      "Printify order list page was not in the expected shape",
+    );
+  }
+
+  const entries: OrderPageEntry[] = [];
+  for (const item of obj.data) {
+    // Each listed order carries a full `address_to` — the buyer's street, and
+    // on a reconcile scan it is mostly OTHER buyers' streets. Three values are
+    // lifted out here and the rest of the entry is dropped on the floor, so no
+    // caller can be handed an address it did not ask for and no log line can
+    // acquire one by widening a field later. `metadata` is likewise not kept:
+    // one string is read out of it and the object itself does not escape.
+    const entry = (typeof item === "object" && item !== null ? item : {}) as {
+      id?: unknown;
+      external_id?: unknown;
+      metadata?: unknown;
+      status?: unknown;
+    };
+    const id =
+      typeof entry.id === "string" ? entry.id : typeof entry.id === "number" ? String(entry.id) : null;
+    if (id === null) continue;
+    const metadata = (typeof entry.metadata === "object" && entry.metadata !== null
+      ? entry.metadata
+      : {}) as { shop_order_label?: unknown };
+    entries.push({
+      id,
+      label: typeof metadata.shop_order_label === "string" ? metadata.shop_order_label : null,
+      externalId: typeof entry.external_id === "string" ? entry.external_id : null,
+      status: typeof entry.status === "string" ? entry.status : null,
+    });
+  }
+  return { entries, currentPage, lastPage, total };
 }
 
 /**
@@ -281,7 +486,7 @@ export function getUncachablePrintifyClient(): PrintifyClient {
     shopId: config.shopId,
 
     async submitOrder(input: PrintifySubmitOrderInput): Promise<PrintifyOrderRef> {
-      const payload = await printifyFetch(config, `/shops/${config.shopId}/orders.json`, {
+      const payload = await printifyFetch(config, `/shops/${config.shopId}/orders.json`, "POST", {
         external_id: input.externalId,
         label: input.label,
         line_items: input.lineItems,
@@ -299,12 +504,53 @@ export function getUncachablePrintifyClient(): PrintifyClient {
     },
 
     async sendToProduction(printifyOrderId: string): Promise<PrintifyOrderRef> {
+      // `printifyOrderId` is passed as the fallback, so this call CANNOT raise
+      // the ambiguous error: we already know the order's name, which is the
+      // thing the ambiguous case is missing. Release is never ambiguous in the
+      // way submission is, and re-sending an order that is already in
+      // production does not manufacture a second parcel.
       const payload = await printifyFetch(
         config,
         `/shops/${config.shopId}/orders/${encodeURIComponent(printifyOrderId)}/send_to_production.json`,
+        "POST",
         {},
       );
       return readOrderRef(payload, printifyOrderId);
+    },
+
+    async findOrderByExternalId(externalId: string): Promise<PrintifyOrderRef | null> {
+      // Matched with `===` and never with a prefix, a case fold or a
+      // "startsWith": the value is a UUID we minted, and a fuzzy match here
+      // would adopt somebody else's Printify order onto this row.
+      //
+      // `shop_order_label` first because it is where Printify actually echoes
+      // the value back, then a top-level `external_id` which no observed
+      // response carries — kept so that a plan or an API version that does
+      // populate it is matched rather than missed.
+      for (let page = 1; page <= FIND_ORDER_MAX_PAGES; page += 1) {
+        const payload = await printifyFetch(
+          config,
+          `/shops/${config.shopId}/orders.json?page=${page}&limit=${FIND_ORDER_PAGE_SIZE}`,
+          "GET",
+        );
+        const { entries, lastPage } = readOrderPage(payload);
+        for (const entry of entries) {
+          if (entry.label === externalId || entry.externalId === externalId) {
+            return { id: entry.id, status: entry.status };
+          }
+        }
+        // The DECLARED end of the list, and only that. An empty `data` used to
+        // end the scan too, which meant a page whose shape we had misread ended
+        // it as well — `readOrderPage` now refuses to produce one of those, and
+        // a genuinely empty shop still arrives here with `last_page = 1` and
+        // gets the same answer by the honest route.
+        if (page >= lastPage) return null;
+      }
+      throw new PrintifyError(
+        502,
+        null,
+        "Printify order search hit its page budget without reaching the end of the list",
+      );
     },
   };
 }

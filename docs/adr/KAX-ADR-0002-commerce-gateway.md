@@ -724,13 +724,25 @@ routes against sibling tables and are never merged.
 6 and the sentence "Printify submission hangs off the paid webhook" under "Settlement is
 webhook-driven" are superseded with it. `POST /api/admin/commerce-orders/:id/submit` creates
 the order at Printify and `POST /api/admin/commerce-orders/:id/release` sends it to
-production; both are idempotent no-ops under `SELECT … FOR UPDATE`, and `submit` refuses
-anything whose `status` is not `paid` at the moment of that locked read. Two steps and not
+production; both are idempotent no-ops under `SELECT … FOR UPDATE`, and **both refuse
+anything whose `status` is not `paid` at the moment of that locked read**. Two steps and not
 one, because the window between them is where a human's eyeballs are simultaneously the
 address-validation backstop and the fraud check — which is what makes shipping v0.1 without
 an address-validation service a decision rather than an omission. The webhook keeps settling
 `commerce_orders.status`, `refunded` and `chargeback` included, so an order whose money has
 gone back stops being submittable.
+
+> **Corrected (#325 follow-up).** The sentence above originally said `submit` refused an
+> unpaid order and said nothing about `release`, and the code matched: `release` checked
+> `released_at` and `printify_order_id` and never read `status` at all. That is a hole and
+> not an omission in the prose. Submission and production are separated by a hold window
+> measured in minutes, `charge.dispute.created` and `charge.refunded` land inside windows
+> like that, and "the money has gone back" therefore has to be re-asked at the moment of
+> production and not inherited from the moment of submission. `release` now reads `status`
+> under its own `FOR UPDATE` and answers `not_paid` — 409 on the admin endpoint, a no-op
+> that burns no attempt in the worker. The clause `status = 'paid'` was added to the
+> worker's release claim query at the same time, but that one is only an optimiser: the
+> locked read is what decides, exactly as on the submit side.
 
 > **Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on.** The paragraph above stays true of
 > every deployment that has not set that flag, which is all of them by default. What it no
@@ -756,21 +768,124 @@ gone back stops being submittable.
 >
 > **The retry policy is the genuinely new decision.** `printifyClient.ts` never retries a
 > write, because a retried submission whose first attempt landed is a second parcel. The
-> worker earns each retry: 429 and 5xx back off exponentially from a minute to a six-hour
-> ceiling; **every other 4xx parks immediately**, because a rejected address is rejected
-> again tomorrow; and a **transport failure parks too**, because it is the one case where we
-> cannot know whether the order was created and only the answer lost, which makes it exactly
-> the case a machine must not retry. Parking sets `fulfillment_attempts` to the ceiling,
-> which every claim query filters on — the order leaves the worker's hands for good and
-> waits for the manual endpoints, which still work on it. Migration 0028 adds the four
-> columns this needs; `fulfillment_last_error` holds the provider's status and code and
-> **never a response body**, because Printify's 4xx bodies quote the offending field back and
-> on this path that field is the buyer's street.
+> worker earns each retry: **429 backs off exponentially** — 2, 4, 8, 16 and 32 minutes
+> between six attempts, so 62 minutes of retrying in total — and **every other 4xx parks
+> immediately**, because a rejected address is rejected again tomorrow. A **transport
+> failure parks too**: status 0 usually means the network is gone, in which case nothing
+> this process can do will resolve the order faster than a human will. Parking sets
+> `fulfillment_attempts` to the ceiling, which every claim query filters on — the order
+> leaves the worker's hands for good and waits for the manual endpoints, which still work on
+> it. Migration 0028 adds the four columns this needs; `fulfillment_last_error` holds the
+> provider's status and code, or one of a small set of fixed literals, and **never a
+> response body**, because Printify's 4xx bodies quote the offending field back and on this
+> path that field is the buyer's street.
+>
+> **Corrected (#325 follow-up): 5xx is not a retryable failure, it is an unknown.** The
+> paragraph above originally grouped 5xx with 429 and called a transport failure "the one
+> case where we cannot know whether the order was created". Both halves were wrong, and the
+> second was wrong in the expensive direction. A 5xx can just as easily come from a backend
+> that created the order and then failed to answer; and a **2xx carrying no order id** —
+> which `printifyClient.ts` raised as a 502 and the worker therefore read as a retryable
+> server error — is worse than unknown, because the request was accepted and the order
+> almost certainly EXISTS. Retrying either one posts a second order against one customer
+> payment: a second parcel, and a second charge to the merchant's own card.
+>
+> So ambiguity is now a first-class outcome and never a retry.
+> `PrintifyAmbiguousSubmissionError` is the signal for "the provider may have created this
+> order and we cannot name it", the no-id path raises it, and it can never satisfy
+> `isRetryable`. Before the worker would resubmit a paid order that still has no
+> `printify_order_id` and whose last marker is ambiguous, it calls
+> `findOrderByExternalId(client_reference)` — which is what `external_id` has been carrying
+> the order's `client_reference` FOR since the first version of this design, and which
+> nothing could read back until now. Found means adopt the id, mark the row submitted, charge
+> no attempt and post nothing. Definitively absent — a completed search that reached the end
+> of the list — means a resubmission creates one parcel rather than a second one. A search
+> that FAILED, including one that ran out of its page budget, resolves nothing: it charges an
+> attempt, keeps the ambiguous marker and looks again next tick, because "we could not look"
+> must never be read as "it is not there".
+>
+> The release pass is deliberately untouched by this. `sendToProduction` is called with an id
+> already on the row, so it cannot raise the ambiguous error, and re-sending an order that is
+> already in production manufactures nothing extra. Ambiguity is a property of naming the
+> order, and release begins by knowing the name.
 >
 > **`GET /api/admin/commerce-orders`** is added with it, because a retry ladder readable only
 > in logs is one nobody can answer "did that order ship?" about. It is `requireAdmin`, and it
 > does **not** carry the `ship_to_*` columns — the address leaves this server exactly once,
 > addressed to the printer, and a listing page finding it convenient is not a second reason.
+>
+> **Corrected again (#327): the guard above was written against an API that does not
+> exist, and inferred absence from three things that are not one.** A live response was
+> captured from `GET /v1/shops/{id}/orders.json` and checked against the code. Four
+> corrections follow, and each of them turned a guard against a duplicate parcel into a
+> cause of one.
+>
+> 1. **There is no top-level `external_id` in a Printify order.** Not in the list
+>    projection and not in `GET /orders/{id}.json`. The keys a listed order carries are
+>    `id, app_order_id, shop_id, address_to, line_items, metadata, total_price,
+>    total_shipping, total_tax, status, shipping_method, created_at,
+>    sent_to_production_at, fulfilment_type, printify_connect, sales_channel_type_id`. The
+>    value we POST as `external_id` comes back inside `metadata`, as `shop_order_label`.
+>    `findOrderByExternalId` read `row.external_id`, which is `undefined` on every row: no
+>    page ever matched, the scan ran to the declared last page, and the function answered
+>    `null` — "definitively absent" — to the one caller whose next step was to post the
+>    order again. It now matches `metadata.shop_order_label`, with the top-level field kept
+>    as a fallback in case a plan or an API version ever populates it. Every fixture was
+>    rebuilt from the captured shape, because fixtures that invented the field are what let
+>    the bug pass a test suite.
+> 2. **A page that could not be parsed is not an empty page.** `Array.isArray(obj.data) ?
+>    obj.data : []` turned a bare array, an unexpected envelope, or a 200 with `{}` into a
+>    page with no entries, which the pager read as the end of the list and reported as
+>    absence. It also contradicted the adapter's own reading of the same value: an empty
+>    `{}` from the submission POST raises the ambiguous error — "we cannot tell, do not
+>    resubmit" — while the same `{}` from the GET meant "certainly not there, resubmit".
+>    Absence is now concluded only from positive evidence of a well-formed page: `data` an
+>    array and `current_page`, `last_page` and `total` all present as numbers. Anything else
+>    throws, consistent with the interface's own contract that a search which could not be
+>    completed throws rather than answering.
+> 3. **Reconciliation runs before EVERY submission, not only before an ambiguous-looking
+>    one.** The marker is written after the POST returns, so the failures it exists for — a
+>    crash inside the POST window, an OOM, a pod replaced by a rolling deploy, a database
+>    blip — are precisely the failures that stop it being written. What is left behind is a
+>    row that looks untried: null id, zero attempts, null error. The guard was keyed on the
+>    one piece of state the failure it guards against destroys. A durable pre-POST intent
+>    write would close it too, but it costs a transaction on every submission to record
+>    something one GET can settle, and it would still have to be reconciled against Printify
+>    to be acted on. Reconciling unconditionally is cheaper, is one path instead of two, and
+>    closes the marker-overwrite hole in the same motion — a marker later replaced or
+>    cleared can no longer hide an existing order, because nothing consults it to decide
+>    whether to look. The cost is one GET per submission against a 600/minute ceiling, on a
+>    shop that submits a handful of orders a day; the cost of a failed lookup is that
+>    nothing is submitted until it succeeds, which is the safe direction.
+> 4. **`POST /admin/commerce-orders/:id/submit` reconciles too.** That endpoint is where an
+>    order the worker could not resolve is ROUTED to a human, and it posted blind: no
+>    lookup, no look at the marker. The most likely place in the system to print a second
+>    parcel was the button pressed by the one person who had been told the order needed
+>    attention. It now runs the same reconcile — adopting an order Printify already has and
+>    reporting `reconciled: true` — and answers **409 `reconcile_unavailable`** when the
+>    lookup could not be completed AND the row says a submission may already exist, which
+>    `{"acknowledgeDuplicateRisk": true}` overrides for an operator who has just checked
+>    Printify's own UI. A failed lookup on a row with nothing in doubt is deliberately NOT a
+>    409: the manual route is the only path to a fulfilled order proven in production, and
+>    refusing there would take it away every time Printify's list endpoint was unwell. The
+>    reconcile is also skipped entirely for an order that is not paid, not there, or already
+>    submitted — those refuse without a provider call, and spending a lookup to reach the
+>    same refusal would put outbound traffic on paths that had none.
+>
+> **On search depth: the claim that the order list is newest-first is an ASSUMPTION and has
+> not been verified.** The captured envelope carries `current_page` and `last_page` and
+> documents no sort order, and nothing in the code or the tests establishes one. It is
+> recorded as an assumption rather than a fact because the code is written so that being
+> wrong about it is slow rather than dangerous: the page budget bounds a pathological loop,
+> exhausting it throws, and absence is only ever concluded from the declared last page. Do
+> not narrow the budget on the strength of the ordering claim until somebody has checked it.
+>
+> **Adjacent, found while fixing the above:** `ensureCriticalSchema.ts` re-seeded the sticker
+> at `item_cents = 1564`, which is 0026's figure and not 0027's. An applied migration never
+> re-runs, so a rebuilt `commerce_products` would have come back carrying the double-counted
+> total 0027 exists to remove — $20.73 for a sticker priced at $15.64 — on the quietest
+> possible path, a table repair nobody watched. The seed now carries 1055 + 509 and the
+> variant id, and the schema test asserts the migrated state rather than the remembered one.
 
 **The purchase endpoints are deliberately off the OpenAPI contract, and the settings
 endpoints are deliberately on it.** This is a recorded split rather than an accident of
@@ -886,6 +1001,12 @@ page.**
 > must be idempotent under the order's key and must fail loudly enough to be redelivered; a
 > worker that reads `status = 'paid'` under a row lock on its own clock owes Stripe nothing,
 > retries on its own terms, and can be switched off without touching the settlement path.
+> That sentence describes **both** of the worker's passes and is the reason the release pass
+> was changed to make it true: until the #325 follow-up, `releaseCommerceOrder` never read
+> `status`, so the half of the worker that actually spends money on manufacturing was the
+> half that was not reading the settlement the webhook writes. Reading it under the lock is
+> what lets the worker stay indifferent to Stripe's delivery timing — a dispute that lands
+> at any point before production is seen by the next locked read, whenever that is.
 > The flag is off by default, both endpoints remain, and a deployment gets the manual path
 > unless it says otherwise. See "Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on" above for
 > the retry policy, the release hold window, and what the automation costs.
@@ -2003,7 +2124,9 @@ it and should be done first for that reason as well as for the safety one.
    the shipped handler at `webhooks.ts:156-163`.~~ **SUPERSEDED for the physical path
    (#287)** — see "Superseded for the physical path (#286)". Submission is a **manual
    two-step admin action**, `submit` then `release`, each idempotent under
-   `SELECT … FOR UPDATE` and `submit` gated on `status = 'paid'`. The manual window between
+   `SELECT … FOR UPDATE` and **each gated on `status = 'paid'` read under that lock** — the
+   second half of that gate arrived in the #325 follow-up; see the correction under
+   "Superseded for the physical path (#286)". The manual window between
    them is the fraud and address-validation backstop and is the whole rationale; making it a
    webhook side effect removes it. The webhook keeps settling `commerce_orders.status` —
    `paid` / `payment_failed` off `payment_intent.*`, `refunded` / `chargeback` off
@@ -2018,7 +2141,7 @@ it and should be done first for that reason as well as for the safety one.
 | derived print master | `native_pass` has no print master by definition — and both candidate v0.1 stickers are native passes (900 × 900 or 832 × 832 required against a measured 1024 × 1024), so whichever the operator picks, nothing on the path wants one |
 | `TaxProvider` interface | the ADR's own wording is "before public launch", and one transaction is not a public launch — Stripe Tax as configuration |
 | normalized commerce event | the `commerce_orders` row **is** the event; the event is its projection |
-| reconciliation engine | one order needs poll-on-read, not a drift engine |
+| reconciliation engine | one order needs poll-on-read, not a drift engine. Still cut: the #325 follow-up adds `findOrderByExternalId`, which is a lookup of ONE order by the key we submitted it under and is called only where the alternative is posting it twice. It reconciles nothing on a schedule and compares no state |
 | upscaling, object storage, multi-product | upload-by-URL removes the need, and a sticker needs no upscale at all; upscaling is what v0.2 buys the larger formats with |
 | **posters, and every format above the source's 1024 px** | not deferred by preference — **unreachable**. The smallest poster needs 2700 × 3300 and there is no larger original; 4 × 4 in stickers need 1113 px and miss by 8%. They return with upscaling in v0.2 |
 | trademark / likeness review | no producer exists; replaced by merchant indemnity + takedown |
