@@ -232,6 +232,13 @@ export const UNMARK_SAFE_MIGRATIONS: ReadonlySet<string> = new Set([
   "0025_stripe_listing_orders.sql",
   "0026_physical_commerce.sql",
   "0027_publish_the_first_sticker.sql",
+  // Both are ALTER ... ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS
+  // and nothing else, so re-running either is a no-op on a healthy database.
+  // They are listed because this exact recovery was needed once: a
+  // `drizzle-kit push` dropped 0028's columns from production, and with 0028
+  // already journaled there was no migration path back.
+  "0028_fulfillment_worker_state.sql",
+  "0029_restore_fulfillment_worker_columns.sql",
 ]);
 
 export async function unmarkJournal(filenames: string[]): Promise<{ unmarked: string[]; notJournaled: string[] }> {
