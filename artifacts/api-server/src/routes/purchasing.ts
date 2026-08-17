@@ -286,10 +286,22 @@ router.post("/me/purchasing/setup-intent", requireAuth, async (req: Request, res
   const customerId = await ensureStripeCustomer(userId, user?.email ?? null);
 
   const stripe = await getUncachableStripeClient();
+  // Cards only. `automatic_payment_methods` offers whatever is enabled on the
+  // Stripe account — bank debits, wallets, Link — and everything downstream of
+  // here is written for a card: the expiry check in `derivePurchasingState`,
+  // the on-session confirm in the purchase path, and the stored-card terms the
+  // buyer accepts. Offering a method that then cannot be charged is worse than
+  // not offering it: the buyer saves it, sees `•••• ????` where the last four
+  // digits belong, and discovers at the till that it was never going to work.
+  //
+  // `usage: "off_session"` still stands and is deliberate — see the design
+  // note on the settings card. It is the superset, and it pushes any
+  // authentication challenge to setup time, on a 2D page with a full element
+  // mounted, rather than to the moment of purchase in the 3D city.
   const intent = await stripe.setupIntents.create({
     customer: customerId,
     usage: "off_session",
-    automatic_payment_methods: { enabled: true },
+    payment_method_types: ["card"],
   });
 
   // The client secret and nothing else. The Customer id is the server's
@@ -384,7 +396,33 @@ router.post("/me/purchasing/payment-method", requireAuth, async (req: Request, r
   }
 
   const method = await stripe.paymentMethods.retrieve(paymentMethodId);
-  const card = method.card ?? null;
+
+  // Cards only, and refused here rather than trusted from the element.
+  //
+  // The SetupIntent now asks Stripe for `payment_method_types: ["card"]`, so
+  // the element should never offer anything else — but which methods a buyer
+  // is shown is account configuration and a client-side widget, and neither is
+  // a permission. Without this check a bank debit or a wallet saves a row with
+  // no `card` object at all: `brand` and `last4` land NULL, the dashboard
+  // renders the placeholder `•••• ????`, and the purchase then tries to
+  // confirm a mandate-based method on-session as though it were a card and
+  // fails with a 500 the buyer cannot act on.
+  //
+  // This is not a statement that only cards are worth supporting. It is that
+  // everything downstream — the expiry check in `derivePurchasingState`, the
+  // on-session confirm in the purchase path, the saved-card terms the buyer
+  // agreed to — is written for a card today. A bank debit settles over days,
+  // which the charge-then-submit-to-Printify ordering assumes away. Adding one
+  // means changing those, not relaxing this.
+  if (method.type !== "card" || !method.card) {
+    res.status(400).json({
+      error: "Only a card can be saved for physical purchases at the moment",
+      code: "unsupported_payment_method",
+      paymentMethodType: method.type,
+    });
+    return;
+  }
+  const card = method.card;
 
   const now = new Date();
   try {
