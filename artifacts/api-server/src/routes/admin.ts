@@ -6,7 +6,6 @@ import {
   artifactsTable,
   dropsTable,
   commerceOrdersTable,
-  commerceProductsTable,
 } from "@workspace/db/schema";
 import { and, desc, eq, isNull, ne, sql, count } from "drizzle-orm";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
@@ -24,13 +23,13 @@ import { fetchPublicGallery } from "../lib/publicClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import {
-  addressToFromSnapshot,
   getUncachablePrintifyClient,
   printifyEnabled,
   PrintifyError,
   PrintifyNotConfiguredError,
   type PrintifyClient,
 } from "../lib/printifyClient";
+import { releaseCommerceOrder, submitCommerceOrder } from "../lib/commerceFulfillment";
 
 const router: IRouter = Router();
 
@@ -618,6 +617,83 @@ function reportPrintifyFailure(res: Response, err: unknown): boolean {
   return true;
 }
 
+/** Newest first, and never the whole table. */
+const COMMERCE_ORDER_LIST_DEFAULT_LIMIT = 50;
+const COMMERCE_ORDER_LIST_MAX_LIMIT = 200;
+
+/**
+ * The listing behind both fulfilment paths.
+ *
+ * Until this existed there was no way to find an order to press submit on
+ * except to know its id already, which made the manual path close to unusable
+ * and would have made the automatic one unobservable — a worker whose retries,
+ * backoff and parked orders can only be read out of a log is a worker nobody
+ * can answer "did that order ship?" about.
+ *
+ * **The `ship_to_*` columns are not in the projection, and that is the point.**
+ * The fields are selected by name rather than filtered out of a `SELECT *`,
+ * because those are not the same guarantee: a stripping step is one refactor
+ * away from being incomplete, whereas a column that was never asked for cannot
+ * be forgotten about. The buyer's address leaves this server exactly once,
+ * addressed to the printer. It does not leave it again because a listing page
+ * found it convenient, and it is not in this response even for an admin — an
+ * operator who genuinely needs to read an address has Printify's own UI, where
+ * the parcel it belongs to is.
+ *
+ * `status` and `fulfillment_state` are compared as the varchars they are, so an
+ * unrecognised filter value returns nothing rather than raising — the reason
+ * neither column is a pgEnum.
+ */
+router.get("/admin/commerce-orders", requireAdmin, async (req, res) => {
+  const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
+  const fulfillmentState =
+    typeof req.query["fulfillmentState"] === "string" ? req.query["fulfillmentState"] : undefined;
+
+  const requested = Number(req.query["limit"]);
+  const limit =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, COMMERCE_ORDER_LIST_MAX_LIMIT)
+      : COMMERCE_ORDER_LIST_DEFAULT_LIMIT;
+
+  const filters = [
+    status !== undefined ? eq(commerceOrdersTable.status, status) : undefined,
+    fulfillmentState !== undefined
+      ? eq(commerceOrdersTable.fulfillmentState, fulfillmentState)
+      : undefined,
+  ].filter((f) => f !== undefined);
+
+  const orders = await db
+    .select({
+      id: commerceOrdersTable.id,
+      clientReference: commerceOrdersTable.clientReference,
+      buyerUserId: commerceOrdersTable.buyerUserId,
+      sku: commerceOrdersTable.sku,
+      currency: commerceOrdersTable.currency,
+      itemCents: commerceOrdersTable.itemCents,
+      shippingCents: commerceOrdersTable.shippingCents,
+      taxCents: commerceOrdersTable.taxCents,
+      totalCents: commerceOrdersTable.totalCents,
+      status: commerceOrdersTable.status,
+      fulfillmentState: commerceOrdersTable.fulfillmentState,
+      printifyOrderId: commerceOrdersTable.printifyOrderId,
+      submittedAt: commerceOrdersTable.submittedAt,
+      releasedAt: commerceOrdersTable.releasedAt,
+      releaseActor: commerceOrdersTable.releaseActor,
+      fulfillmentAttempts: commerceOrdersTable.fulfillmentAttempts,
+      fulfillmentLastError: commerceOrdersTable.fulfillmentLastError,
+      fulfillmentLastAttemptAt: commerceOrdersTable.fulfillmentLastAttemptAt,
+      fulfillmentNextAttemptAt: commerceOrdersTable.fulfillmentNextAttemptAt,
+      createdAt: commerceOrdersTable.createdAt,
+      updatedAt: commerceOrdersTable.updatedAt,
+    })
+    .from(commerceOrdersTable)
+    .where(filters.length > 0 ? and(...filters) : undefined)
+    .orderBy(desc(commerceOrdersTable.id))
+    .limit(limit);
+
+  res.json({ orders, limit });
+});
+
 router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, requireAdmin, async (req, res) => {
   const printify = printifyForRequest(res);
   if (!printify) return;
@@ -625,70 +701,12 @@ router.post("/admin/commerce-orders/:id/submit", requirePrintifyEnabled, require
   if (id === null) return;
 
   try {
-    const outcome = await db.transaction(async (tx) => {
-      const [order] = await tx
-        .select()
-        .from(commerceOrdersTable)
-        .where(eq(commerceOrdersTable.id, id))
-        .limit(1)
-        .for("update");
-      if (!order) return { kind: "not_found" } as const;
-
-      // Already submitted: hand back the id we already have and call nothing.
-      // This is the branch that makes a double-click, a retried deploy script
-      // and a second operator all cost one print run.
-      if (order.printifyOrderId) {
-        return { kind: "already_submitted", order, printifyOrderId: order.printifyOrderId } as const;
-      }
-
-      if (order.status !== "paid") {
-        return { kind: "not_paid", order } as const;
-      }
-
-      // The product is looked up by the SKU the order recorded, because the
-      // order snapshots what was sold rather than pointing at a row that can be
-      // repriced or re-wired afterwards. Only the print identifiers come from
-      // here; no money does.
-      const [product] = await tx
-        .select({
-          printifyProductId: commerceProductsTable.printifyProductId,
-          printifyVariantId: commerceProductsTable.printifyVariantId,
-        })
-        .from(commerceProductsTable)
-        .where(eq(commerceProductsTable.sku, order.sku))
-        .limit(1);
-
-      // `printify_variant_id` is varchar so that an opaque foreign key never
-      // gets arithmetic done to it; Printify wants the number, so the
-      // conversion happens here at the boundary and a value that is not one is
-      // a product nobody can print rather than a `NaN` posted to a printer.
-      const variantId = Number(product?.printifyVariantId);
-      if (!product?.printifyProductId || !Number.isInteger(variantId) || variantId <= 0) {
-        return { kind: "not_printable", order } as const;
-      }
-
-      const submitted = await printify.submitOrder({
-        externalId: order.clientReference,
-        label: order.clientReference,
-        lineItems: [
-          { product_id: product.printifyProductId, variant_id: variantId, quantity: 1 },
-        ],
-        addressTo: addressToFromSnapshot(order),
-      });
-
-      const now = new Date();
-      await tx
-        .update(commerceOrdersTable)
-        .set({
-          printifyOrderId: submitted.id,
-          fulfillmentState: "submitted",
-          submittedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(commerceOrdersTable.id, order.id));
-
-      return { kind: "submitted", order, printifyOrderId: submitted.id, submittedAt: now } as const;
-    });
+    // The row lock, the two guards, the `paid` precondition and the rollback
+    // all live in `lib/commerceFulfillment.ts` now, because the automatic
+    // worker presses the same button and a second copy of that reasoning is
+    // the copy that eventually double-prints. This handler's whole remaining
+    // job is turning an outcome into a status code.
+    const outcome = await submitCommerceOrder(db, printify, id);
 
     switch (outcome.kind) {
       case "not_found":
@@ -748,40 +766,7 @@ router.post("/admin/commerce-orders/:id/release", requirePrintifyEnabled, requir
   const actor = req.user!.id;
 
   try {
-    const outcome = await db.transaction(async (tx) => {
-      const [order] = await tx
-        .select()
-        .from(commerceOrdersTable)
-        .where(eq(commerceOrdersTable.id, id))
-        .limit(1)
-        .for("update");
-      if (!order) return { kind: "not_found" } as const;
-
-      if (order.releasedAt) {
-        return { kind: "already_released", order } as const;
-      }
-      if (!order.printifyOrderId) {
-        // Release is the second half of a two-step, and the first half has not
-        // happened. Nothing to send to production, and inventing a submission
-        // here would be the single-step flow this endpoint exists to avoid.
-        return { kind: "not_submitted", order } as const;
-      }
-
-      const released = await printify.sendToProduction(order.printifyOrderId);
-
-      const now = new Date();
-      await tx
-        .update(commerceOrdersTable)
-        .set({
-          fulfillmentState: "in_production",
-          releasedAt: now,
-          releaseActor: actor,
-          updatedAt: now,
-        })
-        .where(eq(commerceOrdersTable.id, order.id));
-
-      return { kind: "released", order, releasedAt: now, providerStatus: released.status } as const;
-    });
+    const outcome = await releaseCommerceOrder(db, printify, id, actor);
 
     switch (outcome.kind) {
       case "not_found":

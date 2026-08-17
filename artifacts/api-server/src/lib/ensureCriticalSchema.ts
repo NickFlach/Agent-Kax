@@ -457,9 +457,35 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         submitted_at              timestamptz,
         released_at               timestamptz,
         release_actor             varchar,
+        fulfillment_attempts      integer NOT NULL DEFAULT 0,
+        fulfillment_last_error    varchar,
+        fulfillment_last_attempt_at  timestamptz,
+        fulfillment_next_attempt_at  timestamptz,
         created_at                timestamptz NOT NULL DEFAULT now(),
         updated_at                timestamptz NOT NULL DEFAULT now()
       )`),
+  },
+  {
+    /**
+     * The worker-state columns again, as ALTERs.
+     *
+     * The CREATE above is `IF NOT EXISTS`, so on every database that already
+     * has `commerce_orders` — which is all of them — it is a no-op and the four
+     * columns added to it reach nothing. That is the whole trap of a boot
+     * repair written as one CREATE: the shape drifts forward and the existing
+     * table never sees it. The CREATE covers a table rebuilt from nothing; this
+     * covers the table that is actually there.
+     *
+     * Migration 0028 is the real registration of these columns; this is the
+     * copy that survives a deploy diff dropping them again.
+     */
+    label: "commerce_orders fulfillment worker columns",
+    sql: sql.raw(`
+      ALTER TABLE commerce_orders
+        ADD COLUMN IF NOT EXISTS fulfillment_attempts integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS fulfillment_last_error varchar,
+        ADD COLUMN IF NOT EXISTS fulfillment_last_attempt_at timestamptz,
+        ADD COLUMN IF NOT EXISTS fulfillment_next_attempt_at timestamptz`),
   },
   {
     label: "commerce_orders buyer index",
@@ -475,6 +501,14 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
     label: "commerce_orders status index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_status_idx
                   ON commerce_orders (status, created_at)`),
+  },
+  {
+    // The automatic worker's claim query, on both passes. Partial on
+    // `released_at IS NULL` so a released order leaves the index for good.
+    label: "commerce_orders fulfillment due index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_fulfillment_due_idx
+                  ON commerce_orders (fulfillment_next_attempt_at)
+                  WHERE released_at IS NULL`),
   },
   {
     /**
