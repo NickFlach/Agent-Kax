@@ -6,6 +6,7 @@ import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
 import { startKannakaArtworkResponseScheduler } from "./lib/kannakaArtworkResponse";
+import { startCommerceFulfillmentWorker } from "./lib/commerceFulfillmentWorker";
 import { registerAllEventHandlers } from "./lib/eventHandlers";
 import { start as startConstellationBridge } from "./lib/constellationBridge";
 import { runMigrations } from "@workspace/db";
@@ -238,6 +239,11 @@ async function warmUpInBackground(): Promise<void> {
   await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
   await runStartupStep("startKannakaArtworkResponseScheduler", startKannakaArtworkResponseScheduler);
+  // Opt-in, and off on every deployment that has not said otherwise: it logs
+  // that it is inert and returns unless BOTH KAX_PRINTIFY_ENABLED and
+  // KAX_PRINTIFY_AUTO_FULFILL are set. The manual admin endpoints are the
+  // default fulfilment path either way.
+  await runStartupStep("startCommerceFulfillmentWorker", startCommerceFulfillmentWorker);
   await runStartupStep("startConstellationBridge", startConstellationBridge);
   // Stripe: create the stripe-replit-sync schema, register the managed
   // webhook, and backfill existing Stripe data. Non-fatal like every other

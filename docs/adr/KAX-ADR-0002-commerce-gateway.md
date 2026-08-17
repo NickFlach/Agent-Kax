@@ -732,6 +732,46 @@ an address-validation service a decision rather than an omission. The webhook ke
 `commerce_orders.status`, `refunded` and `chargeback` included, so an order whose money has
 gone back stops being submittable.
 
+> **Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on.** The paragraph above stays true of
+> every deployment that has not set that flag, which is all of them by default. What it no
+> longer says is that manual is the *only* path: `lib/commerceFulfillmentWorker.ts` presses
+> the same two buttons on a one-minute timer, and a deployment opts into it per environment.
+>
+> **Both endpoints remain, unchanged, and remain the default.** Nothing was removed and no
+> route changed shape. The worker calls `lib/commerceFulfillment.ts`, which is the two
+> handlers' bodies lifted out verbatim — same row lock, same `paid` precondition read under
+> it, same `printify_order_id` double-submit guard, same rollback on refusal, same address
+> taken from the order's own `ship_to_*` snapshot. There is one implementation and two
+> callers, so automation cannot drift away from what an operator pressing the button gets.
+>
+> **What automation costs, stated rather than waved at.** The manual window between submit
+> and release IS the fraud and address-validation backstop, and a timer is not a pair of
+> eyes. The flag being off by default is the honest form of that: a deployment keeps the
+> backstop unless somebody decides it does not need one.
+> `KAX_PRINTIFY_AUTO_RELEASE_HOLD_MS` (default 15 minutes) preserves the *shape* of the
+> window — an operator watching `GET /api/admin/commerce-orders` has that long to cancel at
+> Printify before anything is manufactured — but a window nobody is required to look at is a
+> weaker guarantee than one that cannot advance without a human, and it should be read as
+> such. `0` is a valid setting and means no window at all.
+>
+> **The retry policy is the genuinely new decision.** `printifyClient.ts` never retries a
+> write, because a retried submission whose first attempt landed is a second parcel. The
+> worker earns each retry: 429 and 5xx back off exponentially from a minute to a six-hour
+> ceiling; **every other 4xx parks immediately**, because a rejected address is rejected
+> again tomorrow; and a **transport failure parks too**, because it is the one case where we
+> cannot know whether the order was created and only the answer lost, which makes it exactly
+> the case a machine must not retry. Parking sets `fulfillment_attempts` to the ceiling,
+> which every claim query filters on — the order leaves the worker's hands for good and
+> waits for the manual endpoints, which still work on it. Migration 0028 adds the four
+> columns this needs; `fulfillment_last_error` holds the provider's status and code and
+> **never a response body**, because Printify's 4xx bodies quote the offending field back and
+> on this path that field is the buyer's street.
+>
+> **`GET /api/admin/commerce-orders`** is added with it, because a retry ladder readable only
+> in logs is one nobody can answer "did that order ship?" about. It is `requireAdmin`, and it
+> does **not** carry the `ship_to_*` columns — the address leaves this server exactly once,
+> addressed to the printer, and a listing page finding it convenient is not a second reason.
+
 **The purchase endpoints are deliberately off the OpenAPI contract, and the settings
 endpoints are deliberately on it.** This is a recorded split rather than an accident of
 which file was edited first.
@@ -753,7 +793,10 @@ protocol stops being hand-rolled — and if it is ever put on, the `clientRefere
 go in the description, not just the schema.
 
 Environment names. The first three are **shipped and read by `lib/stripeClient.ts`**; the
-Printify pair is still to be introduced. Use exactly these:
+Printify pair was still to be introduced when this table was written and is now read by
+`lib/printifyClient.ts`, with the two automation flags below it read per tick by
+`lib/commerceFulfillmentWorker.ts`. The per-row Status column is the authority. Use exactly
+these:
 
 | Name | Purpose | Status | v0.1 |
 |---|---|---|---|
@@ -764,6 +807,8 @@ Printify pair is still to be introduced. Use exactly these:
 | `KAX_PRINTIFY_SHOP_ID` | which Printify shop to publish into | **value known and verified: `28604869`** ("KAX", `sales_channel: "custom_integration"`, created 2026-08-16, order approval set to manual). The code that reads it is to build. **Never hard-code the Shopify shop 28599902, and never default to the first shop listed** | required |
 | `KAX_COMMERCE_QUOTE_SECRET` | HMAC key for the five-minute quote token (#286) | shipped — `routes/commerce.ts` | **required on more than one instance.** Unset, each process signs with a per-process random key: roughly half of all Buy presses then land on an instance that did not mint the quote, `readQuote` returns null, and a legitimate purchase dies at `quote_invalid`. The fallback logs one warning naming this variable; provision it rather than discovering it |
 | `KAX_COMMERCE_DAILY_ORDER_CAP` | purchases per rolling 24 h before `cap_reached` (#286) | shipped — `lib/purchasingState.ts` | optional, defaults to 5. Anything that is not a positive integer falls back to the default rather than disabling the cap — a typo in a limit must not become "no limit" |
+| `KAX_PRINTIFY_AUTO_FULFILL` | drive submit/release on a timer instead of by hand, **default off** | shipped — `lib/commerceFulfillmentWorker.ts`, accepts `"1"` or `"true"`, parsed exactly as `printifyEnabled()` parses its own | optional. Both this AND `KAX_PRINTIFY_ENABLED` must be on or the worker is inert. Off means the manual admin endpoints are the only fulfilment path, which is the v0.1 decision and the default |
+| `KAX_PRINTIFY_AUTO_RELEASE_HOLD_MS` | how long an automatically submitted order waits before it is sent to production | shipped — `lib/commerceFulfillmentWorker.ts` | optional, defaults to `900000` (15 min). **`0` is a valid setting** meaning no hold at all, and is deliberately distinguished from absent — a `Number(v) \|\| DEFAULT` read would silently turn it back into 15 minutes. Non-numeric or negative falls back to the default, because a typo in a safety window must not shorten it |
 
 **Credential resolution is the shipped one and is not re-specified here.** The precedence —
 an explicit `STRIPE_SECRET_KEY` short-circuits the connector entirely, so the webhook secret
@@ -832,6 +877,18 @@ page.**
 > physical path (#286)" above. The webhook still settles `commerce_orders.status` — including
 > `refunded` and `chargeback` off `charge.refunded` / `charge.dispute.*`, which is what stops
 > an order whose money has gone back from staying submittable — it just submits nothing.
+
+> **Amended again for deployments that set `KAX_PRINTIFY_AUTO_FULFILL`.** Submission may also
+> be driven by `lib/commerceFulfillmentWorker.ts`, a scheduler that presses the two admin
+> endpoints' shared implementation on a one-minute timer. The half of the block above being
+> amended is the one about a *human* being required — not the one about the *webhook*, which
+> stands unchanged and for the same reason. A Stripe delivery that triggers manufacturing
+> must be idempotent under the order's key and must fail loudly enough to be redelivered; a
+> worker that reads `status = 'paid'` under a row lock on its own clock owes Stripe nothing,
+> retries on its own terms, and can be switched off without touching the settlement path.
+> The flag is off by default, both endpoints remain, and a deployment gets the manual path
+> unless it says otherwise. See "Superseded WHEN `KAX_PRINTIFY_AUTO_FULFILL` is on" above for
+> the retry policy, the release hold window, and what the automation costs.
 
 One thing the shipped webhook does *not* do, and physical commerce must: its settlement block
 is wrapped in a `try/catch` that logs and swallows (`webhooks.ts:165-167`), then returns 200.

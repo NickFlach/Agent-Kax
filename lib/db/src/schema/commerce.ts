@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { boolean, index, integer, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { artifactsTable } from "./artifacts";
 import { usersTable } from "./auth";
@@ -160,8 +161,37 @@ export const commerceOrdersTable = pgTable(
     printifyOrderId: varchar("printify_order_id"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     releasedAt: timestamp("released_at", { withTimezone: true }),
-    /** Who pressed release. Production is a human decision and it is recorded. */
+    /**
+     * Who pressed release. Production is a human decision and it is recorded —
+     * or, when `commerceFulfillmentWorker.ts` is armed, a sentinel saying it
+     * was not a human at all. Deliberately no foreign key to `users`: the
+     * sentinel is not a user id and must not have to become one.
+     */
     releaseActor: varchar("release_actor"),
+
+    // ── Automatic fulfilment worker state (0028) ───────────────────────────
+    //
+    // Only `commerceFulfillmentWorker.ts` writes these. The manual admin
+    // endpoints neither read nor set them, which is what keeps the manual path
+    // exactly what it was before the worker existed.
+
+    /**
+     * How many times the worker has tried and been refused. Reaching the
+     * worker's ceiling is how a row is PARKED: the claim query filters on
+     * `fulfillment_attempts < MAX`, so a parked order stops being picked up
+     * and waits for the manual endpoints instead of retrying forever.
+     */
+    fulfillmentAttempts: integer("fulfillment_attempts").notNull().default(0),
+    /**
+     * The provider's status and numeric code, e.g. `"429:8251"`. NEVER a
+     * response body: Printify's 4xx bodies quote the offending field back, and
+     * on this path that field is the buyer's street.
+     */
+    fulfillmentLastError: varchar("fulfillment_last_error"),
+    fulfillmentLastAttemptAt: timestamp("fulfillment_last_attempt_at", { withTimezone: true }),
+    /** When the worker may try again. NULL means "due now". */
+    fulfillmentNextAttemptAt: timestamp("fulfillment_next_attempt_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -171,6 +201,12 @@ export const commerceOrdersTable = pgTable(
     // The stuck-`authenticating` sweep reads by state and age; without this it
     // is a sequential scan over every order ever placed.
     index("commerce_orders_status_idx").on(t.status, t.createdAt),
+    // The worker's claim query, once a minute on both passes. Partial on
+    // `released_at IS NULL` so a released order leaves the index permanently
+    // rather than accumulating in it.
+    index("commerce_orders_fulfillment_due_idx")
+      .on(t.fulfillmentNextAttemptAt)
+      .where(sql`released_at is null`),
   ],
 );
 
