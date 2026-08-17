@@ -77,6 +77,7 @@ export const VENUE_SHELLS = {
   bank: { size: [11, 8, 9], rotationY: -Math.PI / 2, label: "Resonance Trust" },
   residences: { size: [9, 6.8, 8], rotationY: -Math.PI / 2, label: "Standing Wave Residences" },
   joinery: { size: [10.5, 8.2, 8], rotationY: Math.PI / 2, label: "The Joinery" },
+  scada: { size: [8.6, 6.5, 6.2], rotationY: -Math.PI / 2, label: "0xSCADA Engineering Firm" },
 } as const satisfies Record<string, { size: readonly [number, number, number]; rotationY: number; label: string }>;
 
 export type VenueKey = keyof typeof VENUE_SHELLS;

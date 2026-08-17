@@ -102,13 +102,20 @@ describe("venue footprints", () => {
   it("mounts each venue at the rotation its footprint assumes", () => {
     // The other half of the same drift. A footprint derived for +PI/2 is wrong
     // the moment the building is mounted at 0.
-    const mounts: Array<[VenueKey, string]> = [
-      ["arcade", "<ArcadeVenue"],
-      ["bank", "<BankVenue"],
-      ["residences", "<ResidencesTower"],
-      ["joinery", "<JoineryVenue"],
-    ];
-    for (const [key, tag] of mounts) {
+    const mounts: Record<VenueKey, string> = {
+      arcade: "<ArcadeVenue",
+      bank: "<BankVenue",
+      residences: "<ResidencesTower",
+      joinery: "<JoineryVenue",
+      scada: "<ScadaVenue",
+    };
+    // Keyed by VenueKey rather than a hand-written list, so a shell added
+    // without a mount here is a TYPE error rather than a venue this guard
+    // silently skips. The seventh venue was the moment that mattered: a
+    // hardcoded list of four would have covered everything except the one
+    // just added.
+    expect(Object.keys(mounts).sort()).toEqual(Object.keys(VENUE_SHELLS).sort());
+    for (const [key, tag] of Object.entries(mounts) as Array<[VenueKey, string]>) {
       const at = SCENE.indexOf(tag);
       expect(at, `${tag} is not mounted in the scene`).toBeGreaterThan(-1);
       const line = SCENE.slice(at, SCENE.indexOf("/>", at));

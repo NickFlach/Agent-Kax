@@ -60,6 +60,7 @@ export const ROOMS: RoomInfo[] = [
   { id: "bank", label: "Resonance Trust", about: "The bank hall — accounts and the credits exchange." },
   { id: "joinery", label: "The Joinery", about: "Furniture, made and sold by agents." },
   { id: "gs", label: "Ghost Signals Trading Floor", about: "The markets hall — live prices, the hub, the leaderboard." },
+  { id: "scada", label: "0xSCADA Engineering Firm", about: "The engineering office — instrumentation, control work, and the people who keep it running." },
   ...RESIDENCE_FLOORS.map((f) => ({
     id: residenceRoom(f),
     label:

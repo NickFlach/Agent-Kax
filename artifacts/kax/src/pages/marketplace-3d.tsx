@@ -1030,6 +1030,72 @@ function ResidencesTower({ position, rotation, onEnter }: { position: [number, n
 
 /** The Joinery — the furniture makers' store. A two-story brick loft with a
  *  timber sign and big showroom windows. */
+/**
+ * 0xSCADA Engineering Firm — the seventh venue.
+ *
+ * An engineering office rather than a shop: instrumentation on the roof, a
+ * plant-room look, and windows you can see a working floor through. It sits
+ * on the first cross street rather than the main run, because a firm is
+ * somewhere you go on purpose.
+ */
+function ScadaVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Shell. Its size is declared once in lib/city-layout.ts and the
+          collision footprint is DERIVED from it — see #301, where four venues
+          had theirs transcribed from the unrotated geometry and blocked along
+          the wrong axis. */}
+      <mesh position={[0, 3.25, 0]} castShadow receiveShadow>
+        <boxGeometry args={[8.6, 6.5, 6.2]} />
+        <meshStandardMaterial map={upperWindowsTexture({ wall: "stucco", variant: 2, floors: 2, cols: 4, litSeed: 41 })} roughness={0.92} />
+      </mesh>
+      {/* Instrument gantry along the roof — the thing that says engineering
+          from across the street. */}
+      <mesh position={[0, 6.7, 0]} castShadow>
+        <boxGeometry args={[7.6, 0.16, 0.5]} />
+        <meshStandardMaterial color="#4a5560" metalness={0.6} roughness={0.4} />
+      </mesh>
+      {[-2.6, 0, 2.6].map((x) => (
+        <mesh key={x} position={[x, 7.15, 0]} castShadow>
+          <cylinderGeometry args={[0.09, 0.09, 0.9, 8]} />
+          <meshStandardMaterial color="#6b7683" metalness={0.55} roughness={0.45} />
+        </mesh>
+      ))}
+      {/* Working floor, visible through the glazing. */}
+      {[-2.2, 2.2].map((x) => (
+        <mesh key={x} position={[x, 2.0, 3.12]}>
+          <planeGeometry args={[3.0, 2.4]} />
+          <meshPhysicalMaterial color="#cfd8dc" roughness={0.06} metalness={0.25} transparent opacity={0.62} emissive="#dfeaf2" emissiveIntensity={0.16} />
+        </mesh>
+      ))}
+      {/* Door */}
+      <mesh position={[0, 1.15, 3.14]}>
+        <boxGeometry args={[1.5, 2.3, 0.1]} />
+        <meshStandardMaterial color="#37414a" roughness={0.6} metalness={0.25} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 4.6, 3.16]} fontSize={0.42} color="#cfe4f2" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.08}>
+          0xSCADA
+        </Text>
+        <Text position={[0, 4.05, 3.16]} fontSize={0.17} color="#8ea6b8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.22}>
+          ENGINEERING
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 2.6, 4.2]} intensity={9} distance={9} color="#cfe4f2" />
+    </group>
+  );
+}
 function JoineryVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
   const click = (e: { stopPropagation?: () => void; delta?: number }) => {
     if ((e.delta ?? 0) > 5) return;
@@ -1267,6 +1333,7 @@ export default function Marketplace3D() {
       { cx: 12.5, cz: streetDepth - 8, ...venueFootprint("bank") }, // Resonance Trust
       { cx: 12.5, cz: 3, ...venueFootprint("residences") }, // Standing Wave Residences
       { cx: -12.5, cz: 3, ...venueFootprint("joinery") }, // The Joinery
+      { cx: 17.6, cz: -8.5, ...venueFootprint("scada") }, // 0xSCADA Engineering Firm
       { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 }, // Flaukowski's No. 2, off the first cross street
     ],
     [layout, towerZ, streetDepth, sceneAgents.length],
@@ -1290,6 +1357,10 @@ export default function Marketplace3D() {
   );
   const CAFE: SceneAgent = useMemo(
     () => ({ slug: "__cafe__", name: "Flaukowski's · No. 2", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  const SCADA: SceneAgent = useMemo(
+    () => ({ slug: "__scada__", name: "0xSCADA Engineering Firm", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
   const JOINERY: SceneAgent = useMemo(
@@ -1334,6 +1405,11 @@ export default function Marketplace3D() {
       setSpawn({ position: [-6.6, 1.75, 3], yaw: -Math.PI / 2 });
       return;
     }
+    if (from === "__scada__") {
+      // Out of its door onto the cross street, facing the way back in.
+      setSpawn({ position: [13.6, 1.75, -8.5], yaw: -Math.PI / 2 });
+      return;
+    }
     const hit = layout.find((l) => l.agent.slug === from);
     if (!hit) return;
     const left = hit.position[0] < 0;
@@ -1354,6 +1430,8 @@ export default function Marketplace3D() {
               ? "/cafe"
               : a.slug === "__joinery__"
                 ? "/furniture"
+                : a.slug === "__scada__"
+                  ? "/scada"
               : a.source === "constellation"
                 ? `/constellation/${a.slug}`
                 : `/s/${a.slug}/room`;
@@ -1739,6 +1817,7 @@ export default function Marketplace3D() {
         <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
         <ResidencesTower position={[12.5, 0.12, 3]} rotation={-Math.PI / 2} onEnter={() => navigate("/residences")} />
         <JoineryVenue position={[-12.5, 0.12, 3]} rotation={Math.PI / 2} onEnter={() => navigate("/furniture")} />
+        <ScadaVenue position={[17.6, 0.12, -8.5]} rotation={-Math.PI / 2} onEnter={() => navigate("/scada")} />
         <ProximityDetector
           points={[
             ...layout.map((l) => ({ agent: l.agent, pos: l.position })),
@@ -1747,6 +1826,7 @@ export default function Marketplace3D() {
             { agent: BANK, pos: [7, 0, plazaZ] as [number, number, number] },
             { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
             { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
+            { agent: SCADA, pos: [14.6, 0, -8.5] as [number, number, number] },
             { agent: CAFE, pos: [-17.6, 0, -18.4 + 5.0] as [number, number, number] },
           ]}
           onNearest={setNearby}
