@@ -116,7 +116,7 @@ export function DirectoryBoard({ position, rotation = 0, rooms, heading = "KAX C
               anchorX="right"
               anchorY="middle"
             >
-              {line.here > 0 ? String(line.here) : "·"}
+              {line.here > 0 ? String(line.here) : line.rooms ? `${line.rooms} fl` : "·"}
             </Text>
           </Suspense>
         ))}

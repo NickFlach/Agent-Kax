@@ -20,6 +20,8 @@ export interface BoardRoom {
   id: string;
   label: string;
   here: number;
+  /** Set when this entry stands for a collapsed family of rooms. */
+  rooms?: number;
 }
 
 export interface BoardLine {
@@ -28,6 +30,8 @@ export interface BoardLine {
   text: string;
   /** How many are in there now, for the tally on the right. */
   here: number;
+  /** How many rooms this line stands for, when it collapses a family. */
+  rooms?: number;
 }
 
 export interface BoardLayout {
@@ -67,6 +71,51 @@ export function fitLabel(label: string, max = MAX_LABEL_CHARS): string {
 }
 
 /**
+ * Collapse a family of rooms into the building that contains them.
+ *
+ * The residences publish twelve rooms — a lobby, ten floors and the penthouse
+ * — all labelled "Standing Wave Residences — floor N". At the board's width
+ * they truncate to the same string, so a visitor read eleven identical lines
+ * and learned nothing from any of them. Eleven of the city's nineteen rooms
+ * were one building, spending most of the sign on itself.
+ *
+ * A person at the street mouth wants to know the tower is there. Which of its
+ * landings currently has somebody on it is a question for somebody already
+ * inside, and the lift answers it better than a sign at the door.
+ *
+ * Occupancy sums across the family, so the tally means "people in that
+ * building" rather than "people on whichever floor happened to sort first".
+ */
+export function collapseFamilies(rooms: readonly BoardRoom[]): BoardRoom[] {
+  const families = new Map<string, { label: string; here: number; count: number }>();
+  const singles: BoardRoom[] = [];
+
+  for (const r of rooms) {
+    const sep = r.id.indexOf(":");
+    if (sep < 0) {
+      singles.push(r);
+      continue;
+    }
+    const key = r.id.slice(0, sep);
+    // The shared part of the label, before whatever distinguishes members.
+    // Falls back to the id when a family shares no prefix — a naming problem,
+    // not a reason to print nothing.
+    const label = r.label.split("—")[0]?.trim() || key;
+    const prev = families.get(key);
+    families.set(key, {
+      label: prev?.label ?? label,
+      here: (prev?.here ?? 0) + r.here,
+      count: (prev?.count ?? 0) + 1,
+    });
+  }
+
+  const collapsed: BoardRoom[] = [...singles];
+  for (const [key, f] of families) {
+    collapsed.push({ id: key, label: f.label, here: f.here, rooms: f.count });
+  }
+  return collapsed;
+}
+/**
  * Lay a room list out on a board.
  *
  * Sorted by occupancy first so a busy room is visible from the street, then by
@@ -75,7 +124,9 @@ export function fitLabel(label: string, max = MAX_LABEL_CHARS): string {
  * flicker between renders.
  */
 export function layoutBoard(rooms: readonly BoardRoom[], maxLines = MAX_BOARD_LINES): BoardLayout {
-  const ordered = [...rooms].sort((a, b) => b.here - a.here || a.label.localeCompare(b.label));
+  // Families collapse before anything is measured, so the count that decides
+  // overflow is the count a visitor will actually read.
+  const ordered = collapseFamilies(rooms).sort((a, b) => b.here - a.here || a.label.localeCompare(b.label));
   const shown = ordered.slice(0, maxLines);
   const overflow = Math.max(0, ordered.length - shown.length);
 
@@ -83,6 +134,9 @@ export function layoutBoard(rooms: readonly BoardRoom[], maxLines = MAX_BOARD_LI
     id: r.id,
     text: fitLabel(r.label),
     here: r.here,
+    // Only when it stands for more than itself — a lone room is not a
+    // building worth summarising, and "1 fl" would read as noise.
+    ...(r.rooms && r.rooms > 1 ? { rooms: r.rooms } : {}),
   }));
 
   // The board grows to its content rather than being sized for a guess. Six
