@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { isTypingTarget } from "@/lib/is-typing";
+import { resolveObstacles, type FpsObstacle } from "@/lib/fps-collision";
 
 export interface FpsBounds {
   minX: number;
@@ -12,13 +13,15 @@ export interface FpsBounds {
   maxY?: number;
 }
 
-/** Axis-aligned box footprint on the ground plane (for collision). */
-export interface FpsObstacle {
-  cx: number;
-  cz: number;
-  hx: number;
-  hz: number;
-}
+/**
+ * Re-exported so every existing `import type { FpsObstacle } from
+ * "@/components/first-person-rig"` keeps working — `room-geometry.ts` imports
+ * it type-only precisely so a value import cannot drag three.js into the Node
+ * test runner, and that constraint still holds. The shape, the resolver and
+ * the new optional vertical band all live in `@/lib/fps-collision`, which
+ * imports nothing.
+ */
+export type { FpsObstacle } from "@/lib/fps-collision";
 
 /**
  * First-person camera rig — the FPS feel the district was missing.
@@ -252,20 +255,14 @@ export function FirstPersonRig({
       ny = groundHeight(nx, nz) + eyeHeight;
     }
 
-    // Building collision (skips while flying above the rooftops).
-    if (obstacles && ny < 7) {
-      const pad = 0.5;
-      for (const o of obstacles) {
-        const dx = nx - o.cx;
-        const dz = nz - o.cz;
-        const px = o.hx + pad - Math.abs(dx);
-        const pz = o.hz + pad - Math.abs(dz);
-        if (px > 0 && pz > 0) {
-          if (px < pz) nx = o.cx + Math.sign(dx || 1) * (o.hx + pad);
-          else nz = o.cz + Math.sign(dz || 1) * (o.hz + pad);
-        }
-      }
-    }
+    // Building collision. Skips while flying above the rooftops, and skips any
+    // box whose vertical band this elevation is outside — which is what lets a
+    // scene have two storeys without the lower one walling off the upper. The
+    // algorithm itself is unchanged and lives in @/lib/fps-collision so CI can
+    // execute it; this used to be an inline loop no test could reach.
+    const hit = resolveObstacles(nx, nz, ny, obstacles);
+    nx = hit.x;
+    nz = hit.z;
 
     camera.position.set(nx, ny, nz);
   });
