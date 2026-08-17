@@ -12,6 +12,7 @@ import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { commerceEnabled, getUncachableStripeClient } from "../lib/stripeClient";
+import { publicBaseUrl } from "../lib/publicBaseUrl";
 import { loadPurchasingSnapshot } from "../lib/purchasingFacts";
 import {
   isPurchasable,
@@ -1038,6 +1039,8 @@ async function finishPurchase(
   // that recoverable challenge into a decline the buyer cannot clear.
   let intent;
   try {
+    const base = publicBaseUrl();
+    const returnUrl = base ? `${base}/orders` : null;
     intent = await stripe.paymentIntents.create(
       {
         amount: order.totalCents,
@@ -1046,6 +1049,25 @@ async function finishPurchase(
         payment_method: instrument.paymentMethodId,
         confirm: true,
         use_stripe_sdk: true,
+        // Stripe REFUSES a server-confirmed PaymentIntent without this, even
+        // for a plain saved card: any method that could conceivably finish by
+        // redirecting has to say where it would come back to. The refusal is
+        // an invalid-request error, not a decline, so the catch below re-threw
+        // it and the buyer got a 500 with nothing to act on — which is exactly
+        // what happened on the first real purchase attempt.
+        //
+        // It is a fallback, not the plan. `use_stripe_sdk` keeps an
+        // authentication challenge in a modal over the page the buyer is
+        // already on, which is the whole point of buying from inside the city;
+        // this only comes into play if a method insists on leaving. Orders is
+        // the honest landing place either way, because it is the one page that
+        // can truthfully answer "did that work" for an order that authenticated
+        // somewhere else.
+        //
+        // Derived from configuration through the shared resolver, never from a
+        // request header — an attacker-supplied return_url on a payment is the
+        // #272 open-redirect with money attached.
+        ...(returnUrl ? { return_url: returnUrl } : {}),
         shipping: {
           name: order.shipToName,
           ...(order.shipToPhone ? { phone: order.shipToPhone } : {}),
