@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { NpcFigure } from "./npc";
+import { withinTalkRange } from "@/lib/room-geometry";
 import type { Dialogue } from "@/lib/npc-dialogue";
 
 /**
@@ -18,7 +19,10 @@ import type { Dialogue } from "@/lib/npc-dialogue";
  * where it can be read, selected and reached by a keyboard.
  */
 
-const TALK_RANGE = 4.2;
+// The range and the rule live in `lib/room-geometry.ts`: this module imports
+// three.js and @react-three/fiber, so nothing declared here can be called from
+// the test runner — and "is the visitor close enough" is the one part of this
+// component that is pure arithmetic and was wrong.
 
 /** Draws the figure, watches the distance, and offers the prompt. */
 export function TalkableNpc({
@@ -27,6 +31,7 @@ export function TalkableNpc({
   color,
   seed,
   name,
+  promptLabel = "[ E ] TALK",
   onRangeChange,
   active,
 }: {
@@ -35,6 +40,21 @@ export function TalkableNpc({
   color: string;
   seed: number;
   name: string;
+  /**
+   * The second line of the overhead prompt — the verb this person offers.
+   *
+   * Defaulted, because every NPC in the city before the checkout desk offered
+   * exactly one thing and the desk is the first that does not: it is `[ E ]
+   * CHECKOUT` for an account that has something to fix and `[ E ] BUY` for one
+   * that is ready.
+   *
+   * A PRICE does not belong here. This label is painted into a canvas texture
+   * once, at first render, and never repainted — which is right for a verb and
+   * wrong for a number that a fresh quote can move underneath it. The price
+   * lives in the DOM prompt beside the panel, where it re-renders like
+   * everything else, and where it can be read aloud.
+   */
+  promptLabel?: string;
   /** Called when the visitor comes into or leaves talking range. */
   onRangeChange: (inRange: boolean) => void;
   /** True while this NPC is the one being talked to. */
@@ -42,10 +62,37 @@ export function TalkableNpc({
 }) {
   const inRange = useRef(false);
   const sprite = useRef<THREE.Sprite>(null);
-  const tex = useRef<THREE.CanvasTexture | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
 
-  if (!tex.current) {
+  /**
+   * The figure's own transform, so the range check can be made in WORLD space.
+   *
+   * The `position` prop is LOCAL to whatever parent renders this, and every
+   * caller in the city nests it inside a positioned `<group>`: the store's
+   * checkout desk at (5.5, 4.5), the Joinery's sales desk at (8.2, 6.5), the
+   * residences lobby at (0, -6), the cafe counter at (-3.4, -3.6). Comparing
+   * `camera.position` — which is world — against the local prop measured the
+   * distance to a point in the middle of the room instead of to the person, by
+   * up to 10.4m against a TALK_RANGE of 4.2. The prompt therefore never
+   * appeared where the NPC actually stood, and did appear when the visitor
+   * walked over the parent's origin.
+   *
+   * `getWorldPosition` also composes the parent's ROTATION, which a hand-added
+   * offset could not: the Joinery's desk group is turned a quarter turn.
+   */
+  const group = useRef<THREE.Group>(null);
+  const worldPos = useMemo(() => new THREE.Vector3(), []);
+
+  /**
+   * The overhead plate, repainted when its words change.
+   *
+   * It used to be painted once into a ref and never again, which was invisible
+   * while every prompt in the city read `[ E ] TALK` forever. The desk breaks
+   * that assumption: a player who fixes their card in the other tab comes back
+   * to a desk that has become buyable, and a sign still reading CHECKOUT would
+   * be the surface disagreeing with the panel under it.
+   */
+  const tex = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = 512; c.height = 96;
     const ctx = c.getContext("2d")!;
@@ -61,16 +108,52 @@ export function TalkableNpc({
     ctx.fillText(name.slice(0, 22), 256, 32);
     ctx.font = "500 24px 'Courier New', monospace";
     ctx.fillStyle = "#c9ab6b";
-    ctx.fillText("[ E ] TALK", 256, 68);
+    ctx.fillText(promptLabel.slice(0, 22), 256, 68);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    tex.current = t;
-  }
+    return t;
+  }, [name, promptLabel]);
+
+  // A repaint makes a new GPU texture; the old one is ours to release. Without
+  // this a desk that changed its label a few times would leak one per change.
+  useEffect(() => () => tex.dispose(), [tex]);
+
+  /**
+   * The callback, read through a ref so the unmount effect below can stay
+   * mount-scoped. Listing `onRangeChange` as a dependency would re-run that
+   * effect — and therefore fire its cleanup — on every render of a parent that
+   * passes an inline lambda, which for a page re-rendering on a 3D frame is
+   * every frame.
+   */
+  const onRangeChangeRef = useRef(onRangeChange);
+  useEffect(() => {
+    onRangeChangeRef.current = onRangeChange;
+  }, [onRangeChange]);
+
+  /**
+   * Leaving the scene counts as leaving the room.
+   *
+   * Range is otherwise reported only from `useFrame`, which stops running the
+   * moment this unmounts — so an NPC that disappears while the visitor is
+   * standing at it leaves the parent believing they are still there forever.
+   * Every caller renders conditionally (the desk only when it has something to
+   * sell), and a latched `deskNear` means E opens the purchase panel from
+   * across the gallery.
+   */
+  useEffect(
+    () => () => {
+      if (inRange.current) onRangeChangeRef.current(false);
+    },
+    [],
+  );
 
   useFrame(({ camera }) => {
-    const dx = camera.position.x - position[0];
-    const dz = camera.position.z - position[2];
-    const near = Math.hypot(dx, dz) < TALK_RANGE;
+    const g = group.current;
+    if (!g) return;
+    // World space on both sides. `getWorldPosition` refreshes the ancestor
+    // matrices itself, so this is correct even on the first frame.
+    g.getWorldPosition(worldPos);
+    const near = withinTalkRange(camera.position, worldPos);
     if (near !== inRange.current) {
       inRange.current = near;
       setShowPrompt(near);
@@ -80,11 +163,11 @@ export function TalkableNpc({
   });
 
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group ref={group} position={position} rotation={[0, rotation, 0]}>
       <NpcFigure color={color} seed={seed} />
       {(showPrompt || active) && (
         <sprite ref={sprite} position={[0, 2.35, 0]} scale={[1.9, 0.36, 1]}>
-          <spriteMaterial map={tex.current} transparent depthTest={false} />
+          <spriteMaterial map={tex} transparent depthTest={false} />
         </sprite>
       )}
     </group>

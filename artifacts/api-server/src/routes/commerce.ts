@@ -1159,6 +1159,130 @@ function respondWithPurchase(
   });
 }
 
+// ── GET /api/commerce/products/for-artifact/:artifactId ────────────────────
+
+/**
+ * The published physical products printed from one artifact.
+ *
+ * The discovery read the buying surfaces need and did not have. `commerce_products`
+ * is keyed on a SKU and carries `artifact_id`, so nothing outside this server
+ * could answer "is there a poster of this piece" — and both purchase entry
+ * points (the 2D artifact page and the in-city desk) have to answer it before
+ * they can offer anything at all. Without it the SKU would have to be a
+ * constant in the client, which is the same string in two repositories and a
+ * 409 `product_unavailable` the day an operator renames one.
+ *
+ * Unauthenticated on purpose: `/s/:slug/artifacts/:id` is a public page and
+ * `/s/:slug/room` is a public route, so a signed-out visitor has to be able to
+ * see that a print exists before being asked to sign in for it. Nothing here is
+ * account-shaped — it is the shop window.
+ *
+ * The columns are written out one at a time, as everywhere else on this router.
+ * `printify_product_id` and `printify_variant_id` are our supplier's keys for
+ * our own catalogue and have no business in a public response; `SELECT *` would
+ * publish them.
+ *
+ * `totalCents` comes from `priceProduct`, the same function the quote uses, so
+ * the number on the shelf and the number on the quote cannot drift. It is still
+ * only a display price: `POST /commerce/quote` re-reads the row, and
+ * `POST /commerce/purchase` re-reads it again and refuses `price_changed`.
+ */
+router.get("/commerce/products/for-artifact/:artifactId", async (req: Request, res: Response) => {
+  const artifactId = Number(req.params["artifactId"]);
+  if (!Number.isInteger(artifactId) || artifactId <= 0) {
+    res.status(400).json({ error: "Invalid artifact id" });
+    return;
+  }
+
+  const products = await db
+    .select({
+      sku: commerceProductsTable.sku,
+      title: commerceProductsTable.title,
+      itemCents: commerceProductsTable.itemCents,
+      shippingCents: commerceProductsTable.shippingCents,
+      currency: commerceProductsTable.currency,
+      shipToCountries: commerceProductsTable.shipToCountries,
+    })
+    .from(commerceProductsTable)
+    .where(
+      and(
+        eq(commerceProductsTable.artifactId, artifactId),
+        // The seeded sticker is unpublished, and an unpublished row must not
+        // appear in a shop window any more than it may be quoted — the two
+        // reads apply the same predicate for the same reason.
+        eq(commerceProductsTable.published, true),
+      ),
+    )
+    .orderBy(commerceProductsTable.itemCents);
+
+  res.json({
+    products: products.map((product) => ({
+      sku: product.sku,
+      title: product.title,
+      ...priceProduct(product),
+      shipToCountries: product.shipToCountries,
+    })),
+  });
+});
+
+// ── GET /api/commerce/orders ───────────────────────────────────────────────
+
+/**
+ * The buyer's own physical orders, newest first.
+ *
+ * `/orders` shows a buyer everything they have bought, and the physical half of
+ * that was unreachable: `GET /commerce/orders/:ref` answers about a reference
+ * the client already holds, and a client that has closed the tab holds none.
+ *
+ * The same column allowlist as the poll target, for the same reason and with
+ * more force — this one returns every order an account has, so a `SELECT *`
+ * here would hand back the whole `ship_to_*` snapshot of every parcel a buyer
+ * has ever had sent. The postal columns are not in the list, and a PII column
+ * added to the table later cannot join a response it was never named in.
+ *
+ * Bounded at 100 like `GET /store/my-orders`, which is the digital half of the
+ * same page.
+ */
+router.get("/commerce/orders", requireAuth, async (req: Request, res: Response) => {
+  const userId = req.user!.id;
+
+  const rows = await db
+    .select({
+      clientReference: commerceOrdersTable.clientReference,
+      sku: commerceOrdersTable.sku,
+      currency: commerceOrdersTable.currency,
+      itemCents: commerceOrdersTable.itemCents,
+      shippingCents: commerceOrdersTable.shippingCents,
+      taxCents: commerceOrdersTable.taxCents,
+      totalCents: commerceOrdersTable.totalCents,
+      status: commerceOrdersTable.status,
+      fulfillmentState: commerceOrdersTable.fulfillmentState,
+      createdAt: commerceOrdersTable.createdAt,
+      updatedAt: commerceOrdersTable.updatedAt,
+    })
+    .from(commerceOrdersTable)
+    .where(eq(commerceOrdersTable.buyerUserId, userId))
+    .orderBy(desc(commerceOrdersTable.createdAt))
+    .limit(100);
+
+  res.json({
+    orders: rows.map((order) => ({
+      orderRef: order.clientReference,
+      status: purchaseOutcomeFor(order.status),
+      orderStatus: order.status,
+      fulfillmentState: order.fulfillmentState,
+      sku: order.sku,
+      currency: order.currency,
+      itemCents: order.itemCents,
+      shippingCents: order.shippingCents,
+      taxCents: order.taxCents,
+      totalCents: order.totalCents,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    })),
+  });
+});
+
 // ── GET /api/commerce/orders/:ref ──────────────────────────────────────────
 
 /**

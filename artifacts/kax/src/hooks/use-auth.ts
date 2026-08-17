@@ -3,18 +3,34 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getGetCurrentAuthUserQueryKey,
   type AuthUser,
+  type PurchasingSnapshot,
 } from "@workspace/api-client-react";
 import { getInjectedProvider, personalSign, requestAccounts } from "@/lib/wallet";
 import { appUrl } from "@/lib/urls";
 
-export type { AuthUser };
+export type { AuthUser, PurchasingSnapshot };
 
 interface AuthEnvelope {
   user: AuthUser | null;
+  /**
+   * Whether this account may buy a physical thing, derived by the server on
+   * every read of `/api/auth/user`. See `lib/purchasingState.ts`.
+   *
+   * Optional here and required in the OpenAPI schema, because two of the three
+   * writers of this cache entry are not that endpoint: the 401 fallback below
+   * and the sign-in responses, which share `AuthUserEnvelope` and do not
+   * compute purchasing state. A consumer therefore has to treat "absent" as
+   * "not known yet" and wait, which is what the purchasing card's hydration
+   * guard does — the alternative, defaulting to some state here, would be the
+   * client deciding its own eligibility.
+   */
+  purchasing?: PurchasingSnapshot;
 }
 
 interface AuthState {
   user: AuthUser | null;
+  /** The server's purchasing verdict, or null until `/me` has answered. */
+  purchasing: PurchasingSnapshot | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: () => void;
@@ -28,6 +44,16 @@ interface AuthState {
   linkEmail: (email: string, password: string) => Promise<void>;
   /** Rotate the password on the signed-in account (verifies the current one). */
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /**
+   * Write a server-derived purchasing snapshot into the session cache.
+   *
+   * Every `/me/purchasing/*` mutation answers with the account's freshly
+   * derived state rather than with the row it wrote, precisely so the panel
+   * that made the change can show the consequence of it without a round trip.
+   * This is the only way that snapshot gets in: the argument is always a
+   * response body, never something a component worked out for itself.
+   */
+  applyPurchasing: (purchasing: PurchasingSnapshot) => void;
   refresh: () => Promise<void>;
 }
 
@@ -95,10 +121,23 @@ export function useAuth(): AuthState {
   });
 
   const user = data?.user ?? null;
+  const purchasing = data?.purchasing ?? null;
 
   const refresh = useCallback(async () => {
     await refetch();
   }, [refetch]);
+
+  const applyPurchasing = useCallback(
+    (next: PurchasingSnapshot) => {
+      // Merged into whatever is cached rather than replacing it: the user half
+      // of this entry is what the whole signed-in app reads, and dropping it to
+      // record a purchasing change would sign everybody out mid-form.
+      qc.setQueryData<AuthEnvelope>(AUTH_QUERY_KEY, (prev) =>
+        prev ? { ...prev, purchasing: next } : prev,
+      );
+    },
+    [qc],
+  );
 
   const login = useCallback(() => {
     const target = appUrl("/login");
@@ -208,6 +247,7 @@ export function useAuth(): AuthState {
 
   return {
     user,
+    purchasing,
     isLoading,
     isAuthenticated: !!user,
     login,
@@ -218,6 +258,7 @@ export function useAuth(): AuthState {
     linkWallet,
     linkEmail,
     changePassword,
+    applyPurchasing,
     refresh,
   };
 }

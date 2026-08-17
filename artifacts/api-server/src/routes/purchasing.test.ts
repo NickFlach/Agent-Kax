@@ -37,7 +37,10 @@ import {
 } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { authMiddleware } from "../middlewares/authMiddleware";
-import { CURRENT_STORED_CARD_TERMS_VERSION } from "../lib/purchasingState";
+import {
+  CURRENT_STORED_CARD_TERMS_VERSION,
+  SUPPORTED_SHIP_TO_COUNTRIES,
+} from "../lib/purchasingState";
 import { STORED_CARD_TERMS_SHA256 } from "../lib/storedCardTerms";
 import { cleanupAuthTestData, createWalletUser } from "../test-helpers";
 
@@ -620,6 +623,42 @@ describe("purchasing settings (#284)", () => {
       expect(second.body.purchasing.shipsTo).toEqual({ country: "US", postalCode: "97202" });
     });
 
+    it("leaves validated_at null when nothing checked the address", async () => {
+      // The default, and the one that must not drift. A null `validated_at` is
+      // the honest record of "the buyer typed it and nobody confirmed it", and
+      // it is what a fulfilment provider is entitled to be told. A body with no
+      // `validated` key at all — every client written before the settings desk
+      // existed — has to land here rather than claim a check that never ran.
+      const { id, cookie } = await signedInUser();
+      const res = await request(app).put("/me/purchasing/address").set("Cookie", cookie).send(ADDRESS);
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+
+      const rows = await addressesFor(id);
+      expect(rows[0]!.validatedAt).toBeNull();
+      expect(rows[0]!.validationMethod).toBeNull();
+    });
+
+    it("stamps validated_at, with the server's own method name, when the form reported complete", async () => {
+      // The other half — without it the test above would also pass against a
+      // handler that never wrote these columns at all.
+      //
+      // The method string is checked because it is the half the client does not
+      // supply: the request says only "something checked this", and what is
+      // recorded is this server's constant. A request that tries to name the
+      // method is ignored, so the column cannot come to hold whatever a caller
+      // cared to claim.
+      const { id, cookie } = await signedInUser();
+      const res = await request(app)
+        .put("/me/purchasing/address")
+        .set("Cookie", cookie)
+        .send({ ...ADDRESS, validated: true, validationMethod: "trust me" });
+      expect(res.status, `reached: ${lastError}`).toBe(200);
+
+      const rows = await addressesFor(id);
+      expect(rows[0]!.validatedAt).not.toBeNull();
+      expect(rows[0]!.validationMethod).toBe("stripe_address_element");
+    });
+
     it("normalises a lower-case country rather than refusing it", async () => {
       const { id, cookie } = await signedInUser();
       const res = await request(app)
@@ -739,6 +778,34 @@ describe("purchasing settings (#284)", () => {
       // And it still says enough to diagnose: which write, and the SQLSTATE.
       expect(scrubbed.message).toContain("shipping address write");
       expect(scrubbed.message).toContain("23505");
+    });
+  });
+
+  describe("GET /me/purchasing/terms", () => {
+    it("serves the destinations the address PUT actually accepts", async () => {
+      // The settings desk restricts Stripe's Address Element to this list. If
+      // it were a literal in the client instead, the two would drift the first
+      // time a country was added here: the form would keep offering only the
+      // old set, and nobody would notice, because nothing would fail.
+      //
+      // Asserted against the constant rather than against `["US"]` so that
+      // widening the list is a one-line change and not a test to go and edit —
+      // and so the failure, when it comes, is the client's to fix.
+      const { cookie } = await signedInUser();
+      const res = await request(app).get("/me/purchasing/terms").set("Cookie", cookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body.supportedCountries).toEqual([...SUPPORTED_SHIP_TO_COUNTRIES]);
+      expect(res.body.supportedCountries.length, "an empty list would ship nothing").toBeGreaterThan(0);
+
+      // The same list the address PUT judges by: a country outside it is
+      // refused, so a form built from this response cannot offer one.
+      const refused = await request(app)
+        .put("/me/purchasing/address")
+        .set("Cookie", cookie)
+        .send({ ...ADDRESS, country: "GB" });
+      expect(refused.status).toBe(400);
+      expect(res.body.supportedCountries).not.toContain("GB");
     });
   });
 
