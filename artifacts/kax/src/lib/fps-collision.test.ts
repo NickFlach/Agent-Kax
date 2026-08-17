@@ -22,6 +22,18 @@
  * counts how many samples were DEFLECTED and requires a substantial number.
  * A differential test where neither side ever moves is two functions agreeing
  * about doing nothing.
+ *
+ * THE ONE PLACE THE TWO ARE NOW ALLOWED TO DIFFER, and it is checked rather
+ * than excused. `resolveObstacles` pushes a body out to `centre ± (half + pad)`
+ * — a face that lies OUTSIDE the walls whenever a box straddles one — and the
+ * old loop returned that position untouched, because the bounds had been
+ * applied to the proposal and were never looked at again. So the whole-frame
+ * comparisons below hold `stepMove` against the old loop's answer CLAMPED TO
+ * THE BOUNDS, which is strictly more than the old equality asked: every sample
+ * must still agree bit for bit wherever the old answer was legal, and the ones
+ * where it was not must land exactly on the wall. Both sweeps count how many
+ * samples the clamp rescued and require it to be a real number of them, so
+ * "they agree because the clamp never fires" cannot pass either.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,7 +46,7 @@ import {
   type FpsBounds,
   type FpsObstacle,
 } from "./fps-collision";
-import { monumentZFor, streetDepthFor, venueFootprint, layoutFor } from "./city-layout";
+import { monumentZFor, plazaZFor, PLAZA_FLANK_X, streetDepthFor, venueFootprint, layoutFor } from "./city-layout";
 import { streetMouthsFor } from "./undercroft";
 import {
   UNDERCROFT_CEILING_Y,
@@ -84,8 +96,8 @@ function streetObstacles(storeCount = 48): FpsObstacle[] {
     { cx: -6.2, cz: -12, hx: BOARD.hz, hz: BOARD.hx },
     { cx: 6.2, cz: -30, hx: BOARD.hz, hz: BOARD.hx },
     { cx: 0, cz: monumentZFor(storeCount), hx: 1.2, hz: 1.2 },
-    { cx: -12.5, cz: streetDepth - 8, ...venueFootprint("arcade") },
-    { cx: 12.5, cz: streetDepth - 8, ...venueFootprint("bank") },
+    { cx: -PLAZA_FLANK_X, cz: plazaZFor(storeCount), ...venueFootprint("arcade") },
+    { cx: PLAZA_FLANK_X, cz: plazaZFor(storeCount), ...venueFootprint("bank") },
     { cx: 12.5, cz: 3, ...venueFootprint("residences") },
     { cx: -12.5, cz: 3, ...venueFootprint("joinery") },
     { cx: 17.6, cz: -8.5, ...venueFootprint("scada") },
@@ -270,6 +282,26 @@ function oldFrame(
   return { x: hit.x, y: ny, z: hit.z };
 }
 
+/**
+ * The old loop's answer, held inside the walls — the ONE difference the new
+ * `stepMove` is allowed to make, and the thing this file's whole-frame sweeps
+ * are differentially testing against.
+ */
+function clampedOld(
+  want: { x: number; y: number; z: number },
+  bounds: FpsBounds,
+): { x: number; y: number; z: number } {
+  return {
+    x: Math.max(bounds.minX, Math.min(bounds.maxX, want.x)),
+    y: want.y,
+    z: Math.max(bounds.minZ, Math.min(bounds.maxZ, want.z)),
+  };
+}
+
+function withinBounds(p: { x: number; z: number }, b: FpsBounds): boolean {
+  return p.x >= b.minX && p.x <= b.maxX && p.z >= b.minZ && p.z <= b.maxZ;
+}
+
 /** The residences' stairwell, as it stands — including its 1.7 m side edge. */
 function stairHeight(x: number, z: number): number {
   if (x < -11.5 || x > -8.5 || z < -3 || z > 3) return 0;
@@ -291,6 +323,7 @@ describe("the shared rig still moves the street and the venues exactly as it did
     const rnd = mulberry32(31415);
     let deflected = 0;
     let vertical = 0;
+    let rescued = 0;
     const samples = 20000;
     for (let i = 0; i < samples; i++) {
       const x = -21 + rnd() * 42;
@@ -301,18 +334,25 @@ describe("the shared rig still moves the street and the venues exactly as it did
       const dx = (rnd() - 0.5) * 5;
       const dz = (rnd() - 0.5) * 5;
       const dy = (rnd() - 0.5) * 6;
-      const want = oldFrame(x, y, z, dx, dz, dy, 1.75, bounds, obs, undefined);
+      const raw = oldFrame(x, y, z, dx, dz, dy, 1.75, bounds, obs, undefined);
+      const want = clampedOld(raw, bounds);
+      if (raw.x !== want.x || raw.z !== want.z) rescued++;
       const got = stepMove({ x, y, z, dx, dz, dy, eyeHeight: 1.75, bounds, obstacles: obs });
       expect(got.x, `x @ ${x},${y},${z}`).toBe(want.x);
       expect(got.y, `y @ ${x},${y},${z}`).toBe(want.y);
       expect(got.z, `z @ ${x},${y},${z}`).toBe(want.z);
+      // And the invariant in its own right, on every single sample: whatever
+      // the old loop did, the body is inside the walls when the frame ends.
+      expect(withinBounds(got, bounds), `out of bounds @ ${x},${y},${z} -> ${got.x},${got.z}`).toBe(true);
       if (got.x !== x + dx || got.z !== z + dz) deflected++;
       if (got.y !== y + dy) vertical++;
     }
-    // Anti-vacuity, both axes: a sweep that never hit a building and never hit
-    // the ceiling would be two functions agreeing about doing nothing.
+    // Anti-vacuity, three ways: a sweep that never hit a building, never hit
+    // the ceiling, or never caught the old loop outside the walls would be two
+    // functions agreeing about doing nothing.
     expect(deflected, "the sweep never collided with anything").toBeGreaterThan(samples * 0.05);
     expect(vertical, "the sweep never exercised the vertical clamp").toBeGreaterThan(samples * 0.05);
+    expect(rescued, "the old loop never left the bounds, so the clamp is untested here").toBeGreaterThan(0);
   });
 
   it("keeps the five venue boxes #311 fixed pushing along the axes they push along", () => {
@@ -321,8 +361,8 @@ describe("the shared rig still moves the street and the venues exactly as it did
     // deflection out of the new whole-frame move as out of the old loop.
     const obs = streetObstacles();
     const venues: Array<[string, number, number]> = [
-      ["arcade", -12.5, streetDepthFor(48) - 8],
-      ["bank", 12.5, streetDepthFor(48) - 8],
+      ["arcade", -PLAZA_FLANK_X, plazaZFor(48)],
+      ["bank", PLAZA_FLANK_X, plazaZFor(48)],
       ["residences", 12.5, 3],
       ["joinery", -12.5, 3],
       ["scada", 17.6, -8.5],
@@ -370,13 +410,16 @@ describe("the shared rig still moves the street and the venues exactly as it did
     const rnd = mulberry32(2718);
     let onStairs = 0;
     let stepped = 0;
+    let rescued = 0;
     for (let i = 0; i < 20000; i++) {
       const x = -11.4 + rnd() * 22.8;
       const z = -8.4 + rnd() * 16.8;
       const y = stairHeight(x, z) + 1.75;
       const dx = (rnd() - 0.5) * 2;
       const dz = (rnd() - 0.5) * 2;
-      const want = oldFrame(x, y, z, dx, dz, 0, 1.75, bounds, obs, stairHeight);
+      const raw = oldFrame(x, y, z, dx, dz, 0, 1.75, bounds, obs, stairHeight);
+      const want = clampedOld(raw, bounds);
+      if (raw.x !== want.x || raw.z !== want.z) rescued++;
       const got = stepMove({
         x,
         y,
@@ -396,6 +439,7 @@ describe("the shared rig still moves the street and the venues exactly as it did
       expect(got.x, `x @ ${x},${z}`).toBe(want.x);
       expect(got.z, `z @ ${x},${z}`).toBe(want.z);
       expect(got.y).toBe(stairHeight(got.x, got.z) + 1.75);
+      expect(withinBounds(got, bounds), `out of bounds @ ${x},${z} -> ${got.x},${got.z}`).toBe(true);
       if (stairHeight(x, z) > 0) onStairs++;
       if (Math.abs(got.y - y) > 1) stepped++;
     }
@@ -403,6 +447,7 @@ describe("the shared rig still moves the street and the venues exactly as it did
     // AND the stairwell's own 1.7 m side edge is still steppable, because no
     // step limit was asked for. Turning that into a wall is a different change.
     expect(stepped, "the residences' stair edge stopped being walkable off").toBeGreaterThan(10);
+    expect(rescued, "the old loop never left the bounds, so the clamp is untested here").toBeGreaterThan(0);
   });
 
   it("refuses a step bigger than maxGroundStep, and only when asked to", () => {
@@ -421,6 +466,34 @@ describe("the shared rig still moves the street and the venues exactly as it did
     const ok = stepMove({ ...common, x: 0, dx: 0.45, groundHeight: gentle, maxGroundStep: 1.5 });
     expect(ok.x).toBeCloseTo(0.45, 9);
     expect(ok.blocked).toBe(false);
+  });
+
+  it("ends inside the walls even when the box that pushed you straddles one", () => {
+    // The defect in miniature, and the negative half with it. A slab whose
+    // OUTWARD blocking face lies past `minX` — which is the Undercroft's outer
+    // cutting wall exactly: face at -13.100 against a `minX` of -12.900.
+    const bounds: FpsBounds = { minX: -10, maxX: 10, minZ: -10, maxZ: 10 };
+    const straddling: FpsObstacle[] = [{ cx: -9.5, cz: 0, hx: 0.3, hz: 6 }];
+    const face = -9.5 - (0.3 + OBSTACLE_PAD);
+    expect(face, "the fixture's slab does not straddle the bound, so this proves nothing").toBeLessThan(bounds.minX);
+
+    const from = { y: 1.75, z: 0, dz: 0, dy: 0, eyeHeight: 1.75 } as const;
+    // Walking west into it from inside the slab's span: the resolver's answer
+    // is `face`, which is out of the world.
+    const raw = oldFrame(-9.4, 1.75, 0, -0.5, 0, 0, 1.75, bounds, straddling, undefined);
+    expect(raw.x, "the old loop kept the body inside — re-derive this test").toBe(face);
+    expect(raw.x < bounds.minX, "the old loop's answer was in bounds after all").toBe(true);
+
+    const got = stepMove({ ...from, x: -9.4, dx: -0.5, bounds, obstacles: straddling });
+    expect(got.x, "the frame ended outside the world").toBe(bounds.minX);
+    expect(withinBounds(got, bounds)).toBe(true);
+
+    // And a body already standing on that wall is not frozen there: the second
+    // resolution pass is clamped too, so the move is accepted rather than
+    // refused, and the body can walk back out along the wall.
+    const along = stepMove({ ...from, x: bounds.minX, dx: 0, dz: 0.45, bounds, obstacles: straddling });
+    expect(withinBounds(along, bounds)).toBe(true);
+    expect(along.z, "a body on the wall could not move along it").toBeCloseTo(0.45, 9);
   });
 
   it("keys the band on the storey the body is in, not the one it proposed", () => {

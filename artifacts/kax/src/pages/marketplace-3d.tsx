@@ -29,8 +29,8 @@ import {
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
-import { streetDepthFor, monumentZFor, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS } from "@/lib/city-layout";
-import { streetMouthsFor } from "@/lib/undercroft";
+import { streetDepthFor, monumentZFor, plazaZFor, PLAZA_FLANK_X, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS } from "@/lib/city-layout";
+import { streetMouthsFor, streetReturnSpawn } from "@/lib/undercroft";
 import { DirectoryBoard, useCityRooms, BOARD_FOOTPRINT } from "@/components/directory-board";
 
 
@@ -1427,8 +1427,11 @@ export default function Marketplace3D() {
       // are mounted a quarter turn round, which swaps a box's x and z
       // extents — these were transcribed from the unrotated geometry, so
       // every one blocked along the wrong axis.
-      { cx: -12.5, cz: streetDepth - 8, ...venueFootprint("arcade") }, // the Arcade
-      { cx: 12.5, cz: streetDepth - 8, ...venueFootprint("bank") }, // Resonance Trust
+      // The plaza's z comes from `plazaZFor` rather than from a second copy of
+      // `streetDepth - 8`, because the Undercroft's north mouth has to stay
+      // clear of the Arcade and could not read a local.
+      { cx: -PLAZA_FLANK_X, cz: plazaZFor(sceneAgents.length), ...venueFootprint("arcade") }, // the Arcade
+      { cx: PLAZA_FLANK_X, cz: plazaZFor(sceneAgents.length), ...venueFootprint("bank") }, // Resonance Trust
       { cx: 12.5, cz: 3, ...venueFootprint("residences") }, // Standing Wave Residences
       { cx: -12.5, cz: 3, ...venueFootprint("joinery") }, // The Joinery
       { cx: 17.6, cz: -8.5, ...venueFootprint("scada") }, // 0xSCADA Engineering Firm
@@ -1476,7 +1479,7 @@ export default function Marketplace3D() {
     [],
   );
   // The plaza flanks: Arcade west of the monument, the bank east of it.
-  const plazaZ = streetDepth - 8;
+  const plazaZ = plazaZFor(sceneAgents.length);
   // Cross streets, and the corner the cafe holds.
   const sideStreetZ = [-12, -30];
   const cafeZ = -18.4;
@@ -1519,11 +1522,13 @@ export default function Marketplace3D() {
       return;
     }
     if (from === "__undercroft__") {
-      // Back up the near ramp, standing in the alley outside its mouth.
-      const m = streetMouths[0]!;
-      // On the alley's centreline beside the mouth — clear of both the mouth
-      // itself and the prop lane down the alley's shop side.
-      setSpawn({ position: [m.x + 1.4, 1.75, m.z], yaw: -Math.PI / 2 });
+      // Back up the near ramp, standing in the alley outside its mouth — on
+      // the alley's own centreline, clear of the mouth's collision box and of
+      // the prop lane down the alley's shop side. Both clearances are DERIVED
+      // (see `streetReturnSpawn`) rather than written here: the literal that
+      // used to be here put the body 0.8 m inside the kiosk it had just walked
+      // out of, and said in a comment that it did not.
+      setSpawn(streetReturnSpawn(streetMouths[0]!));
       return;
     }
     const hit = layout.find((l) => l.agent.slug === from);
@@ -1940,8 +1945,8 @@ export default function Marketplace3D() {
         <DirectoryBoard position={[-6.2, 0, -12]} rotation={Math.PI / 2} rooms={cityRooms} heading="THIS WAY" />
         <DirectoryBoard position={[6.2, 0, -30]} rotation={-Math.PI / 2} rooms={cityRooms} heading="THIS WAY" />
         <GhostSignalsTower position={[0, 0, towerZ]} onEnter={() => navigate("/gs/floor")} />
-        <ArcadeVenue position={[-12.5, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
-        <BankVenue position={[12.5, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
+        <ArcadeVenue position={[-PLAZA_FLANK_X, 0.12, plazaZ]} rotation={Math.PI / 2} onEnter={() => navigate("/arcade")} />
+        <BankVenue position={[PLAZA_FLANK_X, 0.12, plazaZ]} rotation={-Math.PI / 2} onEnter={() => navigate("/bank")} />
         <ResidencesTower position={[12.5, 0.12, 3]} rotation={-Math.PI / 2} onEnter={() => navigate("/residences")} />
         <JoineryVenue position={[-12.5, 0.12, 3]} rotation={Math.PI / 2} onEnter={() => navigate("/furniture")} />
         <ScadaVenue position={[17.6, 0.12, -8.5]} rotation={-Math.PI / 2} onEnter={() => navigate("/scada")} />
