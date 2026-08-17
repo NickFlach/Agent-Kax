@@ -381,6 +381,7 @@ const BankHall = lazy(() => import("@/pages/bank-hall"));
 const Residences = lazy(() => import("@/pages/residences"));
 const FurnitureHall = lazy(() => import("@/pages/furniture-hall"));
 const ScadaFirm = lazy(() => import("@/pages/scada-firm"));
+const UndercroftPage = lazy(() => import("@/pages/undercroft"));
 const Cafe = lazy(() => import("@/pages/cafe"));
 const StoreInterior = lazy(() => import("@/pages/store-interior"));
 const Marketplace3D = lazy(() => import("@/pages/marketplace-3d"));
@@ -502,6 +503,9 @@ function Router() {
       </Route>
       <Route path="/scada">
         <Venue><ScadaFirm /></Venue>
+      </Route>
+      <Route path="/undercroft">
+        <Venue><UndercroftPage /></Venue>
       </Route>
       <Route path="/cafe">
         <Venue><Cafe /></Venue>

@@ -10,6 +10,7 @@ import {
 } from "@/lib/city-textures";
 import type { DayPhase } from "@/lib/time-of-day";
 import { DISPLAY_FONT } from "@/lib/fonts";
+import { ALLEY_X, alleyProps } from "@/lib/city-layout";
 
 
 /**
@@ -26,7 +27,13 @@ import { DISPLAY_FONT } from "@/lib/fonts";
  * face is ≈±12.25). The alleys run down the gap at ±10.
  */
 
-export const ALLEY_X = 11;
+/**
+ * Re-exported so `marketplace-3d.tsx`'s existing import keeps working. The
+ * value itself now lives in `@/lib/city-layout` beside the prop walk, because
+ * this file cannot be imported by the Node test runner and the Undercroft's
+ * street mouths have to be checked against both.
+ */
+export { ALLEY_X };
 
 /** Service alley behind one shop row. `side` is -1 for west, +1 for east. */
 export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; lit: boolean }) {
@@ -37,16 +44,9 @@ export function BackAlley({ side, depth, lit }: { side: 1 | -1; depth: number; l
   const backWall = useMemo(() => repeated(brickTexture(3), 1, length / 6), [length]);
 
   // Props march down the alley at irregular intervals so it never reads tiled.
-  const props = useMemo(() => {
-    const out: Array<{ z: number; kind: "dumpster" | "crates" | "pipes" | "escape" | "lamp" }> = [];
-    const kinds = ["dumpster", "escape", "crates", "lamp", "pipes", "dumpster", "escape", "crates"] as const;
-    let i = 0;
-    for (let z = 2; z > depth - 4; z -= 8 + (i % 3) * 1.5) {
-      out.push({ z, kind: kinds[i % kinds.length]! });
-      i++;
-    }
-    return out;
-  }, [depth]);
+  // The walk itself lives in `@/lib/city-layout` so a test can ask where these
+  // stand without importing three.js.
+  const props = useMemo(() => alleyProps(depth), [depth]);
 
   return (
     <group>

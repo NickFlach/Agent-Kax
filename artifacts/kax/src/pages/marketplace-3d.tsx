@@ -29,7 +29,8 @@ import {
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
-import { streetDepthFor, monumentZFor, venueFootprint } from "@/lib/city-layout";
+import { streetDepthFor, monumentZFor, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS } from "@/lib/city-layout";
+import { streetMouthsFor } from "@/lib/undercroft";
 import { DirectoryBoard, useCityRooms, BOARD_FOOTPRINT } from "@/components/directory-board";
 
 
@@ -1097,6 +1098,95 @@ function ScadaVenue({ position, rotation, onEnter }: { position: [number, number
     </group>
   );
 }
+
+/**
+ * A way down into the Undercroft — the ramp head, and the sign that says so.
+ *
+ * TWO OF THESE, in the service alleys at x = ±11, near each end of the strip.
+ * The alleys are the only long stretch of the street with no obstacle in them
+ * at all: the roadway and the pavement between the curb and the shopfronts
+ * both carry pedestrians, and the cross streets are already inside a
+ * shopfront's collision box for most of their width. Neither mouth displaces a
+ * storefront, a venue door or a directory board — `layoutFor` and the 48-cut
+ * are not touched by this feature at all, which is the mechanical guarantee
+ * that the original forty-eight are exactly where they were.
+ *
+ * The walking decline itself is INSIDE `/undercroft`. The street rig has no
+ * terrain callback, and giving it one would silently disable R/F flying (the
+ * rig reassigns `ny` from the terrain after the vertical input is applied) and
+ * would put anything below y = -1.2 underneath the sea plane. So the descent
+ * lives one route away, where it costs the street nothing — and it is a real
+ * walk down a real ramp, not a fade.
+ */
+function UndercroftMouth({
+  position,
+  rotation,
+  label,
+  onEnter,
+}: {
+  position: [number, number, number];
+  rotation: number;
+  label: string;
+  onEnter: () => void;
+}) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Shell. Size declared once in lib/city-layout.ts, footprint DERIVED
+          from it — #301. Square in plan, so the two mirrored mouths share one
+          shell entry without either of them getting the wrong footprint. */}
+      <mesh position={[0, 1.4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 2.8, 3]} />
+        <meshStandardMaterial color="#39423c" roughness={0.92} />
+      </mesh>
+      {/* The stairhead opening — a dark mouth with a lit throat, so it reads
+          as somewhere that goes down rather than as a shed. */}
+      <mesh position={[0, 1.05, 1.52]}>
+        <planeGeometry args={[1.9, 2.1]} />
+        <meshStandardMaterial color="#0b1116" roughness={1} />
+      </mesh>
+      {[-1.0, 1.0].map((x) => (
+        <mesh key={x} position={[x, 1.5, 1.5]} castShadow>
+          <boxGeometry args={[0.22, 3.0, 0.22]} />
+          <meshStandardMaterial color="#5a635c" roughness={0.7} metalness={0.25} />
+        </mesh>
+      ))}
+      <mesh position={[0, 2.95, 1.5]} castShadow>
+        <boxGeometry args={[2.4, 0.5, 0.28]} />
+        <meshStandardMaterial color="#1d2b31" roughness={0.85} />
+      </mesh>
+      {/* ENTRY SIGNAGE. A visitor walking past has to be able to read that
+          there is a second street of shops below this one. */}
+      <Suspense fallback={null}>
+        <Text position={[0, 2.95, 1.66]} fontSize={0.26} color="#d8e8f0" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.14}>
+          THE UNDERCROFT
+        </Text>
+      </Suspense>
+      <Suspense fallback={null}>
+        <Text position={[0, 2.5, 1.66]} fontSize={0.12} color="#8fb2c4" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+          {label}
+        </Text>
+      </Suspense>
+      <Suspense fallback={null}>
+        <Text position={[0, 0.42, 1.56]} fontSize={0.1} color="#7f9aa8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+          48 UNITS · WALK DOWN
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 1.5, 2.1]} intensity={11} distance={8} decay={2} color="#bcd9e8" />
+    </group>
+  );
+}
+
 function JoineryVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
   const click = (e: { stopPropagation?: () => void; delta?: number }) => {
     if ((e.delta ?? 0) > 5) return;
@@ -1248,20 +1338,17 @@ function StreetPresence({ onSay }: { onSay: (fn: (t: string) => Promise<string |
   return <RemoteAgents agents={others} heard={heard} y={0.12} />;
 }
 
-const MAX_3D_STOREFRONTS = 48;
-
-function layoutFor(agents: SceneAgent[]) {
-  return agents.map((agent, i) => {
-    const isLeft = i % 2 === 0;
-    const row = Math.floor(i / 2);
-    const z = -2 - row * 4.5 + (i % 3 === 0 ? 0.5 : 0);
-    // Facades land at ±4.5, leaving a real ~1.8-unit sidewalk between the
-    // curb (±2.7) and the shopfronts — pedestrians walk it without clipping.
-    const x = isLeft ? -6.0 : 6.0;
-    const rotation: [number, number, number] = isLeft ? [0, Math.PI / 2, 0] : [0, -Math.PI / 2, 0];
-    return { agent, position: [x, 0.12, z] as [number, number, number], rotation };
-  });
-}
+/**
+ * The street's 48, and the grid they stand on.
+ *
+ * Both moved into `lib/city-layout.ts` when the Undercroft was built, so the
+ * lower tier could mirror this spacing by CALLING it rather than by copying
+ * its numbers, and so the forty-eight positions could be pinned against a
+ * frozen golden table in a test. The arithmetic is unchanged: alternating
+ * sides, two per row, 4.5 apart from z = -2, with the +0.5 jitter on every
+ * third index. See `city-layout.test.ts` → "the original 48 storefronts".
+ */
+const MAX_3D_STOREFRONTS = MAX_STREET_STOREFRONTS;
 
 export default function Marketplace3D() {
   const [, navigate] = useLocation();
@@ -1320,6 +1407,11 @@ export default function Marketplace3D() {
   const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
   const streetDepth = streetDepthFor(sceneAgents.length);
   const towerZ = streetDepth - 20;
+  // The far mouth stands off the street's END, like the tower, the monument,
+  // the Arcade and the Bank. It used to be a literal, which put it inside
+  // Resonance Trust at forty storefronts and outside the movement clamp below
+  // twenty-nine.
+  const streetMouths = useMemo(() => streetMouthsFor(sceneAgents.length), [sceneAgents.length]);
   const obstacles = useMemo(
     () => [
       ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
@@ -1341,8 +1433,14 @@ export default function Marketplace3D() {
       { cx: -12.5, cz: 3, ...venueFootprint("joinery") }, // The Joinery
       { cx: 17.6, cz: -8.5, ...venueFootprint("scada") }, // 0xSCADA Engineering Firm
       { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 }, // Flaukowski's No. 2, off the first cross street
+      // The two ways down. Placed in the service alleys, where nothing else
+      // is — see UndercroftMouth. No vertical band on either: they are
+      // ordinary street furniture, solid at every elevation exactly as every
+      // obstacle on this street has always been, so the street's collision
+      // behaviour is not merely unchanged in intent but unchanged in data.
+      ...streetMouths.map((m) => ({ cx: m.x, cz: m.z, ...venueFootprint("undercroft") })),
     ],
-    [layout, towerZ, streetDepth, sceneAgents.length],
+    [layout, towerZ, streetDepth, streetMouths, sceneAgents.length],
   );
 
   const GS_TOWER: SceneAgent = useMemo(
@@ -1367,6 +1465,10 @@ export default function Marketplace3D() {
   );
   const SCADA: SceneAgent = useMemo(
     () => ({ slug: "__scada__", name: "0xSCADA Engineering Firm", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
+    [],
+  );
+  const UNDERCROFT: SceneAgent = useMemo(
+    () => ({ slug: "__undercroft__", name: "The Undercroft", artifacts: 0, drops: 0, claimed: true, source: "constellation", phi: null, consciousnessLevel: null }),
     [],
   );
   const JOINERY: SceneAgent = useMemo(
@@ -1416,12 +1518,20 @@ export default function Marketplace3D() {
       setSpawn({ position: [13.6, 1.75, -8.5], yaw: -Math.PI / 2 });
       return;
     }
+    if (from === "__undercroft__") {
+      // Back up the near ramp, standing in the alley outside its mouth.
+      const m = streetMouths[0]!;
+      // On the alley's centreline beside the mouth — clear of both the mouth
+      // itself and the prop lane down the alley's shop side.
+      setSpawn({ position: [m.x + 1.4, 1.75, m.z], yaw: -Math.PI / 2 });
+      return;
+    }
     const hit = layout.find((l) => l.agent.slug === from);
     if (!hit) return;
     const left = hit.position[0] < 0;
     // On the sidewalk just outside the shopfront, facing the road.
     setSpawn({ position: [left ? -3.9 : 3.9, 1.87, hit.position[2] + 0.4], yaw: left ? -Math.PI / 2 : Math.PI / 2 });
-  }, [layout, towerZ, spawn]);
+  }, [layout, towerZ, streetMouths, spawn]);
 
   const dest = (a: SceneAgent) =>
     a.slug === "__gs__"
@@ -1438,6 +1548,8 @@ export default function Marketplace3D() {
                 ? "/furniture"
                 : a.slug === "__scada__"
                   ? "/scada"
+                  : a.slug === "__undercroft__"
+                    ? "/undercroft?from=north"
               : a.source === "constellation"
                 ? `/constellation/${a.slug}`
                 : `/s/${a.slug}/room`;
@@ -1833,6 +1945,22 @@ export default function Marketplace3D() {
         <ResidencesTower position={[12.5, 0.12, 3]} rotation={-Math.PI / 2} onEnter={() => navigate("/residences")} />
         <JoineryVenue position={[-12.5, 0.12, 3]} rotation={Math.PI / 2} onEnter={() => navigate("/furniture")} />
         <ScadaVenue position={[17.6, 0.12, -8.5]} rotation={-Math.PI / 2} onEnter={() => navigate("/scada")} />
+        {/* The two ways down. Facing the street from each alley — the west one
+            first, which is the mount `city-layout.test.ts` reads the rotation
+            of. Its shell is square in plan, so the mirrored east mount cannot
+            have a wrong footprint (asserted in that test). */}
+        <UndercroftMouth
+          position={[streetMouths[0]!.x, 0.12, streetMouths[0]!.z]}
+          rotation={Math.PI / 2}
+          label="NORTH RAMP"
+          onEnter={() => navigate("/undercroft?from=north")}
+        />
+        <UndercroftMouth
+          position={[streetMouths[1]!.x, 0.12, streetMouths[1]!.z]}
+          rotation={-Math.PI / 2}
+          label="SOUTH RAMP"
+          onEnter={() => navigate("/undercroft?from=south")}
+        />
         <ProximityDetector
           points={[
             ...layout.map((l) => ({ agent: l.agent, pos: l.position })),
@@ -1842,6 +1970,7 @@ export default function Marketplace3D() {
             { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
             { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
             { agent: SCADA, pos: [14.6, 0, -8.5] as [number, number, number] },
+            { agent: UNDERCROFT, pos: [streetMouths[0]!.x + 2.2, 0, streetMouths[0]!.z] as [number, number, number] },
             { agent: CAFE, pos: [-17.6, 0, -18.4 + 5.0] as [number, number, number] },
           ]}
           onNearest={setNearby}

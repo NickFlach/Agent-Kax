@@ -24,9 +24,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   FOOTPRINT_MARGIN,
+  MAX_STREET_STOREFRONTS,
   MONUMENT_Z_OFFSET,
+  STREET_SHOP_Y,
   VENUE_SHELLS,
   footprintFor,
+  layoutFor,
   monumentZFor,
   streetDepthFor,
   venueFootprint,
@@ -80,8 +83,20 @@ describe("venue footprints", () => {
       bank: { hx: 4.5 + FOOTPRINT_MARGIN, hz: 5.5 + FOOTPRINT_MARGIN },
       residences: { hx: 4.0 + FOOTPRINT_MARGIN, hz: 4.5 + FOOTPRINT_MARGIN },
       joinery: { hx: 4.0 + FOOTPRINT_MARGIN, hz: 5.25 + FOOTPRINT_MARGIN },
+      // `scada` was never added when the sixth venue shipped, and the loop
+      // below iterates `Object.keys(expected)` — so this guard has been
+      // silently skipping 0xSCADA since #318. It is not a type error because
+      // `tsconfig.json` excludes `**/*.test.ts`, so the `Record<VenueKey,…>`
+      // annotation was never checked. Filled in here rather than left for the
+      // next person to rediscover.
+      scada: { hx: 3.1 + FOOTPRINT_MARGIN, hz: 4.3 + FOOTPRINT_MARGIN },
+      undercroft: { hx: 1.5 + FOOTPRINT_MARGIN, hz: 1.5 + FOOTPRINT_MARGIN },
     };
-    for (const key of Object.keys(expected) as VenueKey[]) {
+    // And the loop is keyed off the SHELLS, so the next omission fails here
+    // instead of being skipped. This is the same fix #318 applied to the
+    // rotation guard beside it and did not apply to this one.
+    expect(Object.keys(expected).sort()).toEqual(Object.keys(VENUE_SHELLS).sort());
+    for (const key of Object.keys(VENUE_SHELLS) as VenueKey[]) {
       const got = venueFootprint(key);
       expect(got.hx, `${key} hx`).toBeCloseTo(expected[key].hx);
       expect(got.hz, `${key} hz`).toBeCloseTo(expected[key].hz);
@@ -108,6 +123,7 @@ describe("venue footprints", () => {
       residences: "<ResidencesTower",
       joinery: "<JoineryVenue",
       scada: "<ScadaVenue",
+      undercroft: "<UndercroftMouth",
     };
     // Keyed by VenueKey rather than a hand-written list, so a shell added
     // without a mount here is a TYPE error rather than a venue this guard
@@ -122,6 +138,99 @@ describe("venue footprints", () => {
       const sign = VENUE_SHELLS[key].rotationY > 0 ? "rotation={Math.PI / 2}" : "rotation={-Math.PI / 2}";
       expect(line, `${key} is mounted at a rotation its footprint does not assume`).toContain(sign);
     }
+  });
+
+  it("only lets a shell be mounted twice if turning it cannot change its footprint", () => {
+    // The guard above reads the FIRST mount of each tag. The Undercroft has
+    // two mouths facing opposite ways, so the second one is unread — which
+    // would be a hole if a quarter turn could change its footprint. It cannot:
+    // the shell is square in plan, so every rotation gives the same box. This
+    // asserts that rather than trusting it, and it fails the moment somebody
+    // makes the mouth rectangular and leaves the mirrored mount behind.
+    const shell = VENUE_SHELLS.undercroft;
+    expect(shell.size[0], "the Undercroft mouth is no longer square in plan").toBe(shell.size[2]);
+    const a = footprintFor(shell.size, Math.PI / 2);
+    const b = footprintFor(shell.size, -Math.PI / 2);
+    expect(a.hx).toBeCloseTo(b.hx);
+    expect(a.hz).toBeCloseTo(b.hz);
+    expect(a.hx).toBeCloseTo(a.hz);
+    expect(SCENE.split("<UndercroftMouth").length - 1, "there should be exactly two ways down").toBe(2);
+  });
+});
+
+/**
+ * THE ORIGINAL 48.
+ *
+ * This is the most important test in the Undercroft change and it exists for
+ * one sentence Nick said twice: the first forty-eight storefronts stay exactly
+ * as they are. Not "we did not mean to move them" — the same set, the same
+ * order, the same coordinates.
+ *
+ * So the whole grid is frozen. Forty-eight rows, written out, no formula: a
+ * golden table generated from the code as it stood BEFORE the Undercroft
+ * existed. A test that recomputed the expected positions from the same
+ * arithmetic under test would agree with any change to that arithmetic, which
+ * is the failure mode this is built to avoid.
+ *
+ * `layoutFor` moved from `marketplace-3d.tsx` into `city-layout.ts` as part of
+ * this work so that both tiers could share one grid. That move is the reason
+ * this table is worth having: it is the only thing standing between "the
+ * street is unchanged" and somebody's word for it.
+ */
+const STREET_GOLDEN: ReadonlyArray<readonly [number, number]> = [
+  [-6, -1.5], [6, -2], [-6, -6.5], [6, -6], [-6, -11], [6, -11],
+  [-6, -15], [6, -15.5], [-6, -20], [6, -19.5], [-6, -24.5], [6, -24.5],
+  [-6, -28.5], [6, -29], [-6, -33.5], [6, -33], [-6, -38], [6, -38],
+  [-6, -42], [6, -42.5], [-6, -47], [6, -46.5], [-6, -51.5], [6, -51.5],
+  [-6, -55.5], [6, -56], [-6, -60.5], [6, -60], [-6, -65], [6, -65],
+  [-6, -69], [6, -69.5], [-6, -74], [6, -73.5], [-6, -78.5], [6, -78.5],
+  [-6, -82.5], [6, -83], [-6, -87.5], [6, -87], [-6, -92], [6, -92],
+  [-6, -96], [6, -96.5], [-6, -101], [6, -100.5], [-6, -105.5], [6, -105.5],
+];
+
+describe("the original 48 storefronts", () => {
+  it("still stand exactly where they stood", () => {
+    expect(STREET_GOLDEN.length, "the golden table is empty").toBe(48);
+    const agents = Array.from({ length: 48 }, (_, i) => ({ slug: `agent-${i}` }));
+    const got = layoutFor(agents);
+    expect(got.length).toBe(48);
+    for (let i = 0; i < 48; i++) {
+      const want = STREET_GOLDEN[i]!;
+      const item = got[i]!;
+      // Exact equality, not toBeCloseTo. Every value here is a binary fraction
+      // and a hair of drift in a shopfront is still a moved shopfront.
+      expect(item.position, `storefront ${i} moved`).toEqual([want[0], STREET_SHOP_Y, want[1]]);
+      const isLeft = want[0] < 0;
+      expect(item.rotation, `storefront ${i} turned`).toEqual([0, isLeft ? Math.PI / 2 : -Math.PI / 2, 0]);
+    }
+  });
+
+  it("keeps the same agent in the same slot, in the order it was given", () => {
+    // "Same order" is half the promise and coordinates alone do not check it:
+    // reversing the input would give the identical set of positions.
+    const agents = Array.from({ length: 48 }, (_, i) => ({ slug: `agent-${i}` }));
+    const got = layoutFor(agents);
+    expect(got.map((g) => g.agent.slug)).toEqual(agents.map((a) => a.slug));
+    // Alternating sides, two per row, is the thing that makes slot order and
+    // street order the same fact.
+    expect(got.filter((g) => g.position[0] < 0).length).toBe(24);
+    expect(got[0]!.agent.slug).toBe("agent-0");
+    expect(got[0]!.position[0]).toBeLessThan(0);
+  });
+
+  it("is still what the street mounts, and still cut at 48", () => {
+    const code = SCENE.split(/\r?\n/)
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+    expect(code, "the street stopped using the shared grid").toMatch(/layoutFor\(sceneAgents\)/);
+    expect(MAX_STREET_STOREFRONTS, "the 48-cut moved").toBe(48);
+    expect(code, "the street stopped reading the shared cut").toMatch(
+      /MAX_3D_STOREFRONTS\s*=\s*MAX_STREET_STOREFRONTS/,
+    );
+    expect(code, "the street re-sorts what the API gave it").not.toMatch(/sceneAgents[\s\S]{0,40}\.sort\(/);
+    expect(code, "the street sliced somewhere other than the top").toMatch(
+      /allSceneAgents\.slice\(0,\s*MAX_3D_STOREFRONTS\)/,
+    );
   });
 });
 
