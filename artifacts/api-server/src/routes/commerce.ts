@@ -23,6 +23,7 @@ import {
   NON_CHARGEABLE_ORDER_STATUSES,
   TERMINAL_ORDER_STATUSES,
 } from "../lib/commerceOrderStatus";
+import { buyerTimeline } from "../lib/commerceFulfillmentStages";
 import { scrubDatabaseError } from "../lib/scrubDatabaseError";
 import { logger } from "../lib/logger";
 
@@ -1247,6 +1248,120 @@ router.get("/commerce/products/for-artifact/:artifactId", async (req: Request, r
   });
 });
 
+// ── What a buyer is shown about fulfilment ─────────────────────────────────
+
+/**
+ * The columns the two buyer endpoints select, and the reason the list is a
+ * constant rather than typed out twice.
+ *
+ * The `ship_to_*` columns are not here, which is the same guarantee the admin
+ * listing gets: a projection cannot forget to strip what it never asked for.
+ * Two things beyond that are deliberately absent and are worth naming, because
+ * they are the difference between this response and the admin one:
+ *
+ * - **`fulfillment_last_error` is not selected.** What is selected is
+ *   `fulfillment_last_error IS NOT NULL`, computed in SQL, so the string
+ *   `"429:8251"` never enters the buyer's code path at all. It is not filtered
+ *   out downstream — it is never fetched, and it cannot be added to the response
+ *   by somebody widening a field later. Provider codes and HTTP statuses are for
+ *   an operator, who has `GET /admin/commerce-orders`.
+ * - **`provider_status` is not selected.** `in-production` is Printify's word,
+ *   not ours and not a buyer's. They get a stage.
+ *
+ * `fulfillment_attempts` IS selected and is NOT returned: `buyerTimeline` reads
+ * it to tell a parked order from one still being retried, and reports that as a
+ * `progress` of `stalled`. The count itself is an implementation detail of the
+ * retry ladder and means nothing to the person waiting for a sticker.
+ */
+const BUYER_ORDER_COLUMNS = {
+  clientReference: commerceOrdersTable.clientReference,
+  sku: commerceOrdersTable.sku,
+  currency: commerceOrdersTable.currency,
+  itemCents: commerceOrdersTable.itemCents,
+  shippingCents: commerceOrdersTable.shippingCents,
+  taxCents: commerceOrdersTable.taxCents,
+  totalCents: commerceOrdersTable.totalCents,
+  status: commerceOrdersTable.status,
+  fulfillmentState: commerceOrdersTable.fulfillmentState,
+  submittedAt: commerceOrdersTable.submittedAt,
+  releasedAt: commerceOrdersTable.releasedAt,
+  shippedAt: commerceOrdersTable.shippedAt,
+  deliveredAt: commerceOrdersTable.deliveredAt,
+  trackingCarrier: commerceOrdersTable.trackingCarrier,
+  trackingNumber: commerceOrdersTable.trackingNumber,
+  trackingUrl: commerceOrdersTable.trackingUrl,
+  fulfillmentAttempts: commerceOrdersTable.fulfillmentAttempts,
+  fulfillmentLastAttemptAt: commerceOrdersTable.fulfillmentLastAttemptAt,
+  /** The reason is an admin's. Whether there IS one decides a buyer's wording. */
+  hasFulfillmentError: sql<boolean>`(${commerceOrdersTable.fulfillmentLastError} is not null)`,
+  createdAt: commerceOrdersTable.createdAt,
+  updatedAt: commerceOrdersTable.updatedAt,
+} as const;
+
+type BuyerOrderRow = {
+  [K in keyof typeof BUYER_ORDER_COLUMNS]: K extends "hasFulfillmentError"
+    ? boolean
+    : (typeof commerceOrdersTable.$inferSelect)[K & keyof typeof commerceOrdersTable.$inferSelect];
+};
+
+/**
+ * One order, in the only terms a buyer is ever shown.
+ *
+ * `timeline` is computed here on the server and not in the browser, and that is
+ * a requirement rather than a preference: deriving it client-side would mean
+ * shipping the inputs to derive it FROM, and the honest input to "is this order
+ * stuck" is the provider's refusal — which is exactly the thing a buyer must
+ * never be handed. The client gets stage ids and a `progress` word, and turns
+ * those into sentences using its own copy table. Two code paths, two payloads,
+ * and no filtering of an admin body in a component.
+ *
+ * `tracking` is null rather than an object of nulls until a shipment exists, so
+ * the page can tell "not shipped" from "shipped, no number".
+ */
+function toBuyerOrder(order: BuyerOrderRow) {
+  const tracking =
+    order.trackingCarrier || order.trackingNumber || order.trackingUrl
+      ? {
+          carrier: order.trackingCarrier,
+          number: order.trackingNumber,
+          url: order.trackingUrl,
+        }
+      : null;
+
+  return {
+    orderRef: order.clientReference,
+    status: purchaseOutcomeFor(order.status),
+    orderStatus: order.status,
+    fulfillmentState: order.fulfillmentState,
+    sku: order.sku,
+    currency: order.currency,
+    itemCents: order.itemCents,
+    shippingCents: order.shippingCents,
+    taxCents: order.taxCents,
+    totalCents: order.totalCents,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    tracking,
+    timeline: buyerTimeline({
+      orderStatus: order.status,
+      fulfillmentState: order.fulfillmentState,
+      createdAt: order.createdAt,
+      submittedAt: order.submittedAt,
+      releasedAt: order.releasedAt,
+      shippedAt: order.shippedAt,
+      deliveredAt: order.deliveredAt,
+      fulfillmentAttempts: order.fulfillmentAttempts,
+      // `=== true` rather than a truthiness test: this value crosses a driver
+      // boundary, and every plausible non-boolean it could arrive as — "t",
+      // "f", 0, 1 — has at least one spelling that is truthy while meaning
+      // false. The failure that would cause is a healthy order reported as
+      // stalled to its buyer.
+      hasFulfillmentError: order.hasFulfillmentError === true,
+      fulfillmentLastAttemptAt: order.fulfillmentLastAttemptAt,
+    }),
+  };
+}
+
 // ── GET /api/commerce/orders ───────────────────────────────────────────────
 
 /**
@@ -1269,40 +1384,13 @@ router.get("/commerce/orders", requireAuth, async (req: Request, res: Response) 
   const userId = req.user!.id;
 
   const rows = await db
-    .select({
-      clientReference: commerceOrdersTable.clientReference,
-      sku: commerceOrdersTable.sku,
-      currency: commerceOrdersTable.currency,
-      itemCents: commerceOrdersTable.itemCents,
-      shippingCents: commerceOrdersTable.shippingCents,
-      taxCents: commerceOrdersTable.taxCents,
-      totalCents: commerceOrdersTable.totalCents,
-      status: commerceOrdersTable.status,
-      fulfillmentState: commerceOrdersTable.fulfillmentState,
-      createdAt: commerceOrdersTable.createdAt,
-      updatedAt: commerceOrdersTable.updatedAt,
-    })
+    .select(BUYER_ORDER_COLUMNS)
     .from(commerceOrdersTable)
     .where(eq(commerceOrdersTable.buyerUserId, userId))
     .orderBy(desc(commerceOrdersTable.createdAt))
     .limit(100);
 
-  res.json({
-    orders: rows.map((order) => ({
-      orderRef: order.clientReference,
-      status: purchaseOutcomeFor(order.status),
-      orderStatus: order.status,
-      fulfillmentState: order.fulfillmentState,
-      sku: order.sku,
-      currency: order.currency,
-      itemCents: order.itemCents,
-      shippingCents: order.shippingCents,
-      taxCents: order.taxCents,
-      totalCents: order.totalCents,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-    })),
-  });
+  res.json({ orders: rows.map(toBuyerOrder) });
 });
 
 // ── GET /api/commerce/orders/:ref ──────────────────────────────────────────
@@ -1325,19 +1413,7 @@ router.get("/commerce/orders/:ref", requireAuth, async (req: Request, res: Respo
   const ref = String(req.params["ref"] ?? "");
 
   const [order] = await db
-    .select({
-      clientReference: commerceOrdersTable.clientReference,
-      sku: commerceOrdersTable.sku,
-      currency: commerceOrdersTable.currency,
-      itemCents: commerceOrdersTable.itemCents,
-      shippingCents: commerceOrdersTable.shippingCents,
-      taxCents: commerceOrdersTable.taxCents,
-      totalCents: commerceOrdersTable.totalCents,
-      status: commerceOrdersTable.status,
-      fulfillmentState: commerceOrdersTable.fulfillmentState,
-      createdAt: commerceOrdersTable.createdAt,
-      updatedAt: commerceOrdersTable.updatedAt,
-    })
+    .select(BUYER_ORDER_COLUMNS)
     .from(commerceOrdersTable)
     .where(
       and(
@@ -1352,20 +1428,7 @@ router.get("/commerce/orders/:ref", requireAuth, async (req: Request, res: Respo
     return;
   }
 
-  res.json({
-    orderRef: order.clientReference,
-    status: purchaseOutcomeFor(order.status),
-    orderStatus: order.status,
-    fulfillmentState: order.fulfillmentState,
-    sku: order.sku,
-    currency: order.currency,
-    itemCents: order.itemCents,
-    shippingCents: order.shippingCents,
-    taxCents: order.taxCents,
-    totalCents: order.totalCents,
-    createdAt: order.createdAt,
-    updatedAt: order.updatedAt,
-  });
+  res.json(toBuyerOrder(order));
 });
 
 export default router;

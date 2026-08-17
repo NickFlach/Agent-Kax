@@ -371,6 +371,53 @@ export interface PurchaseResult {
   clientSecret?: string;
 }
 
+/**
+ * The stages a buyer watches an order climb, in order.
+ *
+ * The server's `BUYER_STAGES`, and the ids are its ids. Five and not six: the
+ * POST that creates the order at Printify returns its id in the same call, so
+ * "submitted" and "accepted" are one event in this system, and a stage that
+ * always lit at the same instant as its neighbour would be a progress bar
+ * teaching its reader not to trust it.
+ */
+export type BuyerStageId = "paid" | "submitted" | "in_production" | "shipped" | "delivered";
+
+/**
+ * How the order is moving.
+ *
+ * `stalled` existing separately from `moving` IS the feature. A parked order —
+ * one the retry ladder has given up on — rendered identically to one still on
+ * its way, and that ambiguity is what cost hours the last time something broke
+ * quietly. The server decides which of these it is; the client only picks words.
+ */
+export type OrderProgress = "moving" | "stalled" | "stopped" | "none";
+
+export interface OrderStage {
+  id: BuyerStageId;
+  reached: boolean;
+  /** ISO 8601, or null on a reached stage with no recorded time. */
+  at: string | null;
+  /** The furthest stage reached — the one the buyer is watching. */
+  current: boolean;
+}
+
+/**
+ * `timeline` on a physical order.
+ *
+ * Note what is NOT in this type, and could not be added to it without the server
+ * changing: there is no provider status, no HTTP code, no attempt count and no
+ * error string. The buyer endpoint does not select those columns — it selects
+ * `fulfillment_last_error IS NOT NULL` and throws the reason away in SQL — so
+ * this is not a filtered admin payload. It is a different payload.
+ */
+export interface OrderTimeline {
+  stages: OrderStage[];
+  current: BuyerStageId | null;
+  progress: OrderProgress;
+  /** Where it stopped, when `progress` is `stalled`. */
+  stalledAt: BuyerStageId | null;
+}
+
 /** An order as `GET /commerce/orders` and `GET /commerce/orders/:ref` report it. */
 export interface PhysicalOrder {
   orderRef: string;
@@ -388,14 +435,24 @@ export interface PhysicalOrder {
   /**
    * Where the parcel is, once anything knows.
    *
-   * Optional because `commerce_orders` has no tracking columns yet — the
-   * fulfilment states it does carry stop at `in_production`, and the shipped
-   * transition that would carry a carrier and a number is #263. The field is
-   * declared and rendered now so that landing it on the server is a server
-   * change alone, and it is absent rather than defaulted so the page can tell
-   * "not shipped" from "shipped, no number".
+   * Populated by the Printify status poller, which is what finally made this
+   * real: the columns landed in migration 0030 and the poller writes them from
+   * the shipment on a fetched order. Still null rather than an object of nulls
+   * until a shipment exists, so the page can tell "not shipped" from "shipped,
+   * no number".
+   *
+   * Optional on the type because the two order endpoints are polled by tabs
+   * that may have been open across a deploy.
    */
   tracking?: { carrier?: string | null; number?: string | null; url?: string | null } | null;
+  /**
+   * The stage timeline, computed on the server.
+   *
+   * Optional for the same across-a-deploy reason as `tracking`; `stageRows`
+   * below degrades to an empty list rather than throwing, and the page simply
+   * shows the single fulfilment line it always did.
+   */
+  timeline?: OrderTimeline | null;
 }
 
 /** A digital purchase, from the long-shipped `GET /store/my-orders`. */
@@ -613,6 +670,134 @@ export const FULFILLMENT_LABEL: Record<string, string> = {
  */
 export function labelFor(table: Record<string, string>, value: string): string {
   return table[value] ?? value;
+}
+
+// ---------------------------------------------------------------------------
+// The stage timeline
+// ---------------------------------------------------------------------------
+
+/** The stages, in the order the server sends them and the page renders them. */
+export const BUYER_STAGE_ORDER: readonly BuyerStageId[] = [
+  "paid",
+  "submitted",
+  "in_production",
+  "shipped",
+  "delivered",
+];
+
+/**
+ * What each stage is called, ASSEMBLED FROM THE TWO TABLES ABOVE.
+ *
+ * Every value is a reference and not a string literal, deliberately. A parallel
+ * vocabulary is the failure mode here: the fulfilment line and the timeline
+ * would sit two centimetres apart on the same card saying "Being printed" and
+ * "In production" about the same order, and nothing about that fails a build.
+ * Written this way, rewording `FULFILLMENT_LABEL.shipped` rewords the timeline
+ * too, and it is impossible for the two to disagree.
+ *
+ * The one stage that is not a `fulfillment_state` is `paid`, which is a
+ * `commerce_orders.status`, so it comes from the status table instead — the two
+ * columns move on different clocks and this list is the single place they are
+ * read as one line, for display.
+ */
+export const BUYER_STAGE_LABEL: Record<BuyerStageId, string> = {
+  paid: ORDER_STATUS_LABEL["paid"]!,
+  submitted: FULFILLMENT_LABEL["submitted"]!,
+  in_production: FULFILLMENT_LABEL["in_production"]!,
+  shipped: FULFILLMENT_LABEL["shipped"]!,
+  delivered: FULFILLMENT_LABEL["delivered"]!,
+};
+
+/**
+ * What a stalled order is told, by the stage it stalled at.
+ *
+ * Plain language, every one of them, and NOT ONE of them is a provider code, an
+ * HTTP status, a retry count or an internal reason string. The server does not
+ * send any of those to a buyer — the endpoint does not even select the column —
+ * so this table cannot accidentally interpolate one; it is keyed on a stage id
+ * and nothing else.
+ *
+ * Only two entries can happen in practice, because there are only two things the
+ * automatic worker does and therefore only two places it can give up: getting
+ * the order to the printer, and getting the printer to start it. The rest are
+ * present so that a stall at a later stage says something true rather than
+ * nothing, and `stallNote` falls back for anything unlisted.
+ *
+ * Every one of them ends by saying a human is on it, because that is the fact: a
+ * parked order leaves the retry ladder and waits for the manual endpoints, which
+ * an operator presses. Telling a buyer to try again would be telling them to do
+ * something that cannot help.
+ */
+export const STALL_NOTE: Record<BuyerStageId, string> = {
+  paid: "We could not send this to the printer yet — we are on it.",
+  submitted: "The printer has your order but it hasn't started yet — we are on it.",
+  in_production: "This has stopped moving at the printer — we are on it.",
+  shipped: "We have lost track of this parcel — we are on it.",
+  delivered: "Something is wrong with this order — we are on it.",
+};
+
+/** The one sentence a stalled order gets, or null when it is moving normally. */
+export function stallNote(timeline: OrderTimeline | null | undefined): string | null {
+  if (!timeline || timeline.progress !== "stalled") return null;
+  const stage = timeline.stalledAt;
+  if (stage === null) return "This order has stopped moving — we are on it.";
+  return STALL_NOTE[stage] ?? "This order has stopped moving — we are on it.";
+}
+
+/** One rendered row of the timeline. */
+export interface StageRow {
+  id: BuyerStageId;
+  label: string;
+  reached: boolean;
+  current: boolean;
+  /** The stage's own timestamp, already formatted, or null. */
+  at: string | null;
+  /** True on the stage the order stopped at. Rendered differently, not just re-worded. */
+  stalled: boolean;
+}
+
+/**
+ * The timeline as rows to render.
+ *
+ * Falls back to the server's stage order when a stage is missing from the
+ * payload, so a tab left open across a deploy that adds a stage renders the new
+ * one as unreached rather than dropping it — and an EMPTY list when there is no
+ * timeline at all, which the page treats as "show the single fulfilment line
+ * you always did".
+ *
+ * `stalled` is a field on the row rather than something the caller derives,
+ * because the requirement is that a parked order does not LOOK like an
+ * in-progress one. A note under the card is not enough on its own; the stage
+ * itself has to render differently, and that needs a flag at the row.
+ */
+export function stageRows(
+  timeline: OrderTimeline | null | undefined,
+  formatAt: (iso: string) => string = (iso) => iso,
+): StageRow[] {
+  if (!timeline) return [];
+  const byId = new Map(timeline.stages.map((s) => [s.id, s]));
+  return BUYER_STAGE_ORDER.map((id) => {
+    const stage = byId.get(id);
+    return {
+      id,
+      label: BUYER_STAGE_LABEL[id],
+      reached: stage?.reached ?? false,
+      current: stage?.current ?? false,
+      at: stage?.at ? formatAt(stage.at) : null,
+      stalled: timeline.progress === "stalled" && timeline.stalledAt === id,
+    };
+  });
+}
+
+/**
+ * Whether the timeline is worth rendering at all.
+ *
+ * `none` means the charge never landed, and a five-stage progress bar under a
+ * declined card reads as a queue the buyer is waiting in — the same reason
+ * `showsFulfillment` exists and the same three statuses it turns on for.
+ */
+export function showsTimeline(timeline: OrderTimeline | null | undefined): boolean {
+  return !!timeline && timeline.progress !== "none";
 }
 
 // ---------------------------------------------------------------------------

@@ -461,6 +461,14 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         fulfillment_last_error    varchar,
         fulfillment_last_attempt_at  timestamptz,
         fulfillment_next_attempt_at  timestamptz,
+        provider_status           varchar,
+        provider_status_at        timestamptz,
+        shipped_at                timestamptz,
+        delivered_at              timestamptz,
+        tracking_carrier          varchar,
+        tracking_number           varchar,
+        tracking_url              varchar,
+        fulfillment_synced_at     timestamptz,
         created_at                timestamptz NOT NULL DEFAULT now(),
         updated_at                timestamptz NOT NULL DEFAULT now()
       )`),
@@ -488,6 +496,29 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         ADD COLUMN IF NOT EXISTS fulfillment_next_attempt_at timestamptz`),
   },
   {
+    /**
+     * The status-sync and stage-timeline columns again, as ALTERs, for exactly
+     * the reason the block above exists: the CREATE is `IF NOT EXISTS`, so on
+     * every database that already has `commerce_orders` it is a no-op and the
+     * eight columns added to it reach nothing.
+     *
+     * Migration 0030 is the real registration; this is the copy that survives a
+     * deploy diff dropping them again — which has happened once already to the
+     * worker's four, and cost hours precisely because the failure was silent.
+     */
+    label: "commerce_orders status sync and timeline columns",
+    sql: sql.raw(`
+      ALTER TABLE commerce_orders
+        ADD COLUMN IF NOT EXISTS provider_status varchar,
+        ADD COLUMN IF NOT EXISTS provider_status_at timestamptz,
+        ADD COLUMN IF NOT EXISTS shipped_at timestamptz,
+        ADD COLUMN IF NOT EXISTS delivered_at timestamptz,
+        ADD COLUMN IF NOT EXISTS tracking_carrier varchar,
+        ADD COLUMN IF NOT EXISTS tracking_number varchar,
+        ADD COLUMN IF NOT EXISTS tracking_url varchar,
+        ADD COLUMN IF NOT EXISTS fulfillment_synced_at timestamptz`),
+  },
+  {
     label: "commerce_orders buyer index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_buyer_idx
                   ON commerce_orders (buyer_user_id)`),
@@ -509,6 +540,14 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_fulfillment_due_idx
                   ON commerce_orders (fulfillment_next_attempt_at)
                   WHERE released_at IS NULL`),
+  },
+  {
+    // The status poller's claim query. Partial on the same two predicates the
+    // query carries, so the index is guaranteed to imply it.
+    label: "commerce_orders status sync due index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_status_sync_due_idx
+                  ON commerce_orders (fulfillment_synced_at)
+                  WHERE printify_order_id IS NOT NULL AND delivered_at IS NULL`),
   },
   {
     /**

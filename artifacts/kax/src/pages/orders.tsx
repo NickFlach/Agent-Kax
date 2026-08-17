@@ -36,9 +36,13 @@ import {
   labelFor,
   mergeOrders,
   showsFulfillment,
+  showsTimeline,
+  stageRows,
+  stallNote,
   type DigitalOrder,
   type OrderRow,
   type PhysicalOrder,
+  type StageRow,
 } from "@/lib/commerce";
 
 /** The digital path's own statuses, which are not the physical ones. */
@@ -52,6 +56,26 @@ function formatDate(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
   return at.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/**
+ * A stage timestamp, to the minute.
+ *
+ * More precise than `formatDate` on purpose. Two stages of the same order
+ * routinely happen the same day — submitted and released are fifteen minutes
+ * apart by default — and a timeline whose rows all read the same date is a
+ * timeline that answers "when did this move" with "some time on Tuesday".
+ */
+function formatStageTime(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return iso;
+  return at.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 export default function Orders() {
@@ -213,6 +237,13 @@ function PhysicalRow({ order }: { order: PhysicalOrder }) {
         </p>
       )}
 
+      {/* The stages, with the current one marked and every completed one
+          timestamped. This is the whole answer to "where did it get to": a
+          printed order keeps moving for days after the charge settles, and
+          before this the buyer's only reading of that was one line that said
+          "Being printed" for a week whether it was being printed or not. */}
+      {showsTimeline(order.timeline) && <StageTimeline order={order} />}
+
       {/* Tracking, once there is any. `commerce_orders` has no carrier or
           number columns yet — the fulfilment states the server writes stop at
           `in_production`, and the shipped transition that would carry them is
@@ -246,5 +277,83 @@ function PhysicalRow({ order }: { order: PhysicalOrder }) {
         {order.orderRef}
       </p>
     </div>
+  );
+}
+
+/**
+ * Paid → Sent to the printer → Being printed → Shipped → Delivered.
+ *
+ * The words come from `BUYER_STAGE_LABEL`, which is assembled from the same two
+ * label tables the fulfilment line above uses, so the two can never disagree
+ * about what a state is called.
+ *
+ * **A stalled stage does not merely get a different sentence, it gets a
+ * different mark.** The marker becomes an exclamation, the row turns the
+ * destructive colour, and the note appears underneath. That is the requirement:
+ * an order the retry ladder has given up on must not be able to be mistaken for
+ * one that is simply taking its time, and a difference that lives only in a
+ * sentence at the bottom of a card is a difference a person scanning a list does
+ * not see.
+ *
+ * Nothing rendered here is a provider code, an HTTP status or an internal reason
+ * string. There is none in the payload to render — `GET /commerce/orders` never
+ * selects `fulfillment_last_error`, only whether one exists.
+ */
+function StageTimeline({ order }: { order: PhysicalOrder }) {
+  const rows = stageRows(order.timeline, formatStageTime);
+  const note = stallNote(order.timeline);
+  const stopped = order.timeline?.progress === "stopped";
+
+  return (
+    <div className="pt-1" data-testid={`order-timeline-${order.orderRef}`}>
+      <p className="uppercase tracking-widest text-[10px] text-muted-foreground mb-1">Progress</p>
+      <ol className="space-y-0.5" data-testid="list-order-stages">
+        {rows.map((row) => (
+          <StageLine key={row.id} row={row} dimmed={stopped} />
+        ))}
+      </ol>
+      {note && (
+        <p className="text-xs text-destructive mt-2" data-testid="text-order-stalled">
+          {note}
+        </p>
+      )}
+      {stopped && (
+        <p className="text-xs text-muted-foreground mt-2" data-testid="text-order-stopped">
+          This order ended — there is nothing more to wait for.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function StageLine({ row, dimmed }: { row: StageRow; dimmed: boolean }) {
+  const tone = row.stalled
+    ? "text-destructive"
+    : dimmed || !row.reached
+      ? "text-muted-foreground/60"
+      : row.current
+        ? "text-primary"
+        : "text-muted-foreground";
+
+  // Four distinct marks and not two, so the row itself carries the state for
+  // anyone who is not reading the colour: done, here, stuck here, not yet.
+  const mark = row.stalled ? "!" : row.current ? "▸" : row.reached ? "✓" : "·";
+
+  return (
+    <li
+      className={`text-xs flex items-baseline gap-2 ${tone}`}
+      data-testid={`stage-${row.id}`}
+      data-stage-state={row.stalled ? "stalled" : row.current ? "current" : row.reached ? "done" : "pending"}
+    >
+      <span aria-hidden="true" className="font-mono w-3 shrink-0">
+        {mark}
+      </span>
+      <span className={row.current || row.stalled ? "font-bold" : undefined}>{row.label}</span>
+      {row.at && (
+        <span className="font-mono text-[10px] text-muted-foreground/70 ml-auto whitespace-nowrap">
+          {row.at}
+        </span>
+      )}
+    </li>
   );
 }

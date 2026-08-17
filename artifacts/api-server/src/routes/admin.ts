@@ -695,6 +695,24 @@ router.get("/admin/commerce-orders", requireAdmin, async (req, res) => {
       fulfillmentLastError: commerceOrdersTable.fulfillmentLastError,
       fulfillmentLastAttemptAt: commerceOrdersTable.fulfillmentLastAttemptAt,
       fulfillmentNextAttemptAt: commerceOrdersTable.fulfillmentNextAttemptAt,
+      // The provider's own words and the poller's own clock. These are the
+      // operator's half of the stage timeline and they are what the buyer's
+      // half is deliberately built WITHOUT: `fulfillment_last_error` is
+      // "429:8251" and `provider_status` is `in-production`, and neither is a
+      // sentence anybody outside this page should be shown.
+      //
+      // `fulfillmentSyncedAt` is the one to read when the answer to "why has
+      // this not moved" might be "nothing has looked at it". A worker failing
+      // silently once a minute reads exactly like a worker that was never
+      // switched on; a stale stamp here says which.
+      providerStatus: commerceOrdersTable.providerStatus,
+      providerStatusAt: commerceOrdersTable.providerStatusAt,
+      shippedAt: commerceOrdersTable.shippedAt,
+      deliveredAt: commerceOrdersTable.deliveredAt,
+      trackingCarrier: commerceOrdersTable.trackingCarrier,
+      trackingNumber: commerceOrdersTable.trackingNumber,
+      trackingUrl: commerceOrdersTable.trackingUrl,
+      fulfillmentSyncedAt: commerceOrdersTable.fulfillmentSyncedAt,
       createdAt: commerceOrdersTable.createdAt,
       updatedAt: commerceOrdersTable.updatedAt,
     })

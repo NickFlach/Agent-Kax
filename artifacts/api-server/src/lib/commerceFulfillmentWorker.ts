@@ -13,6 +13,7 @@ import {
   releaseCommerceOrder,
   submitCommerceOrder,
 } from "./commerceFulfillment";
+import { MAX_FULFILLMENT_ATTEMPTS } from "./commerceFulfillmentStages";
 import { logger } from "./logger";
 
 /**
@@ -120,8 +121,15 @@ import { logger } from "./logger";
  * two hours" an earlier version of this comment claimed. Long enough to ride
  * out a provider blip, short enough that a genuinely broken order is in a
  * human's hands within the hour.
+ *
+ * DEFINED in `commerceFulfillmentStages.ts` and re-exported here, so that every
+ * existing importer of this name is untouched. It moved because the buyer's
+ * timeline has to know it — "parked" is the difference between an order that is
+ * still on its way and one that has been given up on, which is the single fact
+ * that feature exists to show — and the timeline is a pure module that cannot
+ * import this one: this one imports `@workspace/db`, which opens a pool.
  */
-export const MAX_FULFILLMENT_ATTEMPTS = 6;
+export { MAX_FULFILLMENT_ATTEMPTS };
 
 /** Base of the exponential backoff. Attempt 1 waits two minutes. */
 export const BACKOFF_BASE_MS = 60_000;
