@@ -2,16 +2,14 @@ import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { isTypingTarget } from "@/lib/is-typing";
-import { resolveObstacles, type FpsObstacle } from "@/lib/fps-collision";
+import { RIG_DT_CLAMP, stepMove, type FpsBounds, type FpsObstacle } from "@/lib/fps-collision";
 
-export interface FpsBounds {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-  minY?: number;
-  maxY?: number;
-}
+/**
+ * Re-exported for the same reason `FpsObstacle` is: the shape now lives in
+ * `@/lib/fps-collision` so the whole move is testable, and every existing
+ * `import type { FpsBounds } from "@/components/first-person-rig"` keeps working.
+ */
+export type { FpsBounds } from "@/lib/fps-collision";
 
 /**
  * Re-exported so every existing `import type { FpsObstacle } from
@@ -52,6 +50,7 @@ export function FirstPersonRig({
   scrollStep = 2.2,
   spawn,
   groundHeight,
+  maxGroundStep,
   suspended = false,
 }: {
   eyeHeight?: number;
@@ -83,8 +82,26 @@ export function FirstPersonRig({
    * stands eyeHeight above it every frame — this is what makes STAIRS work:
    * the stairwell reports a ramp height and walking up actually lifts you.
    * R/F flying is disabled while terrain is authoritative.
+   *
+   * The third argument is the elevation of the ground the body is standing on
+   * now, for scenes where one (x,z) is two pieces of ground — a deck over a
+   * concourse. Single-storey terrain ignores it, which is what every existing
+   * caller does, so nothing had to change to keep working.
    */
-  groundHeight?: (x: number, z: number) => number;
+  groundHeight?: (x: number, z: number, fromGround?: number) => number;
+  /**
+   * Refuse any move that would change the ground under the body by more than
+   * this. OPT-IN, and deliberately unset everywhere it was unset before.
+   *
+   * The rig has no gravity: `y = ground + eye` is an assignment, so an edge in
+   * the terrain is a jump cut, not a fall. A scene whose terrain has a real
+   * edge in it (the Undercroft's deck over its concourse) sets this, and the
+   * edge becomes a wall you cannot step off. The residences' stairwell has a
+   * 1.7 m edge at the side of its flights and has always let you step off it;
+   * turning that into a wall is a change to a different feature, so it is not
+   * made here.
+   */
+  maxGroundStep?: number;
 }) {
   const { camera, gl } = useThree();
   const keys = useRef<Record<string, boolean>>({});
@@ -207,7 +224,8 @@ export function FirstPersonRig({
     // Terrain snap runs every frame (not just while moving) so a floor
     // teleport or elevator arrival lands you standing on the new ground.
     if (groundHeight) {
-      camera.position.y = groundHeight(camera.position.x, camera.position.z) + eyeHeight;
+      camera.position.y =
+        groundHeight(camera.position.x, camera.position.z, camera.position.y - eyeHeight) + eyeHeight;
     }
 
     // Move — unless something else owns the visitor right now.
@@ -235,36 +253,27 @@ export function FirstPersonRig({
     move.current.addScaledVector(fwdV.current, fwd);
     move.current.addScaledVector(rightV.current, strafe);
     if (move.current.lengthSq() > 0) move.current.normalize();
-    move.current.multiplyScalar(speed * Math.min(dt, 0.05));
+    move.current.multiplyScalar(speed * Math.min(dt, RIG_DT_CLAMP));
     move.current.addScaledVector(fwdV.current, dolly);
 
-    let nx = camera.position.x + move.current.x;
-    let nz = camera.position.z + move.current.z;
-    let ny = camera.position.y + vert * speed * 0.6 * Math.min(dt, 0.05);
+    // Clamp, terrain and collision, in the order they have always run — but as
+    // one pure function in @/lib/fps-collision, so CI executes the whole move
+    // rather than the third of it that happened to live outside `useFrame`.
+    const next = stepMove({
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+      dx: move.current.x,
+      dz: move.current.z,
+      dy: vert * speed * 0.6 * Math.min(dt, RIG_DT_CLAMP),
+      eyeHeight,
+      bounds,
+      obstacles,
+      groundHeight,
+      maxGroundStep,
+    });
 
-    if (bounds) {
-      nx = THREE.MathUtils.clamp(nx, bounds.minX, bounds.maxX);
-      nz = THREE.MathUtils.clamp(nz, bounds.minZ, bounds.maxZ);
-      ny = THREE.MathUtils.clamp(ny, bounds.minY ?? eyeHeight, bounds.maxY ?? Infinity);
-    } else {
-      ny = Math.max(ny, eyeHeight);
-    }
-
-    // Terrain wins: stand on whatever the scene says is underfoot (stairs!).
-    if (groundHeight) {
-      ny = groundHeight(nx, nz) + eyeHeight;
-    }
-
-    // Building collision. Skips while flying above the rooftops, and skips any
-    // box whose vertical band this elevation is outside — which is what lets a
-    // scene have two storeys without the lower one walling off the upper. The
-    // algorithm itself is unchanged and lives in @/lib/fps-collision so CI can
-    // execute it; this used to be an inline loop no test could reach.
-    const hit = resolveObstacles(nx, nz, ny, obstacles);
-    nx = hit.x;
-    nz = hit.z;
-
-    camera.position.set(nx, ny, nz);
+    camera.position.set(next.x, next.y, next.z);
   });
 
   return null;

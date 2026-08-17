@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { DoubleSide } from "three";
 import { Text } from "@react-three/drei";
 import { Link, useLocation } from "wouter";
 import { useGetMarketplaceCombined } from "@workspace/api-client-react";
@@ -23,13 +24,17 @@ import {
   UNDERCROFT_EYE,
   UNDERCROFT_FLOOR_Y,
   UNDERCROFT_HALF_X,
+  UNDERCROFT_MAX_STEP,
+  UNDERCROFT_SPEED,
   UNDERCROFT_SURFACE_Y,
   rankUndercroft,
   undercroftGroundHeight,
+  undercroftGuards,
   undercroftObstacles,
   undercroftSlots,
   type UndercroftCandidate,
   type UndercroftEntrance,
+  type UndercroftGuard,
 } from "@/lib/undercroft";
 import "./marketplace-3d.css";
 
@@ -155,12 +160,11 @@ function Unit({
 }
 
 /** The cutting one ramp runs down, and the arrival apron at the top of it. */
-function Entrance({ e }: { e: UndercroftEntrance }) {
+function Entrance({ e, guards }: { e: UndercroftEntrance; guards: UndercroftGuard[] }) {
   const { court, shaft } = e;
   const courtW = court.x1 - court.x0;
   const courtD = court.z1 - court.z0;
   const shaftW = shaft.x1 - shaft.x0;
-  const shaftD = shaft.z1 - shaft.z0;
   const pavers = useMemo(() => repeated(sidewalkTexture(), 4, 4), []);
   const rock = useMemo(() => repeated(stuccoTexture(3), 3, 2), []);
 
@@ -172,32 +176,41 @@ function Entrance({ e }: { e: UndercroftEntrance }) {
 
   return (
     <group>
-      {/* The apron you arrive on. */}
+      {/* The apron you arrive on — EXACTLY the court rectangle, which is also
+          exactly the ground `undercroftDeckY` says is at surface level. The
+          two used to disagree: the paving covered the whole rectangle while
+          the standable deck started fading 0.8 m inside it, so a third of what
+          was drawn was ground you sank through. DoubleSide because a visitor
+          on the concourse is UNDERNEATH this, and a single-sided plane simply
+          is not there when you look up at it. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(court.x0 + court.x1) / 2, UNDERCROFT_SURFACE_Y, (court.z0 + court.z1) / 2]} receiveShadow>
         <planeGeometry args={[courtW, courtD]} />
-        <meshStandardMaterial map={pavers} roughness={0.95} />
+        <meshStandardMaterial map={pavers} roughness={0.95} side={DoubleSide} />
       </mesh>
       {/* The ramp itself. */}
       <mesh rotation={[-Math.PI / 2 + rampTilt, 0, 0]} position={[rampX, (UNDERCROFT_SURFACE_Y + UNDERCROFT_FLOOR_Y) / 2, rampMidZ]} receiveShadow>
         <planeGeometry args={[shaftW, rampLen]} />
-        <meshStandardMaterial map={pavers} roughness={0.97} />
+        <meshStandardMaterial map={pavers} roughness={0.97} side={DoubleSide} />
       </mesh>
-      {/* The rock the cutting is cut through. */}
-      {[shaft.x0 - 0.3, shaft.x1 + 0.3].map((x) => (
-        <mesh key={x} position={[x, UNDERCROFT_FLOOR_Y / 2, (shaft.z0 + shaft.z1) / 2]} receiveShadow>
-          <boxGeometry args={[0.6, Math.abs(UNDERCROFT_FLOOR_Y) + 1.2, Math.abs(shaftD)]} />
-          <meshStandardMaterial map={rock} roughness={1} color="#5c625f" />
-        </mesh>
-      ))}
 
-      {/* Railings — the reason nobody walks off the apron. */}
-      {[
-        [court.x0 - 0.1, (court.z0 + court.z1) / 2, 0.12, courtD],
-        [court.x1 + 0.1, (court.z0 + court.z1) / 2, 0.12, courtD],
-      ].map(([x, z, w, d], i) => (
-        <mesh key={`r${i}`} position={[x!, UNDERCROFT_SURFACE_Y + 0.55, z!]}>
-          <boxGeometry args={[w!, 1.1, d!]} />
-          <meshStandardMaterial color="#4a5157" metalness={0.5} roughness={0.5} />
+      {/* THE ROCK AND THE RAILINGS, drawn from the same list the collision
+          comes from (`undercroftGuards`). They used to be two sets of
+          literals: the inner rock was drawn down the whole cutting but only
+          blocked as far as the hall, and the railings were drawn on the two
+          long edges while three different rails did the blocking. */}
+      {guards.map((g) => (
+        <mesh
+          key={g.id}
+          position={[g.cx, (g.y0 + g.y1) / 2, g.cz]}
+          receiveShadow
+          castShadow={g.kind === "rail"}
+        >
+          <boxGeometry args={[g.hx * 2, g.y1 - g.y0, g.hz * 2]} />
+          {g.kind === "rail" ? (
+            <meshStandardMaterial color="#4a5157" metalness={0.5} roughness={0.5} />
+          ) : (
+            <meshStandardMaterial map={rock} roughness={1} color="#5c625f" />
+          )}
         </mesh>
       ))}
 
@@ -288,6 +301,7 @@ export default function Undercroft() {
 
   const slots = useMemo(() => undercroftSlots(), []);
   const obstacles = useMemo(() => undercroftObstacles(), []);
+  const guards = useMemo(() => undercroftGuards(), []);
   const floorTex = useMemo(() => repeated(concreteTexture(), 6, 90), []);
 
   // Which ramp you came down. The street sends ?from=undercroft-north|south.
@@ -442,7 +456,7 @@ export default function Undercroft() {
         ))}
 
         {UNDERCROFT_ENTRANCES.map((e) => (
-          <Entrance key={e.id} e={e} />
+          <Entrance key={e.id} e={e} guards={guards.filter((g) => g.id.startsWith(`${e.id}-`))} />
         ))}
 
         {/* Reused from #305: the same standing board the street uses, so a
@@ -473,17 +487,31 @@ export default function Undercroft() {
 
         <FirstPersonRig
           eyeHeight={UNDERCROFT_EYE}
-          speed={9}
+          /* The scene's speed is the geometry's speed. Every railing down here
+             is sized against `speed * the rig's dt clamp`, so the two must come
+             from one constant or the rails stop being wide enough the day
+             somebody makes walking faster. */
+          speed={UNDERCROFT_SPEED}
           bounds={UNDERCROFT_BOUNDS}
           obstacles={obstacles}
           spawn={spawn}
           groundHeight={undercroftGroundHeight}
+          /* The deck has a real edge in it — six metres, straight down. The rig
+             has no gravity, so without this an edge is a jump cut. With it, an
+             edge is a wall. */
+          maxGroundStep={UNDERCROFT_MAX_STEP}
         />
         <CamProbe />
         {/* Without this the Undercroft is a room the directory lists and
             nobody is drawn in — the failure rooms.ts warns about and #300
             fixed for the trading floor. */}
-        <VenuePresence room="undercroft" />
+        {/* ON THE CONCOURSE FLOOR, not at y = 0. `VenuePresence` defaults its
+            `y` to zero and places every body at [rx, y, rz] — six metres above
+            the floor down here, which is behind the opaque ceiling at -2.4. Two
+            visitors in the same room would each have rendered the other inside
+            the rock and seen an empty hall: exactly the #300 failure the note
+            above cites. */}
+        <VenuePresence room="undercroft" y={UNDERCROFT_FLOOR_Y} />
       </Canvas>
     </div>
   );

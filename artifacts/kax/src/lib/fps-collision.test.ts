@@ -30,9 +30,12 @@ import {
   OBSTACLE_PAD,
   obstacleBlocksAt,
   resolveObstacles,
+  stepMove,
+  type FpsBounds,
   type FpsObstacle,
 } from "./fps-collision";
 import { monumentZFor, streetDepthFor, venueFootprint, layoutFor } from "./city-layout";
+import { streetMouthsFor } from "./undercroft";
 import {
   UNDERCROFT_CEILING_Y,
   UNDERCROFT_ENTRANCES,
@@ -87,8 +90,11 @@ function streetObstacles(storeCount = 48): FpsObstacle[] {
     { cx: -12.5, cz: 3, ...venueFootprint("joinery") },
     { cx: 17.6, cz: -8.5, ...venueFootprint("scada") },
     { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 },
-    { cx: -11, cz: -12, ...venueFootprint("undercroft") },
-    { cx: 11, cz: -30, ...venueFootprint("undercroft") },
+    // Read from the same function the scene reads, not transcribed. The two
+    // mouths this fixture used to carry were at coordinates the scene had
+    // never placed them at, so the "street's obstacle list" it was
+    // differentially testing was not the street's obstacle list.
+    ...streetMouthsFor(storeCount).map((m) => ({ cx: m.x, cz: m.z, ...venueFootprint("undercroft") })),
   ];
 }
 
@@ -223,5 +229,224 @@ describe("a vertical band scopes an obstacle to its own storey", () => {
       );
       expect(under.length, `${e.id} court has no unit beneath it`).toBeGreaterThan(0);
     }
+  });
+});
+
+/* ------------------------------------------------- the whole move, not half */
+
+/**
+ * `stepMove` had to grow two things the Undercroft needs and nothing else in
+ * the city does: a band key taken from where the body IS rather than from
+ * where it proposed to go, and an opt-in limit on how far one move may change
+ * the ground. Both live in the rig every scene walks on, so both are tested
+ * here the same way the resolver was — against a VERBATIM copy of the loop as
+ * it stood, over the street's own obstacle list and over a stairwell terrain
+ * shaped like the residences'.
+ */
+function oldFrame(
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dz: number,
+  dy: number,
+  eyeHeight: number,
+  bounds: FpsBounds | undefined,
+  obstacles: FpsObstacle[] | undefined,
+  groundHeight: ((x: number, z: number) => number) | undefined,
+): { x: number; y: number; z: number } {
+  let nx = x + dx;
+  let nz = z + dz;
+  let ny = y + dy;
+  if (bounds) {
+    nx = Math.max(bounds.minX, Math.min(bounds.maxX, nx));
+    nz = Math.max(bounds.minZ, Math.min(bounds.maxZ, nz));
+    ny = Math.max(bounds.minY ?? eyeHeight, Math.min(bounds.maxY ?? Infinity, ny));
+  } else {
+    ny = Math.max(ny, eyeHeight);
+  }
+  if (groundHeight) ny = groundHeight(nx, nz) + eyeHeight;
+  const hit = oldResolve(nx, nz, ny, obstacles ?? []);
+  return { x: hit.x, y: ny, z: hit.z };
+}
+
+/** The residences' stairwell, as it stands — including its 1.7 m side edge. */
+function stairHeight(x: number, z: number): number {
+  if (x < -11.5 || x > -8.5 || z < -3 || z > 3) return 0;
+  const westLane = x < -10;
+  if (!westLane) {
+    if (z > 1.5) return 0;
+    if (z < -1.5) return 1.7;
+    return ((1.5 - z) / 3) * 1.7;
+  }
+  if (z < -1.5) return 1.7;
+  if (z > 1.5) return 3.4;
+  return 1.7 + ((z + 1.5) / 3) * 1.7;
+}
+
+describe("the shared rig still moves the street and the venues exactly as it did", () => {
+  it("makes the same move as the old inline loop, frame for frame, on the street", () => {
+    const obs = streetObstacles();
+    const bounds: FpsBounds = { minX: -20.5, maxX: 20.5, minZ: -142, maxZ: 15, minY: 1.55, maxY: 28 };
+    const rnd = mulberry32(31415);
+    let deflected = 0;
+    let vertical = 0;
+    const samples = 20000;
+    for (let i = 0; i < samples; i++) {
+      const x = -21 + rnd() * 42;
+      const z = 16 - rnd() * 150;
+      // Spans both vertical clamps so the R/F half of the move is exercised.
+      const y = 0.5 + rnd() * 30;
+      // A whole frame's worth of input: walk, strafe, scroll dolly and R/F.
+      const dx = (rnd() - 0.5) * 5;
+      const dz = (rnd() - 0.5) * 5;
+      const dy = (rnd() - 0.5) * 6;
+      const want = oldFrame(x, y, z, dx, dz, dy, 1.75, bounds, obs, undefined);
+      const got = stepMove({ x, y, z, dx, dz, dy, eyeHeight: 1.75, bounds, obstacles: obs });
+      expect(got.x, `x @ ${x},${y},${z}`).toBe(want.x);
+      expect(got.y, `y @ ${x},${y},${z}`).toBe(want.y);
+      expect(got.z, `z @ ${x},${y},${z}`).toBe(want.z);
+      if (got.x !== x + dx || got.z !== z + dz) deflected++;
+      if (got.y !== y + dy) vertical++;
+    }
+    // Anti-vacuity, both axes: a sweep that never hit a building and never hit
+    // the ceiling would be two functions agreeing about doing nothing.
+    expect(deflected, "the sweep never collided with anything").toBeGreaterThan(samples * 0.05);
+    expect(vertical, "the sweep never exercised the vertical clamp").toBeGreaterThan(samples * 0.05);
+  });
+
+  it("keeps the five venue boxes #311 fixed pushing along the axes they push along", () => {
+    // The transposed-footprint bug, guarded directly rather than by proxy. Walk
+    // at each venue's centre from all four sides and require the SAME
+    // deflection out of the new whole-frame move as out of the old loop.
+    const obs = streetObstacles();
+    const venues: Array<[string, number, number]> = [
+      ["arcade", -12.5, streetDepthFor(48) - 8],
+      ["bank", 12.5, streetDepthFor(48) - 8],
+      ["residences", 12.5, 3],
+      ["joinery", -12.5, 3],
+      ["scada", 17.6, -8.5],
+    ];
+    let pushes = 0;
+    for (const [name, cx, cz] of venues) {
+      for (const [dx, dz] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const from = { x: cx - dx * 8, z: cz - dz * 8 };
+        const want = oldFrame(from.x, 1.75, from.z, dx * 8, dz * 8, 0, 1.75, undefined, obs, undefined);
+        const got = stepMove({
+          x: from.x,
+          y: 1.75,
+          z: from.z,
+          dx: dx * 8,
+          dz: dz * 8,
+          dy: 0,
+          eyeHeight: 1.75,
+          obstacles: obs,
+        });
+        expect(got.x, `${name} from ${dx},${dz}`).toBe(want.x);
+        expect(got.z, `${name} from ${dx},${dz}`).toBe(want.z);
+        if (got.x !== from.x + dx * 8 || got.z !== from.z + dz * 8) pushes++;
+      }
+    }
+    expect(pushes, "no venue deflected anybody — the fixture proves nothing").toBe(venues.length * 4);
+  });
+
+  it("walks the residences' stairwell exactly where it used to, edge and all", () => {
+    // The only other scene with terrain. Its obstacles carry no vertical band,
+    // so the new band key cannot change what blocks — and no `maxGroundStep`
+    // is passed, so its 1.7 m side edge behaves as it always has. Both are
+    // checked rather than argued.
+    const obs: FpsObstacle[] = [
+      { cx: 0, cz: 0, hx: 1.2, hz: 1.2 },
+      { cx: -6.5, cz: -7.6, hx: 1.1, hz: 0.4 },
+      { cx: 6.5, cz: 7.6, hx: 1.1, hz: 0.4 },
+    ];
+    expect(obs.some((o) => o.yMin !== undefined || o.yMax !== undefined)).toBe(false);
+    const bounds: FpsBounds = { minX: -11.4, maxX: 11.4, minZ: -8.4, maxZ: 8.4, minY: 1.6, maxY: 5.4 };
+    const rnd = mulberry32(2718);
+    let onStairs = 0;
+    let stepped = 0;
+    for (let i = 0; i < 20000; i++) {
+      const x = -11.4 + rnd() * 22.8;
+      const z = -8.4 + rnd() * 16.8;
+      const y = stairHeight(x, z) + 1.75;
+      const dx = (rnd() - 0.5) * 2;
+      const dz = (rnd() - 0.5) * 2;
+      const want = oldFrame(x, y, z, dx, dz, 0, 1.75, bounds, obs, stairHeight);
+      const got = stepMove({
+        x,
+        y,
+        z,
+        dx,
+        dz,
+        dy: 0,
+        eyeHeight: 1.75,
+        bounds,
+        obstacles: obs,
+        groundHeight: stairHeight,
+      });
+      // Where a body ends up is unchanged. Its EYE now comes from the ground it
+      // ended on rather than the ground it was refused, which only differs when
+      // collision moved it — and the rig re-snaps y from (x,z) at the top of the
+      // very next frame anyway, so the old value was a one-frame artefact.
+      expect(got.x, `x @ ${x},${z}`).toBe(want.x);
+      expect(got.z, `z @ ${x},${z}`).toBe(want.z);
+      expect(got.y).toBe(stairHeight(got.x, got.z) + 1.75);
+      if (stairHeight(x, z) > 0) onStairs++;
+      if (Math.abs(got.y - y) > 1) stepped++;
+    }
+    expect(onStairs, "the sweep never stood on the stairs").toBeGreaterThan(100);
+    // AND the stairwell's own 1.7 m side edge is still steppable, because no
+    // step limit was asked for. Turning that into a wall is a different change.
+    expect(stepped, "the residences' stair edge stopped being walkable off").toBeGreaterThan(10);
+  });
+
+  it("refuses a step bigger than maxGroundStep, and only when asked to", () => {
+    // The opt-in half, on a terrain with a deliberate cliff.
+    const cliff = (x: number) => (x < 0 ? 0 : 6);
+    const common = { y: 1.75, z: 0, dz: 0, dy: 0, eyeHeight: 1.75 } as const;
+    const free = stepMove({ ...common, x: -0.2, dx: 0.45, groundHeight: cliff });
+    expect(free.x, "without a limit the old teleport is still the old teleport").toBeCloseTo(0.25, 9);
+    expect(free.y).toBe(7.75);
+    const held = stepMove({ ...common, x: -0.2, dx: 0.45, groundHeight: cliff, maxGroundStep: 1.5 });
+    expect(held.x, "the limit did not hold the body back").toBe(-0.2);
+    expect(held.y).toBe(1.75);
+    expect(held.blocked).toBe(true);
+    // And a step INSIDE the limit is still allowed, or the rig cannot walk.
+    const gentle = (x: number) => x * 0.25;
+    const ok = stepMove({ ...common, x: 0, dx: 0.45, groundHeight: gentle, maxGroundStep: 1.5 });
+    expect(ok.x).toBeCloseTo(0.45, 9);
+    expect(ok.blocked).toBe(false);
+  });
+
+  it("keys the band on the storey the body is in, not the one it proposed", () => {
+    // The two-way escalator, in miniature. A deck at 0 over a room at -6, with
+    // a wall that is solid only in the room. Deciding what blocks from the
+    // PROPOSED position lets a body in the room walk through the room's wall
+    // the moment the proposal lands on the deck above it.
+    const wall: FpsObstacle[] = [{ cx: 2, cz: 0, hx: 1, hz: 4, yMax: -2.4 }];
+    const deckFrom = (x: number) => (x > 1 ? 0 : -6);
+    const storey = (x: number, _z: number, fromGround?: number) => {
+      const d = deckFrom(x);
+      if (d <= -6) return -6;
+      return fromGround !== undefined && fromGround < d - 1.5 ? -6 : d;
+    };
+    const inRoom = { x: 0.8, y: -6 + 1.75, z: 0, dz: 0, dy: 0, eyeHeight: 1.75 } as const;
+    // Old behaviour, reproduced with the band-aware resolver the branch
+    // shipped: ground at the PROPOSED x is the deck, so the eye is 1.75, so
+    // the wall's `yMax: -2.4` switches it off and lets you straight in.
+    const proposedX = inRoom.x + 0.45;
+    const naiveY = deckFrom(proposedX) + 1.75;
+    const naive = resolveObstacles(proposedX, 0, naiveY, wall);
+    expect(naiveY, "the proposed position is not on the deck, so this proves nothing").toBe(1.75);
+    expect(naive.x, "the old band key should have walked through the wall here").toBeCloseTo(1.25, 9);
+    // New behaviour: the band key is the room, so the room's wall is solid.
+    const held = stepMove({ ...inRoom, dx: 0.45, obstacles: wall, groundHeight: storey, maxGroundStep: 1.5 });
+    expect(held.x, "a body in the room walked through the room's wall").toBeLessThanOrEqual(1.0000001);
+    expect(held.y).toBe(-6 + 1.75);
   });
 });

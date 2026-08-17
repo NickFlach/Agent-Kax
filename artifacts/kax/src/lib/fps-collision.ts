@@ -78,6 +78,155 @@ export interface GroundPos {
 }
 
 /**
+ * The walls a rig is held inside. Lived in `first-person-rig.tsx`; moved here
+ * so the whole move — clamp, terrain, collision — can be one pure function the
+ * Node test runner executes, rather than half of it being reachable and half of
+ * it living inside `useFrame`.
+ */
+export interface FpsBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  minY?: number;
+  maxY?: number;
+}
+
+/**
+ * `Math.min(dt, 0.05)` — the rig's own dt clamp, so a slow frame cannot fling
+ * the body across a wall.
+ *
+ * EXPORTED BECAUSE THE GEOMETRY HAS TO KNOW IT. A railing that blocks over a
+ * shorter distance than the body travels in one frame does not block; and
+ * "one frame" is not 1/60 s, it is this clamp. Anything that sizes itself
+ * against the rig's per-frame travel must compute it from here and from the
+ * scene's own `speed`, never from an assumed frame rate.
+ */
+export const RIG_DT_CLAMP = 0.05;
+
+/** How far a rig moving at `speed` travels in one frame, at the dt clamp. */
+export function rigStepFor(speed: number): number {
+  return speed * RIG_DT_CLAMP;
+}
+
+function clampTo(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+export interface StepRequest {
+  /** Where the body is now. `y` is the EYE, not the ground. */
+  x: number;
+  y: number;
+  z: number;
+  /** This frame's ground-plane movement, already scaled by speed and dt. */
+  dx: number;
+  dz: number;
+  /** Vertical input (R/F flying). Ignored entirely when terrain is present. */
+  dy: number;
+  eyeHeight: number;
+  bounds?: FpsBounds;
+  obstacles?: readonly FpsObstacle[];
+  /**
+   * Terrain, optionally STOREY-AWARE.
+   *
+   * `fromGround` is the elevation of the ground the body is standing on RIGHT
+   * NOW. A scene with one storey ignores it and stays a pure function of
+   * (x,z) — which is every scene in the city except the Undercroft. A scene
+   * with a deck over a floor needs it: the same (x,z) is two different pieces
+   * of ground depending on which one you are on, and without that argument a
+   * terrain function has to pick one and be wrong for somebody.
+   */
+  groundHeight?: (x: number, z: number, fromGround?: number) => number;
+  /**
+   * The largest ground change this rig will accept in a single move.
+   *
+   * Opt-in, and absent for every scene that had no such limit before. Where it
+   * is set, a step whose destination ground is further than this from the
+   * ground under the body is REFUSED outright — the body stays where it was.
+   * That is what turns an edge into a wall instead of into a teleport: the rig
+   * has no gravity, so `y = ground + eye` is an assignment, and a
+   * discontinuity in the terrain is a jump cut rather than a fall.
+   */
+  maxGroundStep?: number;
+}
+
+export interface StepResult {
+  x: number;
+  y: number;
+  z: number;
+  /** True when the move was refused or deflected by something solid. */
+  blocked: boolean;
+}
+
+/**
+ * One frame of movement, as pure numbers — clamp, terrain, collision, in the
+ * order the rig runs them.
+ *
+ * THE TWO THINGS THIS FIXES, both of which were invisible from `useFrame`:
+ *
+ * 1. THE BAND KEY CAME FROM A POSITION THE BODY WAS REFUSED. The rig computed
+ *    `ny = groundHeight(proposed) + eye` and then asked the obstacle list what
+ *    blocks at `ny`. On a surface that crosses a whole storey in one step, the
+ *    storey deciding what is solid was the one at the far end of a move that
+ *    had not happened yet — so a shop six metres below stopped being solid the
+ *    instant you leaned towards the hole above it, and you walked through the
+ *    shop and out onto the roof. The band key is now the ground the body is
+ *    ACTUALLY standing on, and the resolved destination is then re-checked at
+ *    ITS own elevation: a step is accepted only if it is legal in the storey it
+ *    leaves and in the storey it arrives in.
+ * 2. `y` CAME FROM THE PROPOSED POSITION TOO, so a body pushed along a wall
+ *    stood at the height of the ground it had been refused. Now it comes from
+ *    where the body ended up.
+ *
+ * When `groundHeight` is absent — the street, the arcade, the bank, the
+ * joinery, 0xSCADA, the cafe, every store interior — this is the old loop
+ * statement for statement, and `fps-collision.test.ts` checks that
+ * differentially rather than asserting it.
+ */
+export function stepMove(req: StepRequest): StepResult {
+  const { x, y, z, dx, dz, dy, eyeHeight, bounds, obstacles, groundHeight, maxGroundStep } = req;
+
+  let nx = x + dx;
+  let nz = z + dz;
+  let ny = y + dy;
+
+  if (bounds) {
+    nx = clampTo(nx, bounds.minX, bounds.maxX);
+    nz = clampTo(nz, bounds.minZ, bounds.maxZ);
+    ny = clampTo(ny, bounds.minY ?? eyeHeight, bounds.maxY ?? Infinity);
+  } else {
+    ny = Math.max(ny, eyeHeight);
+  }
+
+  if (!groundHeight) {
+    const hit = resolveObstacles(nx, nz, ny, obstacles);
+    return { x: hit.x, y: ny, z: hit.z, blocked: hit.x !== nx || hit.z !== nz };
+  }
+
+  // The storey the body is in right now. This is the band key, and it is a
+  // fact rather than a proposal.
+  const g0 = groundHeight(x, z, y - eyeHeight);
+  const y0 = g0 + eyeHeight;
+
+  const first = resolveObstacles(nx, nz, y0, obstacles);
+  const g1 = groundHeight(first.x, first.z, g0);
+
+  if (maxGroundStep !== undefined && Math.abs(g1 - g0) > maxGroundStep) {
+    return { x, y: y0, z, blocked: true };
+  }
+
+  // Legal where it arrives, too. Without terrain this is the same call twice
+  // and cannot refuse anything, which is why it is safe for every other scene.
+  const y1 = g1 + eyeHeight;
+  const second = resolveObstacles(first.x, first.z, y1, obstacles);
+  if (second.x !== first.x || second.z !== first.z) {
+    return { x, y: y0, z, blocked: true };
+  }
+
+  return { x: first.x, y: y1, z: first.z, blocked: first.x !== nx || first.z !== nz };
+}
+
+/**
  * Push a proposed position out of anything it has walked into.
  *
  * Same algorithm as the rig has always used: for each overlapping box, resolve

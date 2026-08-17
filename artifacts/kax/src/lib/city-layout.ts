@@ -102,6 +102,78 @@ export function monumentZFor(storeCount: number): number {
   return streetDepthFor(storeCount) + MONUMENT_Z_OFFSET;
 }
 
+/* ------------------------------------------------------------- back alleys */
+
+/**
+ * Where the service alleys run. Moved here from `city-back-streets.tsx` so a
+ * Node test can read it: that file imports three.js and drei, so nothing in CI
+ * could ask where the alley was or what stands in it — which is how two
+ * Undercroft mouths came to be placed dead on top of a fire escape and a lamp.
+ */
+export const ALLEY_X = 11;
+
+export type AlleyPropKind = "dumpster" | "crates" | "pipes" | "escape" | "lamp";
+
+/**
+ * The lane the alley's props occupy, measured out from `ALLEY_X` towards the
+ * backs of the shops.
+ *
+ * Every prop `BackAlley` draws is placed at `-1.9`, `-2.2`, `-2.85` or `-2.95`
+ * times `side`, with half-extents under 0.8 — so the whole population lives
+ * between 1.1 and 3.75 out on the shop side, and the outer half of the alley
+ * is empty. Anything else the city wants to stand in an alley belongs out
+ * there, and `undercroft.test.ts` checks that is where the mouths are.
+ */
+export const ALLEY_PROP_LANE = { near: 1.1, far: 3.75 };
+
+export interface AlleyProp {
+  z: number;
+  kind: AlleyPropKind;
+}
+
+/**
+ * The props marching down one alley, at the irregular intervals `BackAlley`
+ * walks them at. Same statements, same order, same `kinds` cycle — the scene
+ * calls this rather than keeping a second copy.
+ */
+export function alleyProps(depth: number): AlleyProp[] {
+  const out: AlleyProp[] = [];
+  const kinds: readonly AlleyPropKind[] = [
+    "dumpster",
+    "escape",
+    "crates",
+    "lamp",
+    "pipes",
+    "dumpster",
+    "escape",
+    "crates",
+  ];
+  let i = 0;
+  for (let z = 2; z > depth - 4; z -= 8 + (i % 3) * 1.5) {
+    out.push({ z, kind: kinds[i % kinds.length]! });
+    i++;
+  }
+  return out;
+}
+
+/**
+ * A conservative bounding footprint for one prop, generous enough to cover the
+ * deepest of them: a fire escape's 2.2 m platforms and the service door that
+ * hangs 1.4 m down-alley of its marker.
+ */
+export function alleyPropFootprint(
+  p: AlleyProp,
+  side: 1 | -1,
+): { cx: number; cz: number; hx: number; hz: number } {
+  const mid = (ALLEY_PROP_LANE.near + ALLEY_PROP_LANE.far) / 2;
+  return {
+    cx: side * (ALLEY_X - mid),
+    cz: p.z + 0.4,
+    hx: (ALLEY_PROP_LANE.far - ALLEY_PROP_LANE.near) / 2,
+    hz: 1.6,
+  };
+}
+
 /** A little air between the player and a wall, so nobody grazes the stone. */
 export const FOOTPRINT_MARGIN = 0.2;
 

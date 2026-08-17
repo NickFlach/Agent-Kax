@@ -30,7 +30,7 @@ import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
 import { streetDepthFor, monumentZFor, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS } from "@/lib/city-layout";
-import { STREET_MOUTHS } from "@/lib/undercroft";
+import { streetMouthsFor } from "@/lib/undercroft";
 import { DirectoryBoard, useCityRooms, BOARD_FOOTPRINT } from "@/components/directory-board";
 
 
@@ -1407,6 +1407,11 @@ export default function Marketplace3D() {
   const [player, setPlayer] = useState<{ x: number; z: number; h: number }>({ x: 0, z: 18, h: 0 });
   const streetDepth = streetDepthFor(sceneAgents.length);
   const towerZ = streetDepth - 20;
+  // The far mouth stands off the street's END, like the tower, the monument,
+  // the Arcade and the Bank. It used to be a literal, which put it inside
+  // Resonance Trust at forty storefronts and outside the movement clamp below
+  // twenty-nine.
+  const streetMouths = useMemo(() => streetMouthsFor(sceneAgents.length), [sceneAgents.length]);
   const obstacles = useMemo(
     () => [
       ...layout.map((l) => ({ cx: l.position[0], cz: l.position[2], hx: 1.6, hz: 1.7 })),
@@ -1433,9 +1438,9 @@ export default function Marketplace3D() {
       // ordinary street furniture, solid at every elevation exactly as every
       // obstacle on this street has always been, so the street's collision
       // behaviour is not merely unchanged in intent but unchanged in data.
-      ...STREET_MOUTHS.map((m) => ({ cx: m.x, cz: m.z, ...venueFootprint("undercroft") })),
+      ...streetMouths.map((m) => ({ cx: m.x, cz: m.z, ...venueFootprint("undercroft") })),
     ],
-    [layout, towerZ, streetDepth, sceneAgents.length],
+    [layout, towerZ, streetDepth, streetMouths, sceneAgents.length],
   );
 
   const GS_TOWER: SceneAgent = useMemo(
@@ -1515,8 +1520,10 @@ export default function Marketplace3D() {
     }
     if (from === "__undercroft__") {
       // Back up the near ramp, standing in the alley outside its mouth.
-      const m = STREET_MOUTHS[0]!;
-      setSpawn({ position: [m.x + 2.6, 1.75, m.z], yaw: -Math.PI / 2 });
+      const m = streetMouths[0]!;
+      // On the alley's centreline beside the mouth — clear of both the mouth
+      // itself and the prop lane down the alley's shop side.
+      setSpawn({ position: [m.x + 1.4, 1.75, m.z], yaw: -Math.PI / 2 });
       return;
     }
     const hit = layout.find((l) => l.agent.slug === from);
@@ -1524,7 +1531,7 @@ export default function Marketplace3D() {
     const left = hit.position[0] < 0;
     // On the sidewalk just outside the shopfront, facing the road.
     setSpawn({ position: [left ? -3.9 : 3.9, 1.87, hit.position[2] + 0.4], yaw: left ? -Math.PI / 2 : Math.PI / 2 });
-  }, [layout, towerZ, spawn]);
+  }, [layout, towerZ, streetMouths, spawn]);
 
   const dest = (a: SceneAgent) =>
     a.slug === "__gs__"
@@ -1943,13 +1950,13 @@ export default function Marketplace3D() {
             of. Its shell is square in plan, so the mirrored east mount cannot
             have a wrong footprint (asserted in that test). */}
         <UndercroftMouth
-          position={[STREET_MOUTHS[0]!.x, 0.12, STREET_MOUTHS[0]!.z]}
+          position={[streetMouths[0]!.x, 0.12, streetMouths[0]!.z]}
           rotation={Math.PI / 2}
           label="NORTH RAMP"
           onEnter={() => navigate("/undercroft?from=north")}
         />
         <UndercroftMouth
-          position={[STREET_MOUTHS[1]!.x, 0.12, STREET_MOUTHS[1]!.z]}
+          position={[streetMouths[1]!.x, 0.12, streetMouths[1]!.z]}
           rotation={-Math.PI / 2}
           label="SOUTH RAMP"
           onEnter={() => navigate("/undercroft?from=south")}
@@ -1963,7 +1970,7 @@ export default function Marketplace3D() {
             { agent: RESIDENCES, pos: [7.5, 0, 3] as [number, number, number] },
             { agent: JOINERY, pos: [-7.5, 0, 3] as [number, number, number] },
             { agent: SCADA, pos: [14.6, 0, -8.5] as [number, number, number] },
-            { agent: UNDERCROFT, pos: [STREET_MOUTHS[0]!.x + 2.2, 0, STREET_MOUTHS[0]!.z] as [number, number, number] },
+            { agent: UNDERCROFT, pos: [streetMouths[0]!.x + 2.2, 0, streetMouths[0]!.z] as [number, number, number] },
             { agent: CAFE, pos: [-17.6, 0, -18.4 + 5.0] as [number, number, number] },
           ]}
           onNearest={setNearby}

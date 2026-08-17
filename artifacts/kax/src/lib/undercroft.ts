@@ -22,7 +22,8 @@
  * execute them.
  */
 
-import { layoutFor, type ShopPlacement } from "./city-layout";
+import { ALLEY_X, layoutFor, streetDepthFor, type ShopPlacement } from "./city-layout";
+import { OBSTACLE_PAD, rigStepFor } from "./fps-collision";
 
 /* ------------------------------------------------------------------ ranking */
 
@@ -77,14 +78,30 @@ export const MAX_UNDERCROFT_UNITS = 48;
  *      A second 48-cut without a total order would be the same bug a storey
  *      down. With it, `rankUndercroft` returns the same 48 in the same order
  *      for the same input, whatever order the input arrived in.
+ *
+ * AND IT IS ORDERED BY CODE UNIT, NOT BY COLLATION. Steps 3 and 4 compare
+ * strings, and `String.prototype.localeCompare` compares them THE VISITOR'S
+ * WAY: it reads the runtime's default locale. This function runs client-side,
+ * inside a `useMemo` in `undercroft.tsx`, so `localeCompare` here means the
+ * browser's locale decides where the 48-cut falls. On the live remainder keys
+ * 1 and 3 are inert for most of the field and the cut lands inside a tie seven
+ * wide, and Lithuanian collation sorts `y` between `i` and `j` — so two
+ * visitors would see two different sets of shopfronts. That is #303 again,
+ * moved off the query plan and onto the client. `<` and `>` on a string are
+ * UTF-16 code-unit order: the same answer on every machine, which is the only
+ * property this comparison is being asked for.
  */
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export function compareUndercroft(a: UndercroftCandidate, b: UndercroftCandidate): number {
   if (a.drops !== b.drops) return b.drops - a.drops;
   if (a.artifacts !== b.artifacts) return b.artifacts - a.artifacts;
   const ap = a.latestPublishedAt ?? "";
   const bp = b.latestPublishedAt ?? "";
-  if (ap !== bp) return bp.localeCompare(ap);
-  return a.slug.localeCompare(b.slug);
+  if (ap !== bp) return byCodeUnit(bp, ap);
+  return byCodeUnit(a.slug, b.slug);
 }
 
 /**
@@ -130,18 +147,57 @@ export const UNDERCROFT_HALF_X = 12.9;
 export const RAMP_DROP = UNDERCROFT_SURFACE_Y - UNDERCROFT_FLOOR_Y;
 export const RAMP_RUN = 24;
 
+/* ---------------------------------------------------- the movement model */
+
 /**
- * How far the ground blends from the surface deck down to the concourse at the
- * edge of an apron.
+ * WHAT THE BODY CAN DO IN ONE FRAME. Every number below is derived from it.
  *
- * The rig has NO step clamping and NO gravity: `ny = groundHeight(nx,nz) +
- * eyeHeight` is an outright assignment every frame, so a discontinuity in this
- * function is an instantaneous teleport rather than a fall. Every edge
- * therefore blends instead of stepping. Railings stop anybody reaching the
- * blend in normal play; the blend is what makes the worst case "an awkward
- * slope" instead of "the camera jumped six metres".
+ * The first cut of this feature sized its railings and its terrain blend
+ * against an imagined frame, and the imagined frame was smaller than the real
+ * one. The rig moves `speed * Math.min(dt, RIG_DT_CLAMP)` — 0.45 m at this
+ * scene's speed, not 0.15 — and a scroll notch adds `scrollStep` on top of
+ * that, UNCLAMPED. A railing that only blocks over 4 cm does not block. So the
+ * geometry reads the movement model rather than guessing at it, and the tests
+ * read the same constants.
  */
-export const EDGE_BLEND = 0.8;
+export const UNDERCROFT_SPEED = 9;
+/** 0.45 m. The furthest a held key moves the body in one frame. */
+export const UNDERCROFT_STEP = rigStepFor(UNDERCROFT_SPEED);
+/** The rig's `scrollStep`, which one wheel notch adds on top, unclamped. */
+export const UNDERCROFT_SCROLL = 2.2;
+/** The longest horizontal hop a single frame can make. */
+export const UNDERCROFT_MAX_TRAVEL = UNDERCROFT_STEP + UNDERCROFT_SCROLL;
+
+/**
+ * The steepest ground the city already asks a body to walk: the residences'
+ * switchback stair, 29.5 degrees. Nothing here invents a new capability, and
+ * the step limit below is sized so that walking — or scrolling — up that
+ * gradient is still accepted.
+ */
+export const MAX_WALKABLE_GRADE = Math.tan((29.5 * Math.PI) / 180);
+
+/**
+ * The largest ground change one move may make. DERIVED FROM THE MOVEMENT
+ * MODEL, not from any piece of geometry: the furthest the body can travel
+ * horizontally in a frame, times the steepest slope it is allowed to travel it
+ * on. Anything beyond this is not a slope, it is an edge, and the rig refuses
+ * it (see `stepMove`). ≈ 1.50 m, against a 6 m drop — no edge in this scene is
+ * anywhere near the limit, which is the point.
+ */
+export const UNDERCROFT_MAX_STEP = UNDERCROFT_MAX_TRAVEL * MAX_WALKABLE_GRADE;
+
+/**
+ * HOW FAR INSIDE THE DECK EVERY SOLID THING MUST BLOCK.
+ *
+ * This is the number the first cut got wrong, and it got it wrong by having
+ * two different ideas of where the deck ended. A rail must stop the body at a
+ * point where the ground under it is STILL DECK LEVEL, with room to spare —
+ * otherwise the rail's vertical band switches off before the rail does, and a
+ * body that has crossed the boundary is no longer blocked by the thing meant
+ * to stop it crossing. Two whole frames of walk travel: whatever a body does
+ * from a standstill against a rail, it is still on the deck.
+ */
+export const DECK_CLEARANCE = 2 * UNDERCROFT_STEP;
 
 export interface Rect {
   x0: number;
@@ -168,8 +224,6 @@ export interface UndercroftEntrance {
   fallDir: 1 | -1;
   /** Where the ramp meets the concourse floor. */
   deckBottomZ: number;
-  /** The z at which the cutting's inner wall gives out into the lobby. */
-  innerWallEndZ: number;
 }
 
 /**
@@ -190,7 +244,16 @@ export interface UndercroftEntrance {
  *
  * The courts, on the other hand, sit deliberately OVER the unit line — that is
  * where the vertical collision term earns its keep, and it is the geometry
- * `fps-collision.test.ts` checks.
+ * `fps-collision.test.ts` checks. It is also why the terrain has to be
+ * storey-aware: under a court the same (x,z) is two pieces of ground, and a
+ * function that returns one number for it is wrong for whoever is on the
+ * other one. See `undercroftGroundHeight`.
+ *
+ * THESE TWO RECTANGLES ARE THE ONE AUTHORITY FOR WHERE THE DECK IS. The paving
+ * that is drawn, the ground that can be stood on, and the rails and rock that
+ * block are all derived from them (`undercroftDeckY`, `undercroftGuards`, and
+ * the meshes in `undercroft.tsx`), because the defect they replace was three
+ * pieces of code disagreeing about where the apron ended.
  */
 export const UNDERCROFT_ENTRANCES: readonly UndercroftEntrance[] = [
   {
@@ -203,7 +266,6 @@ export const UNDERCROFT_ENTRANCES: readonly UndercroftEntrance[] = [
     deckTopZ: 0,
     fallDir: 1,
     deckBottomZ: 24,
-    innerWallEndZ: HALL_NORTH_Z,
   },
   {
     id: "south",
@@ -215,37 +277,60 @@ export const UNDERCROFT_ENTRANCES: readonly UndercroftEntrance[] = [
     deckTopZ: -110,
     fallDir: -1,
     deckBottomZ: -134,
-    innerWallEndZ: HALL_SOUTH_Z,
   },
 ] as const;
 
 /**
- * Where each entrance's mouth stands on the street above.
+ * How far out from the alley's centreline the mouths stand.
  *
- * Both in the service alleys (`ALLEY_X` = 11), at the near and far ends of the
- * strip. Chosen because the alleys are the only long stretch of the street
- * with no obstacle in it at all: every other candidate — the roadway, the
- * pavement between the curb and the shopfronts, the cross streets — either
- * carries pedestrian traffic or is already inside a shopfront's collision box.
- * Neither position displaces a storefront, a venue door or a directory board.
+ * `ALLEY_X` is where the alley RUNS, and it is where `BackAlley` marches its
+ * props — dumpsters, crates, pipe runs, fire escapes, the service door and its
+ * bulb — all of which sit on the SHOP side of the centreline, between 1.1 and
+ * 3.75 out (`ALLEY_PROP_LANE`). The first cut put both mouths dead on
+ * `ALLEY_X`, so at the production store count the north mouth stood inside a
+ * fire escape and the south mouth inside a lamp. The outer lane is the half
+ * with nothing in it, and it is derived from `ALLEY_X` rather than written as
+ * a number so it cannot drift away from the alley it is supposed to be in.
  */
-export const STREET_MOUTHS: ReadonlyArray<{ id: "north" | "south"; x: number; z: number }> = [
-  { id: "north", x: -11, z: -7 },
-  { id: "south", x: 11, z: -100 },
-];
+export const MOUTH_OFFSET = 1.4;
 
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
+/** The z of the near mouth. Fixed, because the near end of the street is. */
+export const NORTH_MOUTH_Z = -12;
+/**
+ * The far mouth, measured from the street's far end — the same way the tower,
+ * the monument, the Arcade and the Bank are all measured.
+ *
+ * It was a literal -100 while the street's end moved with the store count, so
+ * at 40 storefronts it rendered dead centre inside Resonance Trust, and below
+ * 29 it fell outside the rig's own movement clamp and could not be reached at
+ * all. It never fired at the production count, and no test imported it.
+ */
+export const SOUTH_MOUTH_Z_OFFSET = 3;
+
+export interface StreetMouth {
+  id: "north" | "south";
+  x: number;
+  z: number;
 }
 
-/** How completely (x,z) stands on this rectangle's deck: 1 inside, 0 off it. */
-function rectT(x: number, z: number, r: Rect, blend = EDGE_BLEND): number {
-  return Math.min(
-    clamp01((x - r.x0) / blend),
-    clamp01((r.x1 - x) / blend),
-    clamp01((z - r.z0) / blend),
-    clamp01((r.z1 - z) / blend),
-  );
+/**
+ * Where each entrance's mouth stands on the street above, for a street of
+ * `storeCount` shopfronts.
+ *
+ * A FUNCTION, not a table, for the same reason `monumentZFor` is one: the
+ * street's far end is a function of how many shops are on it, and anything
+ * standing at that end has to be too.
+ */
+export function streetMouthsFor(storeCount: number): StreetMouth[] {
+  return [
+    { id: "north", x: -(ALLEY_X + MOUTH_OFFSET), z: NORTH_MOUTH_Z },
+    { id: "south", x: ALLEY_X + MOUTH_OFFSET, z: streetDepthFor(storeCount) + SOUTH_MOUTH_Z_OFFSET },
+  ];
+}
+
+/** Is (x,z) on this rectangle at all? The deck is a rectangle, not a fade. */
+function insideRect(x: number, z: number, r: Rect): boolean {
+  return x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
 }
 
 /** The elevation of one entrance's deck at this z — level, then falling. */
@@ -256,28 +341,59 @@ export function deckYAt(e: UndercroftEntrance, z: number): number {
 }
 
 /**
+ * The deck's elevation at (x,z), or null where there is no deck.
+ *
+ * THE ONE AUTHORITY. The paving drawn in `undercroft.tsx`, the ground the rig
+ * stands on, and every rail and rock wall in `undercroftGuards` are all derived
+ * from this and from the two rectangles it reads. The defect it replaces was
+ * those three answering differently: the drawn plane covered the whole
+ * rectangle, the standable ground began fading 0.8 m INSIDE it, and the rails
+ * blocked 0.45 m inside THAT — so a third of every apron was paving you sank
+ * through, and the rails' vertical band had switched off before the rails did.
+ *
+ * A rectangle with a hard edge, deliberately. An 82-degree skirt is not a
+ * slope, and pretending it is one bought nothing: what stops a body walking
+ * over an edge is a rail in front of it and a step limit in the rig behind
+ * that, not a ramp too steep to walk.
+ */
+export function undercroftDeckY(x: number, z: number): number | null {
+  let best: number | null = null;
+  for (const e of UNDERCROFT_ENTRANCES) {
+    if (!insideRect(x, z, e.court) && !insideRect(x, z, e.shaft)) continue;
+    const y = deckYAt(e, z);
+    if (best === null || y > best) best = y;
+  }
+  return best;
+}
+
+/**
+ * How far the storey test tolerates being below the deck and still calling you
+ * "on it". Sized from the movement model so that walking UP the ramp from the
+ * lobby floor is recognised as getting onto the deck rather than as leaving it.
+ */
+export const STOREY_TOL = UNDERCROFT_MAX_STEP;
+
+/**
  * The ground under (x,z) — the terrain callback the rig walks on.
  *
- * `first-person-rig.tsx` already supports this and the residences already use
- * it for a 29.5-degree switchback stair, so no new movement capability is
- * being invented: the rig snaps the camera to `groundHeight + eyeHeight` every
- * frame, and the terrain OVERRIDES `bounds.minY`, which is what lets a visitor
- * stand below zero at all.
+ * STOREY-AWARE, because the courts sit over the unit line and the same (x,z)
+ * is therefore two different pieces of ground: the apron at zero and the
+ * concourse at minus six. A function of (x,z) alone has to pick one, and
+ * whichever it picks it is wrong for somebody — the first cut picked the deck,
+ * which is why a shopper who squeezed between two units at concourse level was
+ * lifted six metres onto the apron in a single frame.
  *
- * Continuous by construction. The floor is the baseline; each entrance lifts
- * it towards its own deck by a factor that falls smoothly to zero at the
- * apron's edge, and the two entrances combine with `max`, which preserves
- * continuity because both terms are continuous and both are >= the floor.
+ * `fromGround` is the ground the body is standing on now. Given it, this is
+ * a fixed point: a body on the deck stays on the deck, a body underneath stays
+ * underneath, and the only way between them is the ramp, where the two
+ * surfaces meet. Without it — the first snap after a spawn, before there is
+ * any history — the deck wins, which is correct because both spawns are on it.
  */
-export function undercroftGroundHeight(x: number, z: number): number {
-  let h = UNDERCROFT_FLOOR_Y;
-  for (const e of UNDERCROFT_ENTRANCES) {
-    const t = Math.max(rectT(x, z, e.court), rectT(x, z, e.shaft));
-    if (t <= 0) continue;
-    const lifted = UNDERCROFT_FLOOR_Y + (deckYAt(e, z) - UNDERCROFT_FLOOR_Y) * t;
-    if (lifted > h) h = lifted;
-  }
-  return h;
+export function undercroftGroundHeight(x: number, z: number, fromGround?: number): number {
+  const deck = undercroftDeckY(x, z);
+  if (deck === null || deck <= UNDERCROFT_FLOOR_Y) return UNDERCROFT_FLOOR_Y;
+  if (fromGround === undefined) return deck;
+  return fromGround >= deck - STOREY_TOL ? deck : UNDERCROFT_FLOOR_Y;
 }
 
 /** The walls the rig is held inside. */
@@ -339,21 +455,201 @@ function span(a: number, b: number): { c: number; h: number } {
   return { c: (a + b) / 2, h: Math.abs(b - a) / 2 };
 }
 
+/** A railing's half-thickness and its height above the deck. */
+export const RAIL_HALF = 0.15;
+export const RAIL_HEIGHT = 1.1;
+/** A cutting wall's half-thickness, and how far it stands proud of the deck. */
+export const ROCK_HALF = 0.3;
+export const ROCK_PARAPET = 0.6;
+
+/**
+ * Where a slab must stand so that the body it stops is `DECK_CLEARANCE` inside
+ * the deck edge it is guarding.
+ *
+ * `inward` is the direction from the edge into the deck. The resolver pushes a
+ * body out to `centre ± (half + OBSTACLE_PAD)`, so THAT is the blocking face,
+ * and it — not the drawn slab — is what has to land inside the deck. Deriving
+ * it is the whole fix for "rails do not rail": the first cut placed each rail
+ * 0.2 m OUTSIDE its court, which put the face 0.45 m inside, which is exactly
+ * one frame of travel, which is not a blocking window at all.
+ */
+export function guardCenter(edge: number, inward: 1 | -1, half: number): number {
+  return edge + inward * (DECK_CLEARANCE - half - OBSTACLE_PAD);
+}
+
+export type GuardKind = "rail" | "rock" | "fill";
+
+export interface UndercroftGuard {
+  id: string;
+  kind: GuardKind;
+  cx: number;
+  cz: number;
+  hx: number;
+  hz: number;
+  /** Vertical extent of the DRAWN slab, so the mesh and the box agree. */
+  y0: number;
+  y1: number;
+  band?: { yMin?: number; yMax?: number };
+  /** The deck edge this guard holds a body back from. Absent on `fill`. */
+  guards?: { axis: "x" | "z"; edge: number; inward: 1 | -1 };
+}
+
+
+
+/**
+ * The rails and the rock, derived from the deck rectangles.
+ *
+ * ONE LIST, read by `undercroftObstacles` for collision and by `undercroft.tsx`
+ * for the meshes, because "the railing you see" and "the railing that stops
+ * you" being two separate literals is how the first cut ended up with a drawn
+ * apron 35% of which was not standable and rails that blocked over four
+ * centimetres.
+ *
+ * THE BANDS, and the bands are the feature:
+ *
+ *   · RAILINGS carry `SURFACE_BAND`. They stop a visitor walking off the
+ *     apron; they must not stop the visitor walking UNDER it, and with a
+ *     storey-aware terrain there genuinely is somebody under it — the courts
+ *     sit over the unit line and those units are reachable from the concourse.
+ *   · CUTTING WALLS carry no band at all. Rock is solid at every elevation,
+ *     which is what an obstacle already meant.
+ */
+export function undercroftGuards(): UndercroftGuard[] {
+  const out: UndercroftGuard[] = [];
+
+  for (const e of UNDERCROFT_ENTRANCES) {
+    const { court, shaft } = e;
+    const shaftZ = span(shaft.z0, shaft.z1);
+
+    // THE CUTTING'S TWO ROCK WALLS, both running the full length of the shaft
+    // — which is what the scene has always DRAWN. The collider for the inner
+    // one used to stop at the hall's end while the rock carried on, so the
+    // last four metres of the ramp had a wall you could see and walk through.
+    // The inner one starts at the ramp head, because south of that the deck
+    // widens into the court and a wall there would seal the apron off from
+    // its own ramp.
+    const outerEdge = e.side < 0 ? shaft.x0 : shaft.x1;
+    const innerEdge = e.side < 0 ? shaft.x1 : shaft.x0;
+    const outerInward: 1 | -1 = e.side < 0 ? 1 : -1;
+    const innerInward: 1 | -1 = e.side < 0 ? -1 : 1;
+    out.push({
+      id: `${e.id}-cutting-outer`,
+      kind: "rock",
+      cx: guardCenter(outerEdge, outerInward, ROCK_HALF),
+      cz: shaftZ.c,
+      hx: ROCK_HALF,
+      hz: shaftZ.h,
+      y0: UNDERCROFT_FLOOR_Y - 0.6,
+      y1: UNDERCROFT_SURFACE_Y + ROCK_PARAPET,
+      guards: { axis: "x", edge: outerEdge, inward: outerInward },
+    });
+    const innerZ = span(e.deckTopZ, e.fallDir > 0 ? shaft.z1 : shaft.z0);
+    out.push({
+      id: `${e.id}-cutting-inner`,
+      kind: "rock",
+      cx: guardCenter(innerEdge, innerInward, ROCK_HALF),
+      cz: innerZ.c,
+      hx: ROCK_HALF,
+      hz: innerZ.h,
+      y0: UNDERCROFT_FLOOR_Y - 0.6,
+      y1: UNDERCROFT_SURFACE_Y + ROCK_PARAPET,
+      guards: { axis: "x", edge: innerEdge, inward: innerInward },
+    });
+
+    // THE COURT'S RAILINGS. The apron is sealed except for the ramp mouth, so
+    // the only way on from the arrival apron is down.
+    const cx = span(court.x0, court.x1);
+    const cz = span(court.z0, court.z1);
+    const backEdge = e.fallDir > 0 ? court.z0 : court.z1;
+    const mouthEdge = e.fallDir > 0 ? court.z1 : court.z0;
+    out.push({
+      id: `${e.id}-rail-back`,
+      kind: "rail",
+      cx: cx.c,
+      cz: guardCenter(backEdge, e.fallDir, RAIL_HALF),
+      hx: cx.h,
+      hz: RAIL_HALF,
+      y0: UNDERCROFT_SURFACE_Y,
+      y1: UNDERCROFT_SURFACE_Y + RAIL_HEIGHT,
+      band: SURFACE_BAND,
+      guards: { axis: "z", edge: backEdge, inward: e.fallDir },
+    });
+    // The inner long edge (the outer one is the cutting's own rock wall).
+    const innerEdgeX = e.side < 0 ? court.x1 : court.x0;
+    out.push({
+      id: `${e.id}-rail-inner`,
+      kind: "rail",
+      cx: guardCenter(innerEdgeX, e.side, RAIL_HALF),
+      cz: cz.c,
+      hx: RAIL_HALF,
+      hz: cz.h,
+      y0: UNDERCROFT_SURFACE_Y,
+      y1: UNDERCROFT_SURFACE_Y + RAIL_HEIGHT,
+      band: SURFACE_BAND,
+      guards: { axis: "x", edge: innerEdgeX, inward: e.side },
+    });
+    // The mouth edge, railed only where the ramp is NOT. The gap left here is
+    // the way down; a rail across the full width would seal the entrance and
+    // every other test in the suite would still pass.
+    const solidX = e.side < 0 ? span(shaft.x1, court.x1) : span(court.x0, shaft.x0);
+    if (solidX.h > 0.05) {
+      const inward: 1 | -1 = e.fallDir > 0 ? -1 : 1;
+      out.push({
+        id: `${e.id}-rail-mouth`,
+        kind: "rail",
+        cx: solidX.c,
+        cz: guardCenter(mouthEdge, inward, RAIL_HALF),
+        hx: solidX.h,
+        hz: RAIL_HALF,
+        y0: UNDERCROFT_SURFACE_Y,
+        y1: UNDERCROFT_SURFACE_Y + RAIL_HEIGHT,
+        band: SURFACE_BAND,
+        guards: { axis: "z", edge: mouthEdge, inward },
+      });
+    }
+  }
+
+  // THE ROCK AT THE HEAD OF EACH RAMP.
+  //
+  // A descending ramp leaves a wedge of space beneath it, and that wedge is
+  // open floor: a shopper on the concourse can walk under the arrival apron —
+  // which they should be able to, the units are down there — and carry on
+  // south under the ramp itself, which they should not. Part-way along, the
+  // underside comes within one step of their head and they climb onto their
+  // own ramp sideways: a metre and a half of ground in a single frame, and the
+  // survey found it. Sealing the wedge at its one opening is enough, because
+  // the cutting walls close it on both sides for its whole length and at the
+  // far end the ramp has already met the floor.
+  //
+  // Scoped to the concourse: a body ON the ramp here is at street level and
+  // walks straight over it, which is the entire reason obstacles grew a band.
+  for (const e of UNDERCROFT_ENTRANCES) {
+    const sx = span(e.shaft.x0, e.shaft.x1);
+    out.push({
+      id: `${e.id}-ramp-head-bulkhead`,
+      kind: "fill",
+      cx: sx.c,
+      cz: e.deckTopZ + e.fallDir * ROCK_HALF,
+      hx: sx.h,
+      hz: ROCK_HALF,
+      y0: UNDERCROFT_FLOOR_Y - 0.6,
+      y1: UNDERCROFT_CEILING_Y,
+      band: CONCOURSE_BAND,
+    });
+  }
+
+  return out;
+}
+
 /**
  * Everything solid down here, and the elevations at which it is solid.
  *
- * THREE BANDS, and the bands are the feature:
- *
- *   · UNITS and HALL WALLS carry `yMax: UNDERCROFT_CEILING_Y`. They are real
- *     to somebody on the concourse and invisible to somebody on the apron six
- *     metres above them — which is the whole reason `FpsObstacle` grew a
- *     vertical term. Without it, standing on a court at x = ±6 would put you
- *     inside a shop you cannot see, and the shop would win.
- *   · RAILINGS carry `yMin` just below the surface. They stop a visitor
- *     walking off the apron; they must not stop the visitor walking under it.
- *   · CUTTING WALLS carry no band at all. A wall of rock is solid at every
- *     elevation, which is exactly what an obstacle already meant, so they say
- *     nothing and behave as every obstacle in the city behaved before today.
+ * UNITS and HALL WALLS carry `yMax: UNDERCROFT_CEILING_Y`. They are real to
+ * somebody on the concourse and invisible to somebody on the apron six metres
+ * above them — which is the whole reason `FpsObstacle` grew a vertical term.
+ * Without it, standing on a court at x = ±6 would put you inside a shop you
+ * cannot see, and the shop would win. Everything at the surface comes from
+ * `undercroftGuards`, which is also what the scene draws.
  */
 export function undercroftObstacles(): UndercroftObstacle[] {
   const out: UndercroftObstacle[] = [];
@@ -369,36 +665,8 @@ export function undercroftObstacles(): UndercroftObstacle[] {
     out.push(box(HALL_HALF_X * side, hall.c, 0.3, hall.h, CONCOURSE_BAND));
   }
 
-  for (const e of UNDERCROFT_ENTRANCES) {
-    const { court, shaft } = e;
-    const outerX = e.side < 0 ? shaft.x0 - 0.3 : shaft.x1 + 0.3;
-    const innerX = e.side < 0 ? shaft.x1 + 0.3 : shaft.x0 - 0.3;
-
-    // The cutting: outer wall down its whole length, inner wall from the ramp
-    // mouth to the lobby, and a cap across the top end.
-    const shaftZ = span(shaft.z0, shaft.z1);
-    out.push(box(outerX, shaftZ.c, 0.3, shaftZ.h));
-    const inner = span(e.deckTopZ, e.innerWallEndZ);
-    out.push(box(innerX, inner.c, 0.3, inner.h));
-
-    // Railings. The court is sealed except for the ramp mouth, so the only way
-    // on from the arrival apron is down — which is the point of the feature.
-    const cx = span(court.x0, court.x1);
-    const cz = span(court.z0, court.z1);
-    // The edge the ramp leaves by, and the one opposite it.
-    const mouthZ = e.fallDir > 0 ? court.z1 : court.z0;
-    const backZ = e.fallDir > 0 ? court.z0 : court.z1;
-    out.push(box(cx.c, backZ - e.fallDir * 0.2, cx.h, 0.15, SURFACE_BAND));
-    // The inner long edge (the outer one is the cutting's own rock wall).
-    const innerEdgeX = e.side < 0 ? court.x1 + 0.2 : court.x0 - 0.2;
-    out.push(box(innerEdgeX, cz.c, 0.15, cz.h, SURFACE_BAND));
-    // The mouth edge, railed only where the ramp is NOT. The gap left here is
-    // the way down; a rail across the full width would seal the entrance and
-    // every other test in the suite would still pass.
-    const solidX = e.side < 0 ? span(shaft.x1, court.x1) : span(court.x0, shaft.x0);
-    if (solidX.h > 0.05) {
-      out.push(box(solidX.c, mouthZ + e.fallDir * 0.2, solidX.h, 0.15, SURFACE_BAND));
-    }
+  for (const g of undercroftGuards()) {
+    out.push(box(g.cx, g.cz, g.hx, g.hz, g.band));
   }
 
   return out;
