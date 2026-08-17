@@ -36,6 +36,7 @@ KAX_COMMERCE_ENABLED = "1"
 KAX_PRINTIFY_ENABLED = "1"
 KAX_PRINTIFY_SHOP_ID = "28604869"
 KAX_COMMERCE_DAILY_ORDER_CAP = "50"
+KAX_PRINTIFY_AUTO_FULFILL = "1"
 
 [userenv.development]
 # Keep the DEV database at the same schema as production.
