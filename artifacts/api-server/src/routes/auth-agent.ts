@@ -388,7 +388,16 @@ router.post("/auth/agent/npub/challenge", requireAttachAuth, async (req, res) =>
 
 /**
  * npub binding, step 2. Verify the three-legged proof and record the binding:
- *   1. wallet session (requireWalletAuth)
+ *   1. any signed-in, non-disabled account (requireAttachAuth) — NOT a wallet.
+ *      This line said "wallet session (requireWalletAuth)" long after the route
+ *      below stopped doing that, and a stale comment about an auth requirement
+ *      is worse than no comment: it is the thing somebody quotes as evidence
+ *      that KAX still makes residents install a crypto wallet. It does not, and
+ *      has not since `middlewares/botAttachAuth.ts` started RECORDING session
+ *      strength (`user_bots.attached_via`) instead of demanding it — a weaker
+ *      credential still cannot undo a stronger attestation (#112 stays fixed),
+ *      but somebody who verified their bot through OpenClawCity gets their
+ *      store without a wallet. The wallet is for collectors, not for residents.
  *   2. bot owned by this user (re-checked here)
  *   3. schnorr sig from `npub` over the commitment digest (fresh nonce)
  * On success the npub is written to the user_bots row. Idempotent for the same

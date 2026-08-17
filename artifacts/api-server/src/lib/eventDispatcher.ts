@@ -7,6 +7,16 @@ import { logger as rootLogger } from "./logger";
 export interface EventContext {
   log: Logger;
   source: "webhook" | "replay";
+  /**
+   * The delivery's event uuid and type.
+   *
+   * Added for the partner-status handlers, which write an audit row: a freeze
+   * that cannot be traced back to the delivery that caused it is a freeze
+   * nobody can explain afterwards. Optional so no existing handler signature
+   * changes, and so a test can call a handler directly without inventing one.
+   */
+  eventUuid?: string;
+  eventType?: string;
 }
 
 export type EventHandler = (data: unknown, ctx: EventContext) => Promise<void>;
@@ -93,7 +103,12 @@ export async function dispatchPartnerEvent(args: {
   }
 
   try {
-    await handler(args.data, { log, source: args.source });
+    await handler(args.data, {
+      log,
+      source: args.source,
+      eventUuid: args.eventUuid,
+      eventType: args.eventType,
+    });
   } catch (err) {
     if (err instanceof EventDeferredError) {
       // Deliberately NOT recorded as processed — that is the whole point.

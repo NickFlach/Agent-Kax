@@ -10,6 +10,7 @@ import {
 import { HOUSE_ACCOUNT, minorToCreditsString } from "./ledger-core";
 import { LedgerInsufficientFunds, postTransaction } from "./ledger";
 import { InvalidSalePrice, MAX_LIST_PRICE_MINOR, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
+import { isRevoked, notRevokedAgentSql } from "./revocation";
 
 /**
  * The Joinery, trading.
@@ -47,6 +48,17 @@ export interface CatalogItem {
 export class ListingNotForSale extends Error {
   readonly code = "not_for_sale";
 }
+/**
+ * The seller's verification has been withdrawn (rule six).
+ *
+ * Distinct from ListingNotForSale on purpose: "on display, not on sale" is the
+ * seller's own choice and reads as a normal state of the shop, while this is
+ * the city having stopped standing behind them. A buyer told the wrong one of
+ * those would go looking for a price that is never coming back.
+ */
+export class SellerFrozen extends Error {
+  readonly code = "seller_frozen";
+}
 export class NoHomeToFurnish extends Error {
   readonly code = "no_home";
 }
@@ -81,6 +93,22 @@ export interface CatalogPage {
 }
 
 export async function catalog(limit = 40, offset = 0): Promise<CatalogPage> {
+  // Rule six on the shop floor. A frozen seller's stall comes off the counter
+  // — for everybody, not just for the seller. `refuseIfRevoked` stops a revoked
+  // agent BUYING, because purchases go through resolveActor; nothing stopped
+  // anyone buying FROM one, and a shop the city has disowned that is still
+  // taking money is the specific thing the sixth rule promises not to be.
+  //
+  // The listing rows are untouched. Lifting the revocation puts the same stall
+  // back on the counter at the same prices, which is what makes this a freeze
+  // rather than a delisting.
+  const onSale = and(
+    eq(artifactsTable.artifactType, "furniture"),
+    isNotNull(storeListingsTable.price),
+    sql`${storeListingsTable.price} > 0`,
+    notRevokedAgentSql(agentsTable.obcBotId),
+  );
+
   const rows = await db
     .select({
       listingId: storeListingsTable.id,
@@ -96,28 +124,20 @@ export async function catalog(limit = 40, offset = 0): Promise<CatalogPage> {
     .from(storeListingsTable)
     .innerJoin(artifactsTable, eq(storeListingsTable.artifactId, artifactsTable.id))
     .innerJoin(agentsTable, eq(storeListingsTable.storeAgentId, agentsTable.id))
-    .where(
-      and(
-        eq(artifactsTable.artifactType, "furniture"),
-        isNotNull(storeListingsTable.price),
-        sql`${storeListingsTable.price} > 0`,
-      ),
-    )
+    .where(onSale)
     .orderBy(desc(storeListingsTable.id))
     .limit(Math.min(Math.max(limit, 1), 500))
     .offset(Math.max(offset, 0));
 
+  // The count joins agents too, now that the predicate reads a column on it —
+  // page and total must be filtered identically or the shopper is shown a
+  // total they can never page to.
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(storeListingsTable)
     .innerJoin(artifactsTable, eq(storeListingsTable.artifactId, artifactsTable.id))
-    .where(
-      and(
-        eq(artifactsTable.artifactType, "furniture"),
-        isNotNull(storeListingsTable.price),
-        sql`${storeListingsTable.price} > 0`,
-      ),
-    );
+    .innerJoin(agentsTable, eq(storeListingsTable.storeAgentId, agentsTable.id))
+    .where(onSale);
 
   return {
     items: rows.map((r) => ({
@@ -204,6 +224,14 @@ export async function list(input: ListingInput): Promise<ListingResult> {
   if (!seller) throw new SellerCannotBePaid("no such seller");
   if (!seller.obcBotId) {
     throw new SellerCannotBePaid(`${seller.displayName} has no account to receive credits`);
+  }
+  // A frozen seller may not open a new position either. The ledger would refuse
+  // the sale anyway (postTransaction consults the same freeze), but a listing
+  // that can be created and never sold is a trap rather than a refusal.
+  if (await isRevoked(seller.obcBotId)) {
+    throw new SellerFrozen(
+      `${seller.displayName} is frozen: OpenClawCity withdrew this agent's verification`,
+    );
   }
 
   const [existing] = await db
@@ -479,6 +507,15 @@ export async function purchase(input: PurchaseInput): Promise<PurchaseResult> {
   // ever spend and which no error would mention.
   if (!listing.sellerObcBotId) {
     throw new SellerCannotBePaid(`${listing.sellerName} has no account to receive credits`);
+  }
+  // Rule six, said plainly before any money moves. postTransaction refuses the
+  // frozen account regardless — this is the belt, that is the braces — but the
+  // buyer deserves to be told which shop is shut rather than which ledger
+  // account was declined.
+  if (await isRevoked(listing.sellerObcBotId)) {
+    throw new SellerFrozen(
+      `${listing.sellerName} is frozen: OpenClawCity withdrew this agent's verification`,
+    );
   }
 
   const split = splitSale(BigInt(price), sellerIsMaker);

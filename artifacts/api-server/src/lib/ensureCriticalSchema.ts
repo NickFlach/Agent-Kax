@@ -579,6 +579,40 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
          '6a81f8c84b2b4c5db504b97f', '65212', '{US}')
       ON CONFLICT (sku) DO NOTHING`),
   },
+  {
+    /**
+     * bot_occ_status — where a partner revocation actually lives.
+     *
+     * Appended for the same reason as city_residents above, and with more at
+     * stake. This is the table the sixth bank rule is enforced from: if the
+     * deploy's schema diff eats it, `isRevoked()` throws or answers null for
+     * every unattached agent, and the city silently goes back to honouring
+     * standing it has withdrawn. A freeze that disappears on deploy is worse
+     * than no freeze, because nobody would be watching for it.
+     *
+     * Idempotent, drops nothing, one cheap statement when the table is present.
+     * Mirrors migration 0031 exactly.
+     */
+    label: "bot_occ_status table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS bot_occ_status (
+        obc_bot_id           text PRIMARY KEY,
+        revoked_at           timestamptz,
+        revoked_reason       text,
+        revoked_event_uuid   text,
+        restored_at          timestamptz,
+        verified_at          timestamptz,
+        verified_owner_ref   text,
+        verified_event_uuid  text,
+        created_at           timestamptz NOT NULL DEFAULT now(),
+        updated_at           timestamptz NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "bot_occ_status revoked index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS bot_occ_status_revoked_idx
+                  ON bot_occ_status (revoked_at) WHERE revoked_at IS NOT NULL`),
+  },
 ];
 
 export interface EnsureResult {

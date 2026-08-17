@@ -61,6 +61,24 @@ export interface PostResult {
 
 export async function postTransaction(input: PostTxInput): Promise<PostResult> {
   validatePostings(input.postings, input.asset);
+
+  // RULE SIX, enforced here and not at the routes.
+  //
+  // Every value store KAX holds settles through this function — the credit
+  // endpoints, the signup grant, the Joinery till — so this is the one place a
+  // freeze cannot be forgotten by the next thing that moves money. Putting the
+  // check in `routes/ledger.ts` instead would have covered four routes and
+  // missed the joinery sale, which is exactly the shape of the bug the gate
+  // list in lib/revocation.ts exists to prevent.
+  //
+  // It runs BEFORE the idempotency lookup on purpose. A replay of a txId that
+  // was posted while the agent was in good standing must not become a way to
+  // touch a frozen account afterwards, even though it would apply nothing: the
+  // honest answer to "may this account move" is no, and returning the original
+  // receipt would say yes.
+  const { assertAccountsNotFrozen } = await import("./frozenAccounts");
+  await assertAccountsNotFrozen(input.postings.map((p) => p.account));
+
   const postingsHash = canonicalPostingsHash(input.txId, input.asset, input.postings);
   let lastErr: unknown;
 

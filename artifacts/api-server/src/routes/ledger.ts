@@ -19,6 +19,7 @@ import {
   minorToCreditsString,
   type Posting,
 } from "../lib/ledger-core";
+import { AccountFrozen } from "../lib/frozenAccounts";
 
 const router: IRouter = Router();
 
@@ -111,6 +112,20 @@ async function commit(
     }
     if (err instanceof LedgerIdempotencyConflict) {
       res.status(409).json({ ok: false, error: err.message, code: err.code, txId: err.txId });
+      return;
+    }
+    // Rule six. A 403 would be wrong: the CALLER is authorised (it holds the
+    // mint or trade token) — it is the account that may not move. 409 says the
+    // request conflicts with the current state of the resource, which is
+    // exactly the case and is also what the hub already retries sanely on.
+    if (err instanceof AccountFrozen) {
+      res.status(409).json({
+        ok: false,
+        error: err.message,
+        code: err.code,
+        account: err.account,
+        botId: err.botId,
+      });
       return;
     }
     throw err;
