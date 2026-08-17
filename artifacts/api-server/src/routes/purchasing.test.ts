@@ -132,6 +132,11 @@ function makeFakeStripe() {
     paymentMethods: {
       retrieve: async (id: string) => {
         paymentMethodsRetrieved.push(id);
+        // A bank debit or a wallet: Stripe returns a `type` and no `card`
+        // object at all. That is the shape the save path has to refuse, so the
+        // fake has to be able to produce it.
+        const nonCardType = nonCards.get(id);
+        if (nonCardType) return { id, type: nonCardType, card: undefined };
         const card = cards.get(id);
         if (!card) throw missing("payment_method");
         // Real Stripe always stamps the kind on a PaymentMethod, and the save
