@@ -168,12 +168,25 @@ export interface PurchasingFacts {
  * The card a charge would actually use: the default if one is marked, otherwise
  * the most recent one still attached. Detached rows can never be selected —
  * charging one is a guaranteed failure at Stripe.
+ *
+ * A row with no `last4` is skipped for the same reason. That is the marker of
+ * a payment method Stripe handed back with no `card` object at all — a bank
+ * debit, a wallet — which reached the table before the save path refused
+ * anything but a card, and which the purchase path cannot charge: it confirms
+ * on-session as though it were a card and raises an error that is not a
+ * decline, so the buyer gets a 500 rather than an answer.
+ *
+ * Skipping it turns an unrecoverable state into an actionable one. The account
+ * derives `pm_detached` or `needs_payment_method` and the panel says to add a
+ * payment method, which is exactly what is wrong and exactly what fixes it.
+ * Selecting an instrument that cannot be charged is worse than having none,
+ * because the account reads as `ready` right up to the till.
  */
 function selectCard(
   paymentMethods: readonly PurchasingPaymentMethodFacts[],
 ): PurchasingPaymentMethodFacts | null {
-  const attached = paymentMethods.filter((pm) => pm.detachedAt === null);
-  return attached.find((pm) => pm.isDefault) ?? attached[0] ?? null;
+  const usable = paymentMethods.filter((pm) => pm.detachedAt === null && pm.last4 !== null);
+  return usable.find((pm) => pm.isDefault) ?? usable[0] ?? null;
 }
 
 /**

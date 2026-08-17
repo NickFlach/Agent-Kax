@@ -96,6 +96,7 @@ function makeFakeStripe() {
   const detached: string[] = [];
   const intents = new Map<string, FakeSetupIntent>();
   const cards = new Map<string, FakeCard>();
+  const nonCards = new Map<string, string>();
   let seq = 0;
 
   function missing(kind: string): Error {
@@ -131,9 +132,19 @@ function makeFakeStripe() {
     paymentMethods: {
       retrieve: async (id: string) => {
         paymentMethodsRetrieved.push(id);
+        // A bank debit or a wallet: Stripe returns a `type` and no `card`
+        // object at all. That is the shape the save path has to refuse, so the
+        // fake has to be able to produce it.
+        const nonCardType = nonCards.get(id);
+        if (nonCardType) return { id, type: nonCardType, card: undefined };
         const card = cards.get(id);
         if (!card) throw missing("payment_method");
-        return { id, card };
+        // Real Stripe always stamps the kind on a PaymentMethod, and the save
+        // path refuses anything that is not a card — a bank debit or a wallet
+        // has no `card` object, saves NULL brand and last4, and cannot then be
+        // confirmed on-session. The fake said nothing about `type`, which made
+        // it less faithful than the thing it stands in for.
+        return { id, type: "card", card };
       },
       detach: async (id: string) => {
         detached.push(id);
@@ -141,6 +152,18 @@ function makeFakeStripe() {
       },
     },
   };
+
+  /**
+   * Confirm a SetupIntent with something that is NOT a card — a bank debit, a
+   * wallet. Stripe returns these with a `type` and no `card` object at all,
+   * which is precisely the shape the save path has to refuse.
+   */
+  function confirmNonCard(setupIntentId: string, paymentMethodId: string, type: string): void {
+    const intent = intents.get(setupIntentId);
+    if (!intent) throw new Error(`test bug: unknown setup intent ${setupIntentId}`);
+    intent.payment_method = paymentMethodId;
+    nonCards.set(paymentMethodId, type);
+  }
 
   /** Mark a SetupIntent as confirmed with a card, the way Stripe.js would. */
   function confirm(setupIntentId: string, paymentMethodId: string, card: FakeCard): void {
@@ -153,6 +176,7 @@ function makeFakeStripe() {
   return {
     client,
     confirm,
+    confirmNonCard,
     customerCreates,
     setupIntentsRetrieved,
     paymentMethodsRetrieved,
@@ -405,6 +429,31 @@ describe("purchasing settings (#284)", () => {
       // Stated separately: the refusal happens BEFORE the card is fetched, so a
       // guessed SetupIntent id cannot even be used to read brand and last four.
       expect(fake.paymentMethodsRetrieved).toHaveLength(0);
+    });
+
+    it("refuses a payment method that is not a card", async () => {
+      // The live failure this guard was written for. The SetupIntent used to
+      // ask for automatic_payment_methods, so Stripe offered bank debits and
+      // wallets — and one of those has no `card` object at all. It saved NULL
+      // brand and last4, the panel rendered its missing-digits placeholder, and
+      // the purchase then confirmed a mandate-based method on-session and
+      // raised something that was not a decline, which reached the buyer as a
+      // 500 they could do nothing about.
+      const { id, cookie } = await signedInUser();
+      const setupIntentId = await startSetup(cookie);
+      fake.confirmNonCard(setupIntentId, "pm_bank_1", "us_bank_account");
+
+      const res = await request(app)
+        .post("/me/purchasing/payment-method")
+        .set("Cookie", cookie)
+        .send({ setupIntentId });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("unsupported_payment_method");
+      expect(res.body.paymentMethodType).toBe("us_bank_account");
+      // Nothing is written: a refused instrument must not leave a row behind
+      // that `selectCard` could later pick and call ready.
+      expect(await cardsFor(id)).toHaveLength(0);
     });
 
     it("refuses a raw payment-method id offered in place of a SetupIntent id", async () => {

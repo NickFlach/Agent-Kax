@@ -405,3 +405,38 @@ describe("the state vocabulary", () => {
     expect([...produced].sort()).toEqual([...PURCHASING_STATES].sort());
   });
 });
+
+/**
+ * An instrument that cannot be charged must not read as ready.
+ *
+ * A bank debit or a wallet comes back from Stripe with no `card` object, so
+ * `brand` and `last4` land NULL. Before the save path refused those, one could
+ * reach the table — and `selectCard` would pick it, the account would derive
+ * `ready`, the dashboard would show the `•••• ????` placeholder, and the
+ * purchase would confirm a mandate-based method on-session and raise something
+ * that is not a decline. The buyer got a 500 with nothing to act on.
+ */
+describe("an instrument with no card behind it", () => {
+  it("is never selected, so the account does not read as ready", () => {
+    const snapshot = derivePurchasingState(
+      facts({ paymentMethods: [card({ brand: null, last4: null, expMonth: null, expYear: null })] }),
+    );
+    expect(snapshot.state).not.toBe("ready");
+    expect(snapshot.card).toBeNull();
+    expect(isPurchasable(snapshot)).toBe(false);
+  });
+
+  it("loses to a real card rather than shadowing it", () => {
+    // The unusable row is the DEFAULT, so it would otherwise win outright.
+    const snapshot = derivePurchasingState(
+      facts({
+        paymentMethods: [
+          card({ brand: null, last4: null, expMonth: null, expYear: null, isDefault: true }),
+          card({ last4: "4242", isDefault: false }),
+        ],
+      }),
+    );
+    expect(snapshot.state).toBe("ready");
+    expect(snapshot.card?.last4).toBe("4242");
+  });
+});
