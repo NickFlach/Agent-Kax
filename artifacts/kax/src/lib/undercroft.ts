@@ -785,3 +785,65 @@ export function undercroftObstacles(): UndercroftObstacle[] {
 
   return out;
 }
+
+/**
+ * THE RAMP AS IT IS DRAWN, derived from the same numbers it is walked on.
+ *
+ * The rendered slab and the standable surface were two independent pieces of
+ * arithmetic, and they disagreed by the entire 6 m drop: the tilt was computed
+ * from `deckBottomZ - deckTopZ`, which points DOWN the ramp, while a plane
+ * rotated about X descends toward -Z as its local +Y grows. Both ramps were
+ * therefore drawn mirrored — the high end where the low end belongs.
+ *
+ * Nothing caught it because nothing was wrong with the walk. `undercroftDeckY`
+ * was right, the collision replay was right, the guards were right; a visitor
+ * descended a correct invisible slope while the visible one climbed away from
+ * them, so they appeared to walk through the air and then through the ramp to
+ * reach the floor. Every test in the suite passed throughout, because the suite
+ * runs in Node with no DOM and had never once looked at the mesh.
+ *
+ * So the transform lives here now, next to `undercroftDeckY`, and is tested
+ * against it. Sampling the returned plane MUST reproduce the surface the
+ * visitor actually stands on.
+ */
+export function undercroftRampTransform(e: UndercroftEntrance): {
+  /** Centre of the slab. */
+  x: number;
+  y: number;
+  z: number;
+  /** Plane size: width across the cutting, length down the slope. */
+  width: number;
+  length: number;
+  /** Rotation about X to apply to a plane whose default normal is +Z. */
+  rotationX: number;
+} {
+  const shaftW = e.shaft.x1 - e.shaft.x0;
+  const run = e.deckBottomZ - e.deckTopZ;
+  // `deckTopZ - deckBottomZ`, NOT the other way round: a plane rotated about X
+  // by (-PI/2 + tilt) travels toward -Z as its local +Y grows, so the run has
+  // to be expressed in that direction or the slab comes out end-for-end.
+  const tilt = Math.atan2(-RAMP_DROP, e.deckTopZ - e.deckBottomZ);
+  return {
+    x: (e.shaft.x0 + e.shaft.x1) / 2,
+    y: (UNDERCROFT_SURFACE_Y + UNDERCROFT_FLOOR_Y) / 2,
+    z: (e.deckTopZ + e.deckBottomZ) / 2,
+    width: shaftW,
+    length: Math.hypot(run, RAMP_DROP),
+    rotationX: -Math.PI / 2 + tilt,
+  };
+}
+
+/**
+ * Where the DRAWN ramp surface sits at a given distance along the slab.
+ *
+ * `t` runs from -length/2 to +length/2 along the plane's local +Y. Exported so
+ * a test can walk the drawn surface and compare it with `undercroftDeckY`
+ * rather than trusting the trigonometry above by eye.
+ */
+export function undercroftRampPointAt(
+  e: UndercroftEntrance,
+  t: number,
+): { y: number; z: number } {
+  const m = undercroftRampTransform(e);
+  return { y: m.y + t * Math.cos(m.rotationX), z: m.z + t * Math.sin(m.rotationX) };
+}
