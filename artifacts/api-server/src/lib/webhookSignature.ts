@@ -31,17 +31,30 @@ export const SECRET_ENV_VARS = ["OBC_WEBHOOK_SECRET", "OBC_WEBHOOK_SECRETS"] as 
  * deployment has to change for the existing subscription to keep verifying.
  * `OBC_WEBHOOK_SECRETS` is an additional comma- or whitespace-separated list,
  * which is where a new subscription's once-shown secret goes.
+ *
+ * ONLY THE LIST IS SPLIT, and that asymmetry is the point. The primary is a
+ * secret somebody else generated: it is whatever OpenClawCity handed over, and
+ * a space or a comma inside it is entirely possible. `origin/main` read it
+ * verbatim, so putting it through the separator regex would silently change a
+ * value that is CURRENTLY VERIFYING — every delivery from the existing artifact
+ * subscription would start 401ing the moment this deployed, and the secret was
+ * shown exactly once, so the recovery would be deleting the subscription and
+ * making a new one. Splitting is safe only on the variable that was introduced
+ * as a list, where the operator chose the separator knowingly.
+ *
+ * The primary is still TRIMMED. That is not the same risk: surrounding
+ * whitespace on an env var is an artefact of how it was pasted, not part of a
+ * secret, and a trailing newline out of a secrets file is the likeliest way for
+ * a correct value to be configured wrong.
  */
 export function webhookSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
   const out: string[] = [];
-  const push = (v: string | undefined) => {
-    for (const part of String(v ?? "").split(/[,\s]+/)) {
-      const s = part.trim();
-      if (s && !out.includes(s)) out.push(s);
-    }
+  const add = (v: string) => {
+    const s = v.trim();
+    if (s && !out.includes(s)) out.push(s);
   };
-  push(env["OBC_WEBHOOK_SECRET"]);
-  push(env["OBC_WEBHOOK_SECRETS"]);
+  add(String(env["OBC_WEBHOOK_SECRET"] ?? ""));
+  for (const part of String(env["OBC_WEBHOOK_SECRETS"] ?? "").split(/[,\s]+/)) add(part);
   return out;
 }
 
@@ -62,9 +75,15 @@ export interface SignatureCheck {
  * HMAC-SHA256, hex, over the RAW request body — unchanged from the
  * single-secret version except that it tries each configured secret.
  *
- * The `sha256=` prefix is optional and stripped. The length pre-check is
- * required: `timingSafeEqual` throws rather than returning false when the
- * buffers differ in length.
+ * The `sha256=` prefix is optional and stripped, CASE-INSENSITIVELY and after
+ * the header is trimmed. A sender that writes `SHA256=` — or that lets a
+ * trailing newline into the header value — is presenting a correct signature,
+ * and refusing it would be a 401 that looks exactly like a wrong secret. There
+ * is nothing to lose by being lenient about the label: the hex digest after it
+ * still has to verify.
+ *
+ * The length pre-check is required: `timingSafeEqual` throws rather than
+ * returning false when the buffers differ in length.
  */
 export function verifyWebhookSignature(
   rawBody: Buffer,
@@ -75,7 +94,7 @@ export function verifyWebhookSignature(
   if (secrets.length === 0 || !signatureHeader) {
     return { ok: false, matchedIndex: -1, candidates: secrets.length };
   }
-  const provided = signatureHeader.replace(/^sha256=/, "").trim();
+  const provided = signatureHeader.trim().replace(/^sha256=/i, "").trim();
 
   let matchedIndex = -1;
   // Every secret is tried even after a match, so the work done does not depend
