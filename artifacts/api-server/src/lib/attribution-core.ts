@@ -250,11 +250,25 @@ export function formatTrailers(t: AttributionTrailers): string {
  * no attribution.
  */
 export function parseTrailers(message: string): AttributionTrailers | null {
+  // Duplicate detection is case-INSENSITIVE while acceptance stays
+  // case-EXACT. git interpret-trailers folds key case, so an appended
+  // `kax-principal:` that this parser merely ignored would read as a second
+  // principal to anyone using git's own machinery — two readers of the same
+  // bytes disagreeing about attribution, the defect class this module exists
+  // for (#354 review, 0xSCADA-QE). Folding the collision check closes the
+  // ignored-line channel; requiring exact case for acceptance means a
+  // case-variant line can only ever void a parse, never win it.
   const found = new Map<string, string>();
+  const seenFold = new Set<string>();
+  const KEYS_FOLD = new Set((TRAILER_KEYS as readonly string[]).map((k) => k.toLowerCase()));
   for (const line of message.split("\n")) {
     const m = /^([A-Za-z-]+):\s*(.+)$/.exec(line.trim());
-    if (m && (TRAILER_KEYS as readonly string[]).includes(m[1])) {
-      if (found.has(m[1])) return null;
+    if (!m) continue;
+    const fold = m[1].toLowerCase();
+    if (!KEYS_FOLD.has(fold)) continue;
+    if (seenFold.has(fold)) return null;
+    seenFold.add(fold);
+    if ((TRAILER_KEYS as readonly string[]).includes(m[1])) {
       found.set(m[1], m[2].trim());
     }
   }

@@ -247,6 +247,17 @@ KAX-Principal: ${COLONIST}
     expect(parseTrailers(msg)).toBeNull();
   });
 
+  it("refuses a case-variant duplicate the way git's own trailer reader would see it", () => {
+    // git interpret-trailers folds key case; this parser must not disagree
+    // with it about how many principals a message carries. An appended
+    // lowercase `kax-principal:` used to be ignored (honest values parsed);
+    // now it collides and voids the parse. Exact case is still required to
+    // ACCEPT a value, so a case-variant line can only void, never win.
+    const honest = { commitmentId: "cmt-9", principal: QE, signature: "c2ln" };
+    const msg = `feat: x\n\n${formatTrailers(honest)}\nkax-principal: ${COLONIST}\n`;
+    expect(parseTrailers(msg)).toBeNull();
+  });
+
   it("parses a principal with no signature as unattributed, not as partial", () => {
     // A commit carrying KAX-Principal without KAX-Signature is the exact
     // unfalsifiable shape #348 retires. It must not parse as attribution.
