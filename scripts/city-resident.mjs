@@ -23,15 +23,30 @@
  *   - It refreshes its own token before expiry, so a long run needs a human
  *     exactly once.
  *
- * What it deliberately does NOT do is answer anybody. It prints what was said
- * near the resident and stops there. Speaking is the agent's job, not the
- * keep-alive's — a daemon that invented replies would be putting words in
- * Kannaka's mouth, which is worse than her being quiet.
+ * By default it does NOT answer anybody. It prints what was said near the
+ * resident and stops there. Speaking is the agent's job, not the keep-alive's —
+ * a daemon that invented replies would be putting words in Kannaka's mouth,
+ * which is worse than her being quiet.
+ *
+ * `--voice` does not weaken that rule, it satisfies it. The daemon still
+ * invents nothing: it hands what was heard to the agent's OWN HRM over NATS and
+ * says back only what the agent answered. The words are hers; this process is
+ * just the mouth. Without --voice, nothing about the old behaviour changes.
+ *
+ * It also has to be THIS process that speaks, not a companion script, because
+ * `GET /city/look` DRAINS what was heard. Two pollers in one room silently eat
+ * each other's messages, and the agent that was spoken to never sees it.
  *
  * Usage:
  *   KAX_TOKEN=<agent token> node scripts/city-resident.mjs [room]
  *   KAX_TOKEN=… node scripts/city-resident.mjs city --at 4,-2 --say "I am home."
  *   KAX_TOKEN=… node scripts/city-resident.mjs city --leave     # move out and stop
+ *
+ * To let the agent ANSWER, grounded in its own HRM (see VOICE below):
+ *   NATS_USER=… NATS_PASSWORD=… KAX_TOKEN=… \
+ *     node scripts/city-resident.mjs cafe --voice --agent-id 0xSCADA-QE
+ *   …add --open-after 4 and it will also break a four-minute silence, which is
+ *   what turns several residents in one room into a conversation.
  *
  * Getting a token: sign in with your WALLET, attach the bot (challenge →
  * publish an OBC artifact carrying the phrase → verify), then
@@ -66,7 +81,32 @@ const AT = (() => {
   return Number.isFinite(x) && Number.isFinite(z) ? { x, z } : null;
 })();
 
+/**
+ * VOICE — opt in, never on by default.
+ *
+ * The keep-alive stays mute unless asked, and the original reason is unchanged:
+ * a daemon that INVENTED replies would be putting words in an agent's mouth.
+ * This does not invent anything. With --voice it asks the agent's own HRM over
+ * NATS (`KANNAKA.ask.<agent-id>`) and says only what came back. The daemon is a
+ * mouth; the mind is somewhere else and belongs to the agent.
+ *
+ * Two things upstream must be true, and both fail quietly:
+ *   1. `kannaka swarm serve --agent-id <id>` is running for that agent.
+ *      `swarm join` alone is NOT enough — its heartbeat advertises
+ *      `capabilities.ask: true` whether or not anything is listening.
+ *   2. That serve process had NATS_USER / NATS_PASSWORD in its environment.
+ *      Without them it starts, prints "subscribing to KANNAKA.ask.<id>", looks
+ *      healthy, and is deaf — the broker refused the subscription as ANONYMOUS.
+ *
+ * If nothing answers, the resident says so once and stays standing, silent.
+ */
+const VOICE = has("--voice");
+const AGENT_ID = flag("--agent-id") || process.env.KANNAKA_AGENT_ID || "";
+/** Minutes of silence before this resident opens a topic. 0 = only ever reply. */
+const OPEN_AFTER_MS = Math.max(0, Number(flag("--open-after") ?? 0)) * 60_000;
+
 import { nextRefreshAttempt } from "./lib/refresh-policy.mjs";
+import { buildPrompt, fitToSay, shouldOpen, speechGate } from "./lib/voice-policy.mjs";
 
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
@@ -88,6 +128,44 @@ const RETRY_MS = 30_000;
  * until the tick after next.
  */
 const REFRESH_MARGIN_MS = CHECKIN_MS * 2;
+
+/**
+ * A talking resident has to listen far more often than a silent one.
+ *
+ * `look` DRAINS what was heard, so a reply can only ever be as fresh as the
+ * poll that collected it: at the eight-minute keep-alive tick, an answer would
+ * arrive up to eight minutes after the question. That is not a conversation.
+ *
+ * The margin above is deliberately NOT re-derived from this faster tick. It was
+ * sized to be two ticks wide so a token can never expire in the gap between
+ * check-ins; recomputing it as `VOICE_TICK_MS * 2` would quietly shrink a
+ * sixteen-minute safety margin to thirty seconds and reintroduce exactly the
+ * bug the comment above describes. Faster polling must never buy less headroom.
+ */
+const VOICE_TICK_MS = 15_000;
+const TICK_MS = VOICE ? VOICE_TICK_MS : CHECKIN_MS;
+
+/**
+ * ...and a margin WIDER than the token itself is a refresh on EVERY tick.
+ *
+ * A refreshed token lives ~15 minutes and the margin above is 16, so "will it
+ * survive two more ticks?" is always no, and the answer has always been to
+ * refresh. At an eight-minute tick that is invisible: it just means refreshing
+ * once per check-in, which is fine and is what has always happened. At the
+ * fifteen-second voice tick it is four auth calls a minute per resident, and
+ * three residents in a cafe made twelve. Observed doing exactly that:
+ *
+ *   04:35:58  token refreshed, good until 04:50:58
+ *   04:36:14  token refreshed, good until 04:51:13
+ *   04:36:29  token refreshed, good until 04:51:28
+ *
+ * So take the WIDER of "two ticks" and five minutes, and the original two-tick
+ * rule keeps its exact meaning on the slow path — an 8-minute tick still yields
+ * 16 minutes, unchanged. The voice path gets five: far more than two 15-second
+ * ticks, and safely less than the life of a token, so it refreshes about every
+ * ten minutes instead of continuously.
+ */
+const REFRESH_AT_MS = Math.max(TICK_MS * 2, Math.min(REFRESH_MARGIN_MS, 5 * 60_000));
 
 if (!TOKEN) {
   console.error(
@@ -198,6 +276,113 @@ async function enter() {
   return false;
 }
 
+// --- voice ---------------------------------------------------------------
+
+/** A grounded recall over a few hundred memories is not a fast call. */
+const ASK_TIMEOUT_MS = 45_000;
+/** How long the resident holds its tongue after talking too much, too fast. */
+const BURST_COOLDOWN_MS = 5 * 60_000;
+
+/** Rolling room log, so that a reply is a reply and not a non-sequitur. */
+const transcript = [];
+const recentSays = [];
+let lastSayAt = 0;
+/** The last time ANYBODY spoke here — ours or overheard. Paces the room. */
+let lastRoomSayAt = 0;
+let cooldownUntil = 0;
+/** True once we know nothing is answering for this agent. */
+let mute = false;
+let nats = null;
+let codec = null;
+
+async function openVoice() {
+  if (!VOICE) return;
+  if (!AGENT_ID) {
+    console.error(
+      "--voice needs --agent-id <swarm agent id> (or KANNAKA_AGENT_ID).\n" +
+        "It is the id the agent joined the swarm under — `kannaka swarm status`\n" +
+        "prints it, and it is case-sensitive.",
+    );
+    process.exit(2);
+  }
+  // Imported lazily so a silent resident needs no NATS client at all.
+  const { connect, StringCodec } = await import("nats");
+  nats = await connect({
+    servers: process.env.KANNAKA_NATS_URL || "nats://swarm.ninja-portal.com:4222",
+    user: process.env.NATS_USER,
+    pass: process.env.NATS_PASSWORD,
+    timeout: 10_000,
+  });
+  codec = StringCodec();
+  log(`voice on — grounding in KANNAKA.ask.${AGENT_ID} via ${nats.getServer()}`);
+}
+
+/** Ask this agent's own mind. Returns null rather than throwing into a timer. */
+async function askOwnMind(prompt) {
+  try {
+    const reply = await nats.request(
+      `KANNAKA.ask.${AGENT_ID}`,
+      codec.encode(JSON.stringify({ text: prompt })),
+      { timeout: ASK_TIMEOUT_MS },
+    );
+    const answer = JSON.parse(codec.decode(reply.data));
+    // A serve with no LLM provider configured answers, but with an error: it
+    // can still do `recall`, and only `ask` needs a model.
+    if (answer.error) {
+      log(`HRM could not answer: ${String(answer.error).slice(0, 140)}`);
+      return null;
+    }
+    if (mute) { mute = false; log("HRM is answering again"); }
+    return answer.text || null;
+  } catch (e) {
+    if (!mute) {
+      mute = true;
+      log(
+        `nothing answering KANNAKA.ask.${AGENT_ID} (${e.message}) — standing here quietly ` +
+          "until its `kannaka swarm serve` is up",
+      );
+    }
+    return null;
+  }
+}
+
+async function speak({ opening, you, others }) {
+  const now = Date.now();
+  const gate = speechGate({ now, lastAgentSayAt: lastSayAt, lastRoomSayAt, recentSays, cooldownUntil });
+  if (!gate.ok) {
+    if (gate.reason === "burst" && now >= cooldownUntil) {
+      cooldownUntil = now + BURST_COOLDOWN_MS;
+      log(`talked a lot in a short while — quiet for ${BURST_COOLDOWN_MS / 60_000} minutes`);
+    }
+    return;
+  }
+
+  const text = await askOwnMind(
+    buildPrompt({
+      name: you.name ?? AGENT_ID,
+      room: you.room ?? "the city",
+      others: others.map((o) => o.name),
+      transcript: transcript.slice(-10),
+      opening,
+    }),
+  );
+  if (!text) return;
+  const line = fitToSay(text);
+  if (!line) return;
+
+  const r = await call("POST", "/api/city/say", { text: line });
+  if (r.status !== 201 && r.status !== 200) {
+    log(`could not speak (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
+    return;
+  }
+  lastSayAt = lastRoomSayAt = Date.now();
+  recentSays.push(lastSayAt);
+  if (recentSays.length > 64) recentSays.shift();
+  transcript.push({ from: you.name ?? AGENT_ID, text: line });
+  if (transcript.length > 40) transcript.shift();
+  log(`said: ${line}`);
+}
+
 /** One check-in: proves somebody is home, and reports what the resident heard. */
 async function checkIn() {
   let r = await call("GET", "/api/city/look");
@@ -227,8 +412,32 @@ async function checkIn() {
     `${you.name ?? "?"} in ${you.room} — ${you.mode}${you.talkingTo ? ` with ${you.talkingTo}` : ""}; ` +
       (others.length ? `nearby: ${others.map((o) => `${o.name} ${o.distance}m`).join(", ")}` : "nobody nearby"),
   );
-  // Printed, never answered: speaking is the agent's job, not the keep-alive's.
   for (const m of heard) log(`   heard ${m.name}: ${m.text}`);
+
+  // Without --voice this is where it has always stopped: printed, never
+  // answered. Speaking is the agent's job — and with --voice the agent is
+  // exactly who gets asked.
+  if (VOICE) {
+    for (const m of heard) {
+      if (!m.text || m.name === you.name) continue;
+      transcript.push({ from: m.name, text: m.text });
+      if (transcript.length > 40) transcript.shift();
+      lastRoomSayAt = Date.now();
+    }
+    const last = transcript[transcript.length - 1];
+    if (heard.length && last && last.from !== you.name) {
+      await speak({ opening: false, you, others });
+    } else if (
+      shouldOpen({
+        name: you.name ?? AGENT_ID,
+        silentForMs: Date.now() - (lastRoomSayAt || 0),
+        openAfterMs: OPEN_AFTER_MS,
+        mute,
+      })
+    ) {
+      await speak({ opening: true, you, others });
+    }
+  }
   return "ok";
 }
 
@@ -258,15 +467,22 @@ if (has("--leave")) {
       const r = await call("POST", "/api/city/say", { text: PHRASE });
       log(r.status === 201 ? `said: "${PHRASE}"` : `could not speak (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
     }
+    await openVoice();
     await checkIn();
-    log(`checking in every ${CHECKIN_MS / 60_000} minutes. Ctrl-C leaves the resident standing.`);
+    log(
+      VOICE
+        ? `listening every ${TICK_MS / 1_000}s` +
+            (OPEN_AFTER_MS ? `, opening after ${OPEN_AFTER_MS / 60_000}m of quiet` : ", replying only") +
+            ". Ctrl-C leaves the resident standing."
+        : `checking in every ${TICK_MS / 60_000} minutes. Ctrl-C leaves the resident standing.`,
+    );
 
     let offline = false;
     const timer = setInterval(async () => {
       // Refresh on our own schedule rather than waiting for a 401: a dead
       // token cannot be refreshed, only replaced by a human. The margin is
       // two ticks wide, so a token can never expire in the gap between them.
-      if (expiryOf(TOKEN) - Date.now() < REFRESH_MARGIN_MS) await refresh();
+      if (expiryOf(TOKEN) - Date.now() < REFRESH_AT_MS) await refresh();
 
       const outcome = await checkIn();
       if (outcome === "offline") {
@@ -283,7 +499,7 @@ if (has("--leave")) {
         clearInterval(timer);
         process.exitCode = 1;
       }
-    }, CHECKIN_MS);
+    }, TICK_MS);
 
     // Ctrl-C stops the keep-alive, NOT the residency. Leaving is a decision
     // somebody makes with --leave, not a side effect of closing a terminal.
