@@ -22,7 +22,15 @@
 
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain .mjs sibling, no types by design
-import { SAY_MAX, buildPrompt, fitToSay, openingDelayFor, shouldOpen, speechGate } from "./voice-policy.mjs";
+import {
+  SAY_MAX,
+  buildPrompt,
+  fitToSay,
+  foldHeard,
+  openingDelayFor,
+  shouldOpen,
+  speechGate,
+} from "./voice-policy.mjs";
 
 /** The real line, as Kannaka said it, that ended on a dangling conjunction. */
 const REAL_LINE =
@@ -77,14 +85,14 @@ describe("speechGate", () => {
   });
 
   it("stops two residents answering the same line on the same tick", () => {
-    // Another agent spoke 2s ago; this one is otherwise free to talk.
-    const g = speechGate({ now, lastRoomSayAt: now - 2_000 });
+    // Another AGENT spoke 2s ago; this one is otherwise free to talk.
+    const g = speechGate({ now, lastPeerSayAt: now - 2_000 });
     expect(g).toEqual({ ok: false, reason: "room-gap" });
   });
 
   it("caps a runaway conversation once the burst window fills", () => {
     const recentSays = Array.from({ length: 14 }, (_, i) => now - i * 1_000);
-    const g = speechGate({ now, recentSays, lastAgentSayAt: 0, lastRoomSayAt: 0 });
+    const g = speechGate({ now, recentSays, lastAgentSayAt: 0, lastPeerSayAt: 0 });
     expect(g).toEqual({ ok: false, reason: "burst" });
   });
 
@@ -154,5 +162,76 @@ describe("buildPrompt", () => {
     });
     expect(p).toContain("0xSCADA-QE: kind-10100 does not exist");
     expect(p).toContain("Reply to what was just said.");
+  });
+});
+
+describe("foldHeard — the bug that made three agents answer nobody", () => {
+  const YOU = "Kannaka";
+  const now = 1_700_000_000_000;
+
+  it("does NOT let a human's line hold the reply back", () => {
+    // This is the whole bug. Nick said "hi Kannaka" to a cafe of agents that
+    // heard him and could not answer, because processing his line stamped the
+    // room clock and the gate then read it in the same tick.
+    const folded = foldHeard({
+      heard: [{ id: 1, name: "Nick", text: "hi Kannaka", at: now - 500 }],
+      youName: YOU,
+      peerNames: ["0xSCADA-QE", "Flaukowski"],
+      now,
+    });
+    expect(folded.lastPeerSayAt).toBe(0);
+    expect(speechGate({ now, lastPeerSayAt: folded.lastPeerSayAt }).ok).toBe(true);
+  });
+
+  it("does let a peer agent's line hold it back — that is the point", () => {
+    const folded = foldHeard({
+      heard: [{ id: 1, name: "0xSCADA-QE", text: "already answering", at: now - 500 }],
+      youName: YOU,
+      peerNames: ["0xSCADA-QE"],
+      now,
+    });
+    expect(folded.lastPeerSayAt).toBe(now - 500);
+    expect(speechGate({ now, lastPeerSayAt: folded.lastPeerSayAt })).toEqual({
+      ok: false,
+      reason: "room-gap",
+    });
+  });
+
+  it("uses the server's timestamp, not when we got round to reading it", () => {
+    // A poll can be 15s behind the speech; a peer line that old must not block.
+    const folded = foldHeard({
+      heard: [{ id: 1, name: "0xSCADA-QE", text: "said a while back", at: now - 20_000 }],
+      youName: YOU,
+      peerNames: ["0xSCADA-QE"],
+      now,
+    });
+    expect(speechGate({ now, lastPeerSayAt: folded.lastPeerSayAt }).ok).toBe(true);
+  });
+
+  it("ignores its own voice coming back at it", () => {
+    const folded = foldHeard({
+      heard: [{ id: 1, name: YOU, text: "my own line", at: now }],
+      youName: YOU,
+      peerNames: [],
+      now,
+    });
+    expect(folded.lines).toEqual([]);
+    expect(folded.lastActivityAt).toBe(0);
+  });
+
+  it("counts anybody at all as activity, so silence means silence", () => {
+    const folded = foldHeard({
+      heard: [{ id: 1, name: "Nick", text: "hello", at: now - 100 }],
+      youName: YOU,
+      peerNames: [],
+      now,
+    });
+    expect(folded.lastActivityAt).toBe(now - 100);
+  });
+
+  it("survives a line with no timestamp rather than throwing mid-poll", () => {
+    const folded = foldHeard({ heard: [{ id: 1, name: "Nick", text: "hi" }], youName: YOU, now });
+    expect(folded.lines).toHaveLength(1);
+    expect(folded.lastActivityAt).toBe(now);
   });
 });
