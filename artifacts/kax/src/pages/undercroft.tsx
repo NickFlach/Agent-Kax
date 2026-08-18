@@ -6,6 +6,7 @@ import { Link, useLocation } from "wouter";
 import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
+import { SpeakControl, useSpeak } from "@/components/speak-control";
 import { DirectoryBoard, useCityRooms } from "@/components/directory-board";
 import { concreteTexture, sidewalkTexture, stuccoTexture, repeated } from "@/lib/city-textures";
 import { DISPLAY_FONT } from "@/lib/fonts";
@@ -27,6 +28,7 @@ import {
   UNDERCROFT_MAX_STEP,
   UNDERCROFT_SPEED,
   UNDERCROFT_SURFACE_Y,
+  undercroftRampTransform,
   rankUndercroft,
   undercroftGroundHeight,
   undercroftGuards,
@@ -174,11 +176,12 @@ function Entrance({ e, guards }: { e: UndercroftEntrance; guards: UndercroftGuar
   const pavers = useMemo(() => repeated(sidewalkTexture(), 4, 4), []);
   const rock = useMemo(() => repeated(stuccoTexture(3), 3, 2), []);
 
-  // The ramp deck, as one long slab tilted by its own rise over run.
-  const rampTilt = Math.atan2(-(UNDERCROFT_SURFACE_Y - UNDERCROFT_FLOOR_Y), e.deckBottomZ - e.deckTopZ);
-  const rampMidZ = (e.deckTopZ + e.deckBottomZ) / 2;
-  const rampLen = Math.hypot(e.deckBottomZ - e.deckTopZ, UNDERCROFT_SURFACE_Y - UNDERCROFT_FLOOR_Y);
-  const rampX = (shaft.x0 + shaft.x1) / 2;
+  // The ramp deck, as one long slab. The transform comes from the geometry
+  // module so it is derived from — and tested against — the same numbers the
+  // visitor is actually standing on; computing it here is how it came to be
+  // drawn mirrored.
+  const ramp = undercroftRampTransform(e);
+  const rampX = ramp.x;
 
   return (
     <group>
@@ -194,8 +197,8 @@ function Entrance({ e, guards }: { e: UndercroftEntrance; guards: UndercroftGuar
         <meshStandardMaterial map={pavers} roughness={0.95} side={DoubleSide} />
       </mesh>
       {/* The ramp itself. */}
-      <mesh rotation={[-Math.PI / 2 + rampTilt, 0, 0]} position={[rampX, (UNDERCROFT_SURFACE_Y + UNDERCROFT_FLOOR_Y) / 2, rampMidZ]} receiveShadow>
-        <planeGeometry args={[shaftW, rampLen]} />
+      <mesh rotation={[ramp.rotationX, 0, 0]} position={[ramp.x, ramp.y, ramp.z]} receiveShadow>
+        <planeGeometry args={[ramp.width, ramp.length]} />
         <meshStandardMaterial map={pavers} roughness={0.97} side={DoubleSide} />
       </mesh>
 
@@ -279,6 +282,8 @@ function CamProbe() {
 
 export default function Undercroft() {
   const [, navigate] = useLocation();
+  // Press T to answer whoever is down here; agents live on this concourse too.
+  const { sayRef, onSay } = useSpeak();
   const { data, isLoading } = useGetMarketplaceCombined();
   const cityRooms = useCityRooms();
 
@@ -350,6 +355,8 @@ export default function Undercroft() {
           </p>
         </div>
       </div>
+
+      <SpeakControl sayRef={sayRef} testId="input-undercroft-chat" />
 
       <Canvas
         className="!absolute inset-0"
@@ -522,7 +529,7 @@ export default function Undercroft() {
             visitors in the same room would each have rendered the other inside
             the rock and seen an empty hall: exactly the #300 failure the note
             above cites. */}
-        <VenuePresence room="undercroft" y={UNDERCROFT_FLOOR_Y} />
+        <VenuePresence room="undercroft" y={UNDERCROFT_FLOOR_Y} onSay={onSay} />
       </Canvas>
     </div>
   );
