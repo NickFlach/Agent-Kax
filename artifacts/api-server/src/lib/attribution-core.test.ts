@@ -78,7 +78,7 @@ function reseal(rows: SignedActionRow[]): SignedActionRow[] {
       commitSha: r.commitSha,
       ref: r.ref,
     };
-    const entryHash = computeActionHash(head, entry);
+    const entryHash = computeActionHash(head, r.seq, entry);
     const out = { ...r, prevHash: head, entryHash };
     head = entryHash;
     return out;
@@ -120,8 +120,8 @@ describe("AC 1 — a principal claim not signed by that principal's archived key
       ...forged,
       seq: 4,
       prevHash: head,
-      entryHash: computeActionHash(head, forged),
-      signature: signAction(head, forged, privs.get(IMPOSTOR)!),
+      entryHash: computeActionHash(head, 4, forged),
+      signature: signAction(head, 4, forged, privs.get(IMPOSTOR)!),
     };
     const all = [...rows, row];
     // The chain half accepts it — hashes are all consistent.
@@ -182,6 +182,30 @@ describe("AC 2 — the reseal: rewrite a principal, rebuild every hash, chain pa
   });
 });
 
+describe("F1 (#352 review) — seq is inside the signed bytes, so a renumbered row is caught", () => {
+  // Before this fix, seq was the one field neither the hash nor the signature
+  // covered — a store-writer could renumber rows and every audit error
+  // ("attribution failed at seq N") would point a forensic reader at the
+  // wrong row while both verifiers stayed green. Now the hash recomputation
+  // uses the row's own seq, so a renumbered label breaks the chain half.
+  it("rejects a chain whose rows were relabeled but otherwise untouched", () => {
+    const rows = honestChain();
+    const relabeled = [
+      { ...rows[0], seq: 7 }, // hashes and signatures byte-identical
+      rows[1],
+      rows[2],
+    ];
+    expect(() => verifyActionChain(relabeled)).toThrow(/seq 7.*entryHash mismatch/s);
+    expect(() => verifyActionAttribution(relabeled, keys as KeyRegistry)).toThrow(/seq 7/);
+  });
+
+  it("still accepts the honest numbering", () => {
+    const rows = honestChain();
+    expect(() => verifyActionChain(rows)).not.toThrow();
+    expect(() => verifyActionAttribution(rows, keys as KeyRegistry)).not.toThrow();
+  });
+});
+
 describe("AC 3 — verification reads the archived key, never the trailer's claim", () => {
   it("rejects a swapped principal even when the signature bytes are untouched", () => {
     const rows = honestChain();
@@ -190,7 +214,7 @@ describe("AC 3 — verification reads the archived key, never the trailer's clai
     // QE, so under COLONIST's archived key it must fail.
     const doctored = { ...rows[2], principal: COLONIST };
     // Keep the hash consistent so only attribution is under test.
-    doctored.entryHash = computeActionHash(doctored.prevHash, {
+    doctored.entryHash = computeActionHash(doctored.prevHash, doctored.seq, {
       commitmentId: doctored.commitmentId,
       principal: doctored.principal,
       kind: doctored.kind,
@@ -208,6 +232,19 @@ describe("trailers", () => {
     const t = { commitmentId: "cmt-9", principal: QE, signature: "c2ln" };
     const msg = `feat: honest work\n\n${formatTrailers(t)}\n`;
     expect(parseTrailers(msg)).toEqual(t);
+  });
+
+  it("parses a doubled KAX-Principal as unattributed — ambiguity is not attribution (F2)", () => {
+    // The message-appending forger's shape: the honest block is present and a
+    // second principal line is appended below it. Git's last-wins convention
+    // would hand the forger the parse; this parser refuses instead.
+    const honest = { commitmentId: "cmt-9", principal: QE, signature: "c2ln" };
+    const msg = `feat: honest work
+
+${formatTrailers(honest)}
+KAX-Principal: ${COLONIST}
+`;
+    expect(parseTrailers(msg)).toBeNull();
   });
 
   it("parses a principal with no signature as unattributed, not as partial", () => {

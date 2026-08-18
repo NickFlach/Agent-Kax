@@ -62,10 +62,20 @@ export interface SignedActionRow extends ActionEntry {
  * Canonical byte serialization of the fields an entry commits to. Field order
  * is fixed and explicit for the same reason as ledger-core: the hash must be
  * stable and language-agnostic, so object key order can never matter.
+ *
+ * `seq` is IN the canonical form, deliberately diverging from ledger-core.
+ * There the label is inert; here every audit error dereferences it
+ * ("attribution failed at seq 4"), which makes it the entry point a forensic
+ * reader follows into the store. An unauthenticated forensic pointer is the
+ * one field a store-writer could renumber without tripping either verifier,
+ * leaving every audit message pointing at the wrong row (#352 review, F1).
+ * Binding it costs one array slot now, and would have cost a chain-format
+ * migration the day after the first row persisted.
  */
-function canonical(prevHash: string, e: ActionEntry): string {
+function canonical(prevHash: string, seq: number, e: ActionEntry): string {
   return JSON.stringify([
     prevHash,
+    seq,
     e.commitmentId,
     e.principal,
     e.kind,
@@ -74,8 +84,8 @@ function canonical(prevHash: string, e: ActionEntry): string {
   ]);
 }
 
-export function computeActionHash(prevHash: string, e: ActionEntry): string {
-  return crypto.createHash("sha256").update(canonical(prevHash, e)).digest("hex");
+export function computeActionHash(prevHash: string, seq: number, e: ActionEntry): string {
+  return crypto.createHash("sha256").update(canonical(prevHash, seq, e)).digest("hex");
 }
 
 /**
@@ -87,14 +97,19 @@ export function computeActionHash(prevHash: string, e: ActionEntry): string {
  * canonical form proves the signer saw THESE fields, including the principal
  * being asserted.
  */
-export function signingPayload(prevHash: string, e: ActionEntry): Buffer {
-  return Buffer.from(canonical(prevHash, e), "utf8");
+export function signingPayload(prevHash: string, seq: number, e: ActionEntry): Buffer {
+  return Buffer.from(canonical(prevHash, seq, e), "utf8");
 }
 
-export function signAction(prevHash: string, e: ActionEntry, privateKey: KeyObject): string {
+export function signAction(
+  prevHash: string,
+  seq: number,
+  e: ActionEntry,
+  privateKey: KeyObject,
+): string {
   // Ed25519 is single-shot in node:crypto: algorithm is null, no digest choice
   // to get wrong. Same primitive identity.ts mints tokens with.
-  return crypto.sign(null, signingPayload(prevHash, e), privateKey).toString("base64");
+  return crypto.sign(null, signingPayload(prevHash, seq, e), privateKey).toString("base64");
 }
 
 /**
@@ -121,7 +136,7 @@ export function verifyActionChain(rows: SignedActionRow[]): string {
     if (r.prevHash !== prev) {
       throw new Error(`action chain link broken at seq ${r.seq}: prevHash mismatch`);
     }
-    const h = computeActionHash(prev, {
+    const h = computeActionHash(prev, r.seq, {
       commitmentId: r.commitmentId,
       principal: r.principal,
       kind: r.kind,
@@ -161,7 +176,7 @@ export function verifyActionAttribution(rows: SignedActionRow[], keys: KeyRegist
         `attribution failed at seq ${r.seq}: no archived key for principal '${r.principal}'`,
       );
     }
-    const payload = signingPayload(r.prevHash, {
+    const payload = signingPayload(r.prevHash, r.seq, {
       commitmentId: r.commitmentId,
       principal: r.principal,
       kind: r.kind,
@@ -190,8 +205,8 @@ export function buildSignedAction(
   e: ActionEntry,
   privateKey: KeyObject,
 ): SignedActionRow {
-  const entryHash = computeActionHash(headHash, e);
-  const signature = signAction(headHash, e, privateKey);
+  const entryHash = computeActionHash(headHash, seq, e);
+  const signature = signAction(headHash, seq, e, privateKey);
   return { ...e, seq, prevHash: headHash, entryHash, signature };
 }
 
@@ -225,12 +240,21 @@ export function formatTrailers(t: AttributionTrailers): string {
  * three is missing — a commit with a principal and no signature is exactly the
  * unfalsifiable shape this module exists to retire, so it parses as
  * unattributed rather than as partially attributed.
+ *
+ * Duplicated keys also parse as null. Git convention is last-wins, but a
+ * doubled `KAX-Principal:` is exactly what a message-appending forger
+ * produces — the honest block already present, a second principal line added
+ * below it — and last-wins hands that forger the parse (#352 review, F2). The
+ * signature cross-check would catch the lie later; the parser still must not
+ * return a confident wrong answer in the meantime. Ambiguous attribution is
+ * no attribution.
  */
 export function parseTrailers(message: string): AttributionTrailers | null {
   const found = new Map<string, string>();
   for (const line of message.split("\n")) {
     const m = /^([A-Za-z-]+):\s*(.+)$/.exec(line.trim());
     if (m && (TRAILER_KEYS as readonly string[]).includes(m[1])) {
+      if (found.has(m[1])) return null;
       found.set(m[1], m[2].trim());
     }
   }
