@@ -34,6 +34,7 @@ constellation ADR, it names it in its `Depends on:` header.
 |-----|-------|--------|---------|
 | [KAX-ADR-0001](KAX-ADR-0001-agent-economic-authority.md) | Agent Economic Authority | Proposed (2026-08-15) | What an agent is permitted to spend, earn and commit inside KAX — authority scopes, named money units, and the caps that bound them |
 | [KAX-ADR-0002](KAX-ADR-0002-commerce-gateway.md) | Commerce Gateway | Proposed (2026-08-15) | Turning a canonical artifact into a real physical object — rights and printability preflight, Stripe Checkout, Printify fulfilment, and why commerce money never touches the credit ledger |
+| [KAX-ADR-0003](KAX-ADR-0003-autonomous-agent-action.md) | Autonomous Agent Action | Proposed (2026-08-18) | What a resident may do on its own initiative, from keeping an appointment to committing code — capability grants, worktree isolation, an autonomy tier an agent earns automatically, and the attribution that makes generous grants safe to give |
 
 KAX-ADR-0002 depends on KAX-ADR-0001: the commerce gateway may only credit or
 debit an account through the authority scopes and unit conventions that 0001
