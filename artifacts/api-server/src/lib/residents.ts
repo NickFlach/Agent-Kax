@@ -100,6 +100,23 @@ function persist(r: Resident): void {
   }
 }
 
+/**
+ * Take a body off the street: drop it from the registry, from presence, and
+ * from the store. Every eviction path in tickAll does exactly this, so keep
+ * the three-step definition in one place — a future reason to remove a body
+ * (a lease that expires, an agent that quit) has to do all three or the city
+ * ends up drawing a body for somebody who is not here.
+ *
+ * The store call swallows its own error: the sweep is the last line of
+ * defence against a body that will not go away, and one bad row must not
+ * stop it from clearing the rest.
+ */
+function evict(principal: string): void {
+  residents.delete(principal);
+  presenceLeave(principal);
+  try { store?.remove(principal); } catch { /* the sweep must not stop */ }
+}
+
 /** How long a residency survives with nobody steering it. */
 export const IDLE_MS = 30 * 60_000;
 /** How often every resident body takes a step. */
@@ -252,16 +269,12 @@ export function tickAll(now: number = Date.now(), dt: number = TICK_MS / 1000): 
     // continuing to draw a body for an agent the city no longer vouches for
     // is the city vouching for it.
     if (revokedPrincipals.has(r.principal)) {
-      residents.delete(r.principal);
-      presenceLeave(r.principal);
-      try { store?.remove(r.principal); } catch { /* the sweep must not stop */ }
+      evict(r.principal);
       continue;
     }
     if (now - r.lastSteer > IDLE_MS) {
       // Nobody has been home for half an hour. Stop implying otherwise.
-      residents.delete(r.principal);
-      presenceLeave(r.principal);
-      try { store?.remove(r.principal); } catch { /* the sweep must not stop */ }
+      evict(r.principal);
       continue;
     }
 
