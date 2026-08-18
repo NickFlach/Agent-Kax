@@ -109,6 +109,28 @@ describe("#349 — absence of a revert is not evidence of correctness", () => {
     }
   });
 
+  // MUTATION-SENSITIVE (H1, #356 hunt pass): re-order the reset checks ahead
+  // of the authorship check and this goes red — a peer's failing merge is
+  // absence for this subject, not evidence against it.
+  it("a peer's red-CI merge does not reset the subject's streak (H1)", () => {
+    const credited = () => merge({ reviewedBy: PEER });
+    const peerRed = merge({ author: PEER, mergedBy: HUMAN, ciGreen: false });
+    const evidence = [credited(), credited(), credited(), peerRed, credited(), credited()];
+    const d = evaluatePromotion(AGENT, 1 as Tier, evidence, N);
+    expect(d.changed).toBe(true);
+    const peerDecision = d.decisions[3];
+    expect(peerDecision.credited).toBe(false);
+    expect(peerDecision.resetStreak).toBe(false);
+    expect(peerDecision.reason).toMatch(/not the subject's work/);
+  });
+
+  it("the subject's own red-CI merge still resets (H1 must not overcorrect)", () => {
+    const credited = () => merge({ reviewedBy: PEER });
+    const ownRed = merge({ ciGreen: false });
+    const evidence = [credited(), credited(), credited(), ownRed, credited(), credited()];
+    expect(evaluatePromotion(AGENT, 1 as Tier, evidence, N).changed).toBe(false);
+  });
+
   it("a CI failure resets the consecutive streak; a non-creditable merge does not", () => {
     const credited = () => merge({ reviewedBy: PEER });
     // 4 credited, then a CI failure, then only 4 more: no promotion at N=5.
@@ -164,15 +186,41 @@ describe("#347 — a T2 agent cannot demote a peer by reverting their work", () 
 
 describe("external provenance, edge cases", () => {
   it("a scope violation demotes only with an external detector", () => {
-    const self = evaluateDemotion(1 as Tier, {
-      kind: "scope-violation", principal: AGENT, detectedBy: AGENT, detail: "x",
-    });
+    const violation = {
+      kind: "scope-violation" as const, principal: AGENT, detail: "x",
+      allowedPaths: ["skills/agent-aa/**"], touchedPaths: ["src/lib/identity.ts"],
+    };
+    const self = evaluateDemotion(1 as Tier, { ...violation, detectedBy: AGENT });
     expect(self.demoted).toBe(false);
     const ext = evaluateDemotion(1 as Tier, {
-      kind: "scope-violation", principal: AGENT, detectedBy: "kax:system:scope-check", detail: "x",
+      ...violation, detectedBy: "kax:system:scope-check",
     });
     expect(ext.demoted).toBe(true);
     expect(ext.citedPrincipal).toBe("kax:system:scope-check");
+    expect(ext.reason).toMatch(/src\/lib\/identity\.ts/);
+  });
+
+  // MUTATION-SENSITIVE (H2, #356 hunt pass): trust the reporter's word again
+  // and this goes red — the report below asserts a violation the evidence
+  // does not contain, and it must be inert no matter who filed it.
+  it("a false scope-violation report is structurally inert (H2)", () => {
+    const d = evaluateDemotion(2 as Tier, {
+      kind: "scope-violation", principal: AGENT, detectedBy: PEER,
+      allowedPaths: ["skills/agent-aa/**", "docs/*.md"],
+      touchedPaths: ["skills/agent-aa/notes/plan.md", "docs/readme.md"],
+      detail: "asserted, not verified",
+    });
+    expect(d.demoted).toBe(false);
+    expect(d.reason).toMatch(/inert/);
+  });
+
+  it("glob semantics: ** crosses segments, * does not", () => {
+    const cross = evaluateDemotion(2 as Tier, {
+      kind: "scope-violation", principal: AGENT, detectedBy: HUMAN,
+      allowedPaths: ["docs/*.md"], touchedPaths: ["docs/sub/deep.md"],
+      detail: "single star must not cross a slash",
+    });
+    expect(cross.demoted).toBe(true);
   });
 
   it("promotion caps at T2 and demotion floors at T0", () => {

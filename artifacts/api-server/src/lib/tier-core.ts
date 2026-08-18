@@ -65,6 +65,11 @@ export interface RevertEvidence {
   author: string;
   /** Principal that performed the revert. */
   revertedBy: string;
+  /**
+   * MUST be derived by the wrapper from the principal grammar
+   * (`kax:user:` vs `kax:agent:`), never accepted from the reporting party —
+   * a caller-asserted kind is H2 in miniature.
+   */
   revertedByKind: "human" | "agent";
   /**
    * When the reverter is an agent: does its path allowlist overlap the
@@ -75,14 +80,45 @@ export interface RevertEvidence {
   revertedByOverlapsPaths: boolean;
 }
 
-/** A scope violation, detected by the enforcement layer, never self-reported. */
+/**
+ * A scope violation, MACHINE-CHECKED rather than reported (#356 hunt pass,
+ * H2). The evidence carries the grant's path allowlist and the paths the act
+ * touched, and the evaluator recomputes the violation itself — so
+ * `detectedBy` is provenance for the receipt, never the authority for the
+ * demotion. A false report from any principal is structurally inert: if the
+ * touched paths all match the allowlist, no demotion happens no matter who
+ * asserts otherwise. The earlier shape trusted the reporter's word, which
+ * handed the agent the revert door had just disarmed a second door that
+ * accepted assertions.
+ */
 export interface ScopeViolationEvidence {
   kind: "scope-violation";
   /** The violating principal — the demotion subject. */
   principal: string;
-  /** The principal that detected the violation (scope checker, operator). */
+  /** The principal that filed the evidence. Recorded, not trusted. */
   detectedBy: string;
+  /** The grant's path allowlist (globs: `*` in-segment, `**` any depth). */
+  allowedPaths: string[];
+  /** The paths the act actually touched. */
+  touchedPaths: string[];
   detail: string;
+}
+
+/** Minimal glob for path allowlists: `*` within a segment, `**` any depth. */
+function globToRegExp(glob: string): RegExp {
+  const DOUBLE_STAR = "\u0000"; // placeholder no real path glob contains
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .split("**").join(DOUBLE_STAR)
+    .split("*").join("[^/]*")
+    .split(DOUBLE_STAR).join(".*");
+  return new RegExp("^" + escaped + "$");
+}
+
+/** The paths in `touched` that no allowlist glob matches. */
+export function offendingPaths(allowed: string[], touched: string[]): string[] {
+  const patterns = allowed.map(globToRegExp);
+  return touched.filter((p) => !patterns.some((re) => re.test(p)));
 }
 
 /** Why one piece of evidence was counted or refused. Every decision is kept. */
@@ -197,10 +233,16 @@ function judgeMerge(subject: string, e: MergeEvidence): CreditDecision {
     resetStreak,
   });
 
+  // H1 (#356 hunt pass): another principal's work is judged FIRST, before any
+  // streak-reset check. A peer's red-CI merge is not evidence about this
+  // subject — it is absence, and absences carry no weight in either
+  // direction. Checked in the old order, a repo-wide evidence feed let any
+  // agent reset every peer's streak by landing failing work of its own: a
+  // denial-of-promotion attack, #347's shape through the other counter.
+  if (e.author !== subject) return no("not the subject's work");
   if (!e.ciGreen) return no("CI failed on the merge commit", true);
   if (e.reverted) return no("merge was reverted", true);
   if (!e.withinScope) return no("outside the agent's granted scope");
-  if (e.author !== subject) return no("not the subject's work");
   if (e.mergedBy === subject) {
     return no("self-merged: an agent must not manufacture its own record (#346)");
   }
@@ -276,13 +318,25 @@ export function evaluateDemotion(
     if (evidence.detectedBy === subject) {
       return refusal("scope violation self-reported; an external detector is required");
     }
+    // The evaluator recomputes the violation from the evidence. The report is
+    // never the authority — an assertion whose paths all match the allowlist
+    // demotes nobody, whoever filed it.
+    const offending = offendingPaths(evidence.allowedPaths, evidence.touchedPaths);
+    if (offending.length === 0) {
+      return refusal(
+        "no violation recomputable from the evidence: every touched path " +
+          "matches the allowlist; the report is inert",
+      );
+    }
     return {
       subject,
       demoted: true,
       from: currentTier,
       to: (currentTier - 1) as Tier,
       citedPrincipal: evidence.detectedBy,
-      reason: `scope violation detected by ${evidence.detectedBy}: ${evidence.detail}`,
+      reason:
+        `scope violation recomputed from evidence filed by ${evidence.detectedBy}: ` +
+        `${offending.join(", ")} outside the allowlist (${evidence.detail})`,
     };
   }
 
