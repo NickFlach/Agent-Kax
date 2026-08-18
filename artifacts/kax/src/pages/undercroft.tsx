@@ -112,7 +112,13 @@ function Unit({
           roughness={0.25}
         />
       </mesh>
-      {lit && <pointLight position={[0, 1.6, 1.1]} intensity={5} distance={5.5} decay={2} color="#bfe6f2" />}
+      {/* No <pointLight> here, deliberately. three.js forward-renders:
+          every point light becomes a loop iteration in EVERY material's
+          fragment shader, with no distance culling. One light inside this
+          48-unit map was 48 of the route's 80 compiled lights - 60% of the
+          per-pixel lighting cost of the entire concourse. The display glass
+          above already carries emissive #2d6a80 at 0.85, which is free, and
+          that is what actually makes a window read as lit. */}
 
       {/* Fascia sign. */}
       <mesh position={[0, 2.45, 0.63]}>
@@ -353,7 +359,7 @@ export default function Undercroft() {
         shadows
       >
         <fog attach="fog" args={["#0b1116", 18, 78]} />
-        <ambientLight intensity={0.34} color="#b9cbd8" />
+        <ambientLight intensity={0.5} color="#b9cbd8" />
         <hemisphereLight args={["#9fb6c6", "#20262b", 0.5]} />
         {/* Daylight down the two cuttings — the only outside light there is. */}
         {UNDERCROFT_ENTRANCES.map((e) => (
@@ -443,16 +449,21 @@ export default function Undercroft() {
           );
         })}
 
-        {/* Strip lighting down the corridor so it reads as a concourse. */}
+        {/* Strip lighting down the corridor so it reads as a concourse.
+            These were 26 <pointLight>s - a third of the route's 80 compiled
+            lights, and each one was a loop iteration on every pixel of every
+            surface, whether or not that pixel was anywhere near the fixture.
+            They are emissive panels now: a fixture you can SEE, costing one
+            unlit draw apiece instead of a term in the lighting loop. */}
         {Array.from({ length: 26 }).map((_, i) => (
-          <pointLight
+          <mesh
             key={i}
+            rotation={[Math.PI / 2, 0, 0]}
             position={[0, UNDERCROFT_CEILING_Y - 0.25, 18 - i * 5]}
-            intensity={7}
-            distance={11}
-            decay={2}
-            color="#cfe0ea"
-          />
+          >
+            <planeGeometry args={[1.8, 0.42]} />
+            <meshBasicMaterial color="#cfe0ea" toneMapped={false} />
+          </mesh>
         ))}
 
         {UNDERCROFT_ENTRANCES.map((e) => (
