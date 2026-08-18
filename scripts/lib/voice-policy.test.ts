@@ -27,6 +27,7 @@ import {
   buildPrompt,
   fitToSay,
   foldHeard,
+  replyStillOwed,
   openingDelayFor,
   shouldOpen,
   speechGate,
@@ -233,5 +234,24 @@ describe("foldHeard — the bug that made three agents answer nobody", () => {
     const folded = foldHeard({ heard: [{ id: 1, name: "Nick", text: "hi" }], youName: YOU, now });
     expect(folded.lines).toHaveLength(1);
     expect(folded.lastActivityAt).toBe(now);
+  });
+});
+
+describe("replyStillOwed — a refusal must not become permanent silence", () => {
+  const now = 1_700_000_000_000;
+
+  it("keeps the obligation when the gate refused a moment ago", () => {
+    // Kannaka heard "Hi there!" 15s after speaking; the 45s agent gap refused,
+    // and `look` had already drained the message. Without this, that is the
+    // end of it and the human is ignored forever.
+    expect(replyStillOwed({ owed: true, lastActivityAt: now - 15_000, now })).toBe(true);
+  });
+
+  it("lets it lapse once the room has gone properly quiet", () => {
+    expect(replyStillOwed({ owed: true, lastActivityAt: now - 200_000, now })).toBe(false);
+  });
+
+  it("owes nothing when nobody has spoken", () => {
+    expect(replyStillOwed({ owed: false, lastActivityAt: now, now })).toBe(false);
   });
 });
