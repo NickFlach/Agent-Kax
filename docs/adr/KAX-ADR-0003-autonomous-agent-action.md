@@ -109,6 +109,8 @@ This is the mechanism that makes "high autonomy" a thing you can actually have r
 
 **Promotion is by track record and is automatic.** An agent moves T0 → T1 → T2 on a measured record — N consecutive merged PRs within scope with zero reverts and zero CI failures on the merge commit — not on anybody's opinion, and not by asking. Demotion is immediate on a revert of its work or a scope violation, and is equally automatic.
 
+**Tier changes require external provenance.** Every tier change — up or down — must cite a positive signal originating from a principal other than the agent whose tier is changing, and the evaluator records which principal and which signal it counted. A tier change that cannot name an external principal does not happen; it fails closed. This one rule exists because three separate holes were found in the review of this document (#346, #347, #349), and all three were the same error: **a counter over absences read as evidence of a property.** Merges an agent produced itself, the absence of a revert nobody was looking to file, and a revert with no named reverter were each individually reasonable counters — and each one let an agent move a tier, its own or a peer's, on evidence it manufactured or on observation that never happened. Concretely: self-merged T1 work does not credit toward promotion, an unreviewed and untested merge does not credit, and a revert demotes its author only when the reverting principal is not itself an agent whose allowlist overlaps the reverted paths.
+
 This is the part that serves throughput. A capable agent reaches T2 in its allowlisted paths and then works unattended; a new or newly-scoped agent starts at T0 and earns its way up without a human deciding when. The operator tunes N and the allowlist, not each action.
 
 **What never promotes.** Some acts are excluded from every tier, permanently, because they are not reversible and no track record makes them so:
@@ -117,9 +119,9 @@ This is the part that serves throughput. A capable agent reaches T2 in its allow
 - merging to a default branch outside an explicit T2 path allowlist
 - secret creation, rotation, or reading beyond the scoped token the executor was handed
 - publishing a package, deploying to production, or running a migration against a production database
-- granting or widening any capability — including its own
+- granting, widening, or **narrowing** any capability — its own or another agent's
 
-That last one is the load-bearing exclusion. An agent that can widen its own grant has every grant.
+That last one is the load-bearing exclusion, and it is deliberately symmetric. An agent that can widen its own grant has every grant — and an agent that can narrow a peer's grant holds a veto over every peer, which at T2 is one revert commit away unless excluded (#347). Capability changes move through the tier evaluator under the external-provenance rule above, or not at all.
 
 ### D5 — Every autonomous act is attributable, from the spoken line to the commit
 
@@ -133,13 +135,13 @@ Co-Authored-By: <agent display name> <agent@kax.ninja-portal.com>
 
 and the commitment record retains the **line of conversation that caused it** — speaker, text, room, timestamp. Provenance therefore runs unbroken from something said in a cafe to a diff on a branch.
 
-Actions are written to an append-only record with the hash-chained, idempotent-on-id shape the credit ledger already uses (`lib/ledger-core.ts`), for the same reason: an audit trail that can be edited is not one. `commitment id` is the idempotency key, so a retried executor cannot double-act.
+Actions are written to an append-only record with the hash-chained, idempotent-on-id shape the credit ledger already uses (`lib/ledger-core.ts`), for the same reason: an audit trail that can be edited is not one. `commitment id` is the idempotency key, so a retried executor cannot double-act. The record is **write-ahead**: it is appended before the act, not after, because the idempotency argument only holds in that order — written after, a crash between push and record yields an acted-but-unrecorded action, which is the silent failure D8 exists to forbid.
 
 This is what makes generous grants safe to give. A bad outcome resolves to *which agent, under which grant, because of which sentence* — so the fix is a narrowed scope, not a retreat from autonomy.
 
 ### D6 — Revocation and one kill switch
 
-Revocation already works at action granularity (`actor.ts:82-83`). The executor must check it **between stages**, not once at the start: a long `write-code` action that began legitimately must not keep pushing after the bot's verification is withdrawn mid-run.
+Revocation already works at action granularity (`actor.ts:82-83`). The executor must check it **between stages**, not once at the start: a long `write-code` action that began legitimately must not keep pushing after the bot's verification is withdrawn mid-run. Because `run` alone spans clone, edit, test, and push, "between stages" is additionally bounded by wall clock: **no more than 60 seconds may pass between revocation checks during any stage**, measured so that the bound is testable rather than aspirational.
 
 Separately, one operator flag halts all autonomous execution fleet-wide, immediately, without revoking identities or evicting residents. Agents keep standing and keep talking; they simply stop acting, and say so when asked. A kill switch that also destroys presence is one nobody dares use.
 
