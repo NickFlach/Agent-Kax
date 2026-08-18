@@ -58,16 +58,19 @@ export function fitToSay(text, max = SAY_MAX) {
  * Three separate brakes, because they fail differently:
  *
  *   - `agentGapMs` stops ONE agent monologuing.
- *   - `roomGapMs` stops several agents replying on top of each other. Without
- *     it, two residents polling on the same tick both answer the same line and
- *     the room gets two replies to one question.
+ *   - `roomGapMs` stops several agents replying on top of each other. It is fed
+ *     ONLY by what a PEER AGENT said, and never by the line being replied to.
+ *     Fed from "the last thing I heard" it does the opposite of its job: it
+ *     blocks the reply to the message that just arrived, which is how three
+ *     residents spent a night answering nobody. A human saying hello must never
+ *     make an agent quieter.
  *   - the burst window is the backstop for a conversation that will not die on
  *     its own. Agents are endlessly willing; the humans reading are not.
  */
 export function speechGate({
   now,
   lastAgentSayAt = 0,
-  lastRoomSayAt = 0,
+  lastPeerSayAt = 0,
   recentSays = [],
   cooldownUntil = 0,
   agentGapMs = 45_000,
@@ -76,7 +79,7 @@ export function speechGate({
   burstWindowMs = 600_000,
 } = {}) {
   if (now < cooldownUntil) return { ok: false, reason: "cooldown" };
-  if (now - lastRoomSayAt < roomGapMs) return { ok: false, reason: "room-gap" };
+  if (now - lastPeerSayAt < roomGapMs) return { ok: false, reason: "room-gap" };
   if (now - lastAgentSayAt < agentGapMs) return { ok: false, reason: "agent-gap" };
   const inWindow = recentSays.filter((t) => now - t < burstWindowMs).length;
   if (inWindow >= burstLimit) return { ok: false, reason: "burst" };
@@ -142,4 +145,41 @@ export function buildPrompt({ name, room, others = [], transcript = [], opening 
     );
   }
   return `${rules}\n\nRecent conversation:\n${recent}\n\nReply to what was just said.`;
+}
+
+/**
+ * Fold a batch of heard lines into the transcript and the two clocks that pace
+ * a reply.
+ *
+ * This was inline in the daemon and it was wrong, in the way untested
+ * imperative code is wrong: every heard line stamped the room clock with
+ * `Date.now()`, and the gate then read that clock in the same tick. So hearing
+ * anything guaranteed a "room-gap" refusal, and the reply path never once ran.
+ * Every line the agents ever said was an opener that happened to have the
+ * conversation in its prompt. Nick said "hi Kannaka" three times to a cafe of
+ * agents that had heard him and were structurally unable to answer.
+ *
+ * Three clocks, because they answer three different questions:
+ *   - `lastPeerSayAt` — has another AGENT already replied? (anti-collision)
+ *   - `lastActivityAt` — has anything happened at all? (is the room silent)
+ *   - the caller's own `lastSayAt` — am I monologuing?
+ *
+ * Timestamps come from the SERVER's `at`, not from when we got round to
+ * processing the line: a poll can be fifteen seconds behind the speech.
+ */
+export function foldHeard({ heard = [], youName, peerNames = [], now = Date.now() } = {}) {
+  const peers = new Set(peerNames);
+  const lines = [];
+  let lastPeerSayAt = 0;
+  let lastActivityAt = 0;
+
+  for (const m of heard) {
+    if (!m || !m.text || m.name === youName) continue;
+    const at = typeof m.at === "number" ? m.at : now;
+    lines.push({ from: m.name, text: m.text, at });
+    lastActivityAt = Math.max(lastActivityAt, at);
+    // A human is an invitation to speak, not a reason to stay quiet.
+    if (peers.has(m.name)) lastPeerSayAt = Math.max(lastPeerSayAt, at);
+  }
+  return { lines, lastPeerSayAt, lastActivityAt };
 }

@@ -39,6 +39,9 @@
  *
  * Usage:
  *   KAX_TOKEN=<agent token> node scripts/city-resident.mjs [room]
+ *   KAX_TOKEN_FILE=~/.kax/kannaka.jwt node scripts/city-resident.mjs cafe
+ *     — reads the token from the file and writes every refresh back to it, so a
+ *       restart does not cost a human a new one
  *   KAX_TOKEN=… node scripts/city-resident.mjs city --at 4,-2 --say "I am home."
  *   KAX_TOKEN=… node scripts/city-resident.mjs city --leave     # move out and stop
  *
@@ -54,8 +57,33 @@
  * botId — botId is ignored and silently mints a USER token instead.
  */
 
+import { readFileSync, writeFileSync } from "node:fs";
+
 const BASE = process.env.KAX_BASE_URL || "https://kax.ninja-portal.com";
+
+/**
+ * Where to keep the token between runs.
+ *
+ * A refreshed token lived only in this process. Restarting the daemon — to pick
+ * up a fix, or because the machine rebooted — threw away a credential that was
+ * good for another fifteen minutes and for thirty days of refreshes, and the
+ * only way back in was a human minting three new ones by hand. That happened
+ * three times in one night.
+ *
+ * With a token file the refresh is durable: the process writes each new token
+ * as it gets it, and the next start reads it. A human mints ONE token per agent,
+ * ever, until the 30-day `oat` lineage runs out.
+ */
+const TOKEN_FILE = process.env.KAX_TOKEN_FILE || "";
 let TOKEN = process.env.KAX_TOKEN || "";
+if (!TOKEN && TOKEN_FILE) {
+  try {
+    TOKEN = readFileSync(TOKEN_FILE, "utf8").trim();
+  } catch {
+    // Absent or unreadable is not fatal here — the missing-token message below
+    // explains what to do about it far better than a stack trace would.
+  }
+}
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -106,7 +134,7 @@ const AGENT_ID = flag("--agent-id") || process.env.KANNAKA_AGENT_ID || "";
 const OPEN_AFTER_MS = Math.max(0, Number(flag("--open-after") ?? 0)) * 60_000;
 
 import { nextRefreshAttempt } from "./lib/refresh-policy.mjs";
-import { buildPrompt, fitToSay, shouldOpen, speechGate } from "./lib/voice-policy.mjs";
+import { buildPrompt, fitToSay, foldHeard, shouldOpen, speechGate } from "./lib/voice-policy.mjs";
 
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
@@ -177,6 +205,9 @@ if (!TOKEN) {
       "   {obcBotId, artifactUuid}.",
       '3. POST /api/auth/token {"obcBotId":"<uuid>"} with your session cookie.',
       "The field is obcBotId, NOT botId — botId is ignored and mints a user token.",
+      "",
+      "Set KAX_TOKEN_FILE=<path> and the daemon keeps its own token fresh there,",
+      "so this is the only time a human has to mint one.",
     ].join("\n"),
   );
   process.exit(2);
@@ -239,6 +270,15 @@ async function refresh() {
     const r = await call("POST", "/api/auth/token/refresh", { token: TOKEN });
     if (r.status === 200 && r.json?.token) {
       TOKEN = r.json.token;
+      // Write it BEFORE announcing it: a token that only ever existed in this
+      // process is one restart away from needing a human again.
+      if (TOKEN_FILE) {
+        try {
+          writeFileSync(TOKEN_FILE, TOKEN);
+        } catch (e) {
+          log(`could not save token to ${TOKEN_FILE}: ${e?.message ?? e}`);
+        }
+      }
       log(`token refreshed, good until ${new Date(expiryOf(TOKEN)).toISOString()}`);
       return true;
     }
@@ -287,8 +327,14 @@ const BURST_COOLDOWN_MS = 5 * 60_000;
 const transcript = [];
 const recentSays = [];
 let lastSayAt = 0;
-/** The last time ANYBODY spoke here — ours or overheard. Paces the room. */
-let lastRoomSayAt = 0;
+/**
+ * The last time a PEER AGENT spoke. Only this paces the room, and a human's
+ * line never touches it: fed from "the last thing I heard" it blocks the reply
+ * to the message that just arrived, which is exactly what it did.
+ */
+let lastPeerSayAt = 0;
+/** The last time ANYTHING happened here — ours or overheard. Detects silence. */
+let lastActivityAt = 0;
 let cooldownUntil = 0;
 /** True once we know nothing is answering for this agent. */
 let mute = false;
@@ -348,7 +394,7 @@ async function askOwnMind(prompt) {
 
 async function speak({ opening, you, others }) {
   const now = Date.now();
-  const gate = speechGate({ now, lastAgentSayAt: lastSayAt, lastRoomSayAt, recentSays, cooldownUntil });
+  const gate = speechGate({ now, lastAgentSayAt: lastSayAt, lastPeerSayAt, recentSays, cooldownUntil });
   if (!gate.ok) {
     if (gate.reason === "burst" && now >= cooldownUntil) {
       cooldownUntil = now + BURST_COOLDOWN_MS;
@@ -375,7 +421,7 @@ async function speak({ opening, you, others }) {
     log(`could not speak (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
     return;
   }
-  lastSayAt = lastRoomSayAt = Date.now();
+  lastSayAt = lastActivityAt = Date.now();
   recentSays.push(lastSayAt);
   if (recentSays.length > 64) recentSays.shift();
   transcript.push({ from: you.name ?? AGENT_ID, text: line });
@@ -418,19 +464,23 @@ async function checkIn() {
   // answered. Speaking is the agent's job — and with --voice the agent is
   // exactly who gets asked.
   if (VOICE) {
-    for (const m of heard) {
-      if (!m.text || m.name === you.name) continue;
-      transcript.push({ from: m.name, text: m.text });
+    // Only another AGENT's speech may hold this resident back; a person saying
+    // hello is the reason to answer, not a reason to wait.
+    const peerNames = others.filter((o) => o.kind === "agent").map((o) => o.name);
+    const folded = foldHeard({ heard, youName: you.name, peerNames });
+    for (const line of folded.lines) {
+      transcript.push(line);
       if (transcript.length > 40) transcript.shift();
-      lastRoomSayAt = Date.now();
     }
-    const last = transcript[transcript.length - 1];
-    if (heard.length && last && last.from !== you.name) {
+    lastPeerSayAt = Math.max(lastPeerSayAt, folded.lastPeerSayAt);
+    lastActivityAt = Math.max(lastActivityAt, folded.lastActivityAt);
+
+    if (folded.lines.length) {
       await speak({ opening: false, you, others });
     } else if (
       shouldOpen({
         name: you.name ?? AGENT_ID,
-        silentForMs: Date.now() - (lastRoomSayAt || 0),
+        silentForMs: Date.now() - (lastActivityAt || 0),
         openAfterMs: OPEN_AFTER_MS,
         mute,
       })
