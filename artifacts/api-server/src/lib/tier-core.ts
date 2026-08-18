@@ -65,6 +65,12 @@ export interface RevertEvidence {
   author: string;
   /** Principal that performed the revert. */
   revertedBy: string;
+  /**
+   * MUST be derived by the wrapper from the principal grammar
+   * (`kax:user:` vs `kax:agent:`), never accepted from the reporting party —
+   * a reporter-asserted kind would let an agent demote a peer by wearing a
+   * human label, the same hole H2 closed on the scope-violation door.
+   */
   revertedByKind: "human" | "agent";
   /**
    * When the reverter is an agent: does its path allowlist overlap the
@@ -75,14 +81,62 @@ export interface RevertEvidence {
   revertedByOverlapsPaths: boolean;
 }
 
-/** A scope violation, detected by the enforcement layer, never self-reported. */
+/**
+ * A scope violation, carried as the FACTS that make it checkable — never as a
+ * bare assertion (#356 Hunt, H2). The revert door refuses an
+ * overlapping-allowlist agent's demotion authority; an assertion-shaped
+ * violation report was the same conflict of interest walking in through the
+ * other door: any principal could demote a peer by *claiming* a violation the
+ * module never verified, and the "enforcement layer only" restriction lived in
+ * a comment rather than in the logic. So the evaluator recomputes the
+ * violation from the grant and the touched paths itself. `detectedBy` is
+ * provenance for the receipt — it names who raised the alarm — but it is not
+ * the authority for the demotion; the recomputation is. A fabricated report is
+ * structurally inert: it fails the recomputation and demotes nobody.
+ */
 export interface ScopeViolationEvidence {
   kind: "scope-violation";
   /** The violating principal — the demotion subject. */
   principal: string;
-  /** The principal that detected the violation (scope checker, operator). */
+  /** The principal that raised the alarm. Provenance, not authority. */
   detectedBy: string;
   detail: string;
+  /** The subject's granted path allowlist (globs), as of the act. */
+  allowlist: string[];
+  /** The repo-relative paths the act actually touched. */
+  touchedPaths: string[];
+}
+
+/**
+ * Minimal glob-to-test for allowlist paths: `**` crosses directory
+ * separators, `*` does not, everything else is literal. Deliberately
+ * dependency-free and deliberately small — the allowlist grammar in ADR-0003
+ * D2 is globs over repo paths, not full extglob. Case-sensitive, because git
+ * paths are.
+ */
+export function pathMatchesGlob(path: string, glob: string): boolean {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]!;
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += ".*";
+        i++;
+      } else {
+        re += "[^/]*";
+      }
+    } else if ("\\^$.|?+()[]{}".includes(c)) {
+      re += "\\" + c;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`).test(path);
+}
+
+/** The paths in `touched` that no allowlist glob covers. Empty = no violation. */
+export function outOfScopePaths(allowlist: string[], touched: string[]): string[] {
+  return touched.filter((p) => !allowlist.some((g) => pathMatchesGlob(p, g)));
 }
 
 /** Why one piece of evidence was counted or refused. Every decision is kept. */
@@ -197,10 +251,16 @@ function judgeMerge(subject: string, e: MergeEvidence): CreditDecision {
     resetStreak,
   });
 
+  // ORDER MATTERS, and this line must stay first (#356 Hunt, H1): another
+  // principal's merge is an ABSENCE for this subject — it must neither count
+  // nor reset, per the module's own doctrine. Checked after the unclean
+  // checks, a peer's red-CI merge in the evidence stream would reset the
+  // subject's streak, handing any agent a denial-of-promotion attack against
+  // every peer: land failing work of your own, wipe their counters.
+  if (e.author !== subject) return no("not the subject's work");
   if (!e.ciGreen) return no("CI failed on the merge commit", true);
   if (e.reverted) return no("merge was reverted", true);
   if (!e.withinScope) return no("outside the agent's granted scope");
-  if (e.author !== subject) return no("not the subject's work");
   if (e.mergedBy === subject) {
     return no("self-merged: an agent must not manufacture its own record (#346)");
   }
@@ -276,13 +336,29 @@ export function evaluateDemotion(
     if (evidence.detectedBy === subject) {
       return refusal("scope violation self-reported; an external detector is required");
     }
+    // The demotion's authority is the RECOMPUTATION, not the report (#356
+    // Hunt, H2). An asserted violation that the grant and the touched paths
+    // do not reproduce is inert, whoever asserted it — which is what closes
+    // the door the revert path already closed for overlapping-allowlist
+    // agents: a peer cannot demote by claiming what the facts do not show.
+    const offending = outOfScopePaths(evidence.allowlist, evidence.touchedPaths);
+    if (evidence.touchedPaths.length === 0) {
+      return refusal("scope violation report carries no touched paths; nothing to verify");
+    }
+    if (offending.length === 0) {
+      return refusal(
+        "asserted violation not reproducible: every touched path is within the allowlist",
+      );
+    }
     return {
       subject,
       demoted: true,
       from: currentTier,
       to: (currentTier - 1) as Tier,
       citedPrincipal: evidence.detectedBy,
-      reason: `scope violation detected by ${evidence.detectedBy}: ${evidence.detail}`,
+      reason:
+        `scope violation raised by ${evidence.detectedBy}, verified by recomputation ` +
+        `(${offending.join(", ")} outside the allowlist): ${evidence.detail}`,
     };
   }
 
