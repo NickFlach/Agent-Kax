@@ -134,7 +134,14 @@ const AGENT_ID = flag("--agent-id") || process.env.KANNAKA_AGENT_ID || "";
 const OPEN_AFTER_MS = Math.max(0, Number(flag("--open-after") ?? 0)) * 60_000;
 
 import { nextRefreshAttempt } from "./lib/refresh-policy.mjs";
-import { buildPrompt, fitToSay, foldHeard, shouldOpen, speechGate } from "./lib/voice-policy.mjs";
+import {
+  buildPrompt,
+  fitToSay,
+  foldHeard,
+  replyStillOwed,
+  shouldOpen,
+  speechGate,
+} from "./lib/voice-policy.mjs";
 
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
@@ -338,6 +345,14 @@ let lastActivityAt = 0;
 let cooldownUntil = 0;
 /** True once we know nothing is answering for this agent. */
 let mute = false;
+/**
+ * Somebody spoke to this room and has not been answered yet.
+ *
+ * `look` DRAINS, so a line refused by the gate at the instant it arrived is
+ * gone. The obligation has to outlive the refusal or a 45-second gap turns
+ * into permanent silence towards a person standing right there.
+ */
+let owedReply = false;
 let nats = null;
 let codec = null;
 
@@ -400,7 +415,7 @@ async function speak({ opening, you, others }) {
       cooldownUntil = now + BURST_COOLDOWN_MS;
       log(`talked a lot in a short while — quiet for ${BURST_COOLDOWN_MS / 60_000} minutes`);
     }
-    return;
+    return false;
   }
 
   const text = await askOwnMind(
@@ -412,14 +427,14 @@ async function speak({ opening, you, others }) {
       opening,
     }),
   );
-  if (!text) return;
+  if (!text) return false;
   const line = fitToSay(text);
-  if (!line) return;
+  if (!line) return false;
 
   const r = await call("POST", "/api/city/say", { text: line });
   if (r.status !== 201 && r.status !== 200) {
     log(`could not speak (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
-    return;
+    return false;
   }
   lastSayAt = lastActivityAt = Date.now();
   recentSays.push(lastSayAt);
@@ -427,6 +442,7 @@ async function speak({ opening, you, others }) {
   transcript.push({ from: you.name ?? AGENT_ID, text: line });
   if (transcript.length > 40) transcript.shift();
   log(`said: ${line}`);
+  return true;
 }
 
 /** One check-in: proves somebody is home, and reports what the resident heard. */
@@ -475,8 +491,13 @@ async function checkIn() {
     lastPeerSayAt = Math.max(lastPeerSayAt, folded.lastPeerSayAt);
     lastActivityAt = Math.max(lastActivityAt, folded.lastActivityAt);
 
-    if (folded.lines.length) {
-      await speak({ opening: false, you, others });
+    if (folded.lines.length) owedReply = true;
+    // Not `else if`: the reply may have been refused on the tick it arrived,
+    // and the message is already drained. Keep the obligation and retry.
+    owedReply = replyStillOwed({ owed: owedReply, lastActivityAt });
+
+    if (owedReply) {
+      if (await speak({ opening: false, you, others })) owedReply = false;
     } else if (
       shouldOpen({
         name: you.name ?? AGENT_ID,

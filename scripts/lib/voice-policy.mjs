@@ -183,3 +183,28 @@ export function foldHeard({ heard = [], youName, peerNames = [], now = Date.now(
   }
   return { lines, lastPeerSayAt, lastActivityAt };
 }
+
+/**
+ * Is a reply still owed?
+ *
+ * `speechGate` refusing is TEMPORARY — a 45-second gap, a 12-second room gap —
+ * but `/city/look` DRAINS. So a line refused at the instant it arrived is gone
+ * from the inbox and never comes back, and the refusal becomes permanent
+ * silence. That is not a hypothetical:
+ *
+ *   10:05:23  Kannaka said: (an opening line)
+ *   10:05:38  Kannaka heard Nick: Hi there!
+ *   (nothing, ever)
+ *
+ * She had spoken fifteen seconds earlier, the agent gap refused, and Nick's
+ * hello was already drained. He was standing in front of an agent that had
+ * heard him, wanted to answer, and had thrown the question away.
+ *
+ * So the obligation outlives the refusal: once somebody speaks to this room,
+ * a reply is OWED until it is given. It lapses only if the room has gone quiet
+ * long enough that answering would be answering a ghost.
+ */
+export function replyStillOwed({ owed, lastActivityAt = 0, now = Date.now(), windowMs = 180_000 }) {
+  if (!owed) return false;
+  return now - lastActivityAt < windowMs;
+}
