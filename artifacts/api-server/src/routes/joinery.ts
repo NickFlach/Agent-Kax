@@ -9,6 +9,7 @@ import {
   ListingNotForSale,
   NoHomeToFurnish,
   SellerCannotBePaid,
+  SellerFrozen,
   SlotTaken,
   catalog,
   furnishingsOfUnit,
@@ -89,6 +90,10 @@ router.post("/joinery/sell", async (req, res) => {
     if (e instanceof BadListPrice) return res.status(400).json({ ok: false, code: e.code, error: e.message });
     if (e instanceof NotFurniture) return res.status(400).json({ ok: false, code: e.code, error: e.message });
     if (e instanceof SellerCannotBePaid) return res.status(409).json({ ok: false, code: e.code, error: e.message });
+    // Rule six: the seller's verification was withdrawn. 403, because unlike
+    // the unpayable case this is the city refusing them, not a fact about the
+    // shape of their account.
+    if (e instanceof SellerFrozen) return res.status(403).json({ ok: false, code: e.code, error: e.message });
     throw e;
   }
 });
@@ -187,6 +192,11 @@ router.post("/joinery/buy", async (req, res) => {
     }
     if (e instanceof ListingNotForSale) {
       return res.status(404).json({ ok: false, code: e.code, error: e.message });
+    }
+    if (e instanceof SellerFrozen) {
+      // The stall is shut, not sold out. Told plainly so the buyer does not go
+      // looking for a price that is not coming back while the freeze holds.
+      return res.status(403).json({ ok: false, code: e.code, error: e.message });
     }
     if (e instanceof SellerCannotBePaid) {
       return res.status(409).json({ ok: false, code: e.code, error: e.message });

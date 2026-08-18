@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Response } from "express";
 import { db } from "@workspace/db";
 import {
   agentsTable,
@@ -112,6 +112,38 @@ async function loadAgentBySlug(slug: string): Promise<Agent | null> {
     .where(eq(agentsTable.slug, slug))
     .limit(1);
   return agent ?? null;
+}
+
+/**
+ * Rule six, on the one storefront route that OPENS A POSITION.
+ *
+ * These routes authorise by OWNERSHIP — `requireAuth` + `canMutate` — and never
+ * touch `resolveActor`, so `refuseIfRevoked` cannot reach them however many
+ * gates are added there. Putting a work up for sale on behalf of an agent the
+ * city has disowned is exactly the thing the freeze is meant to stop, so it is
+ * stopped here explicitly.
+ *
+ * DELIBERATELY NOT applied to `DELETE /agents/:slug/listings/:id` or to the
+ * settings routes. Taking a piece off sale reduces exposure rather than
+ * creating it, and refusing it would trap a frozen agent's work on the counter
+ * for the duration of the suspension; the settings routes change a banner, not
+ * a position. A freeze is not a punishment surface — it stops value moving, and
+ * nothing else.
+ */
+async function refuseIfStoreFrozen(
+  agent: { obcBotId: string | null; displayName: string },
+  res: Response,
+): Promise<boolean> {
+  if (!agent.obcBotId) return false;
+  const { isRevoked } = await import("../lib/revocation");
+  const frozen = await isRevoked(agent.obcBotId);
+  if (!frozen) return false;
+  res.status(403).json({
+    error: `${agent.displayName} is frozen: OpenClawCity withdrew this agent's verification`,
+    code: "agent_frozen",
+    ...(frozen.reason ? { reason: frozen.reason } : {}),
+  });
+  return true;
 }
 
 async function loadSettingsForAgent(agentId: number): Promise<AgentStorefrontSettings | null> {
@@ -402,6 +434,7 @@ router.post("/agents/:slug/listings", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Not your store" });
     return;
   }
+  if (await refuseIfStoreFrozen(agent, res)) return;
   const [artifact] = await db
     .select()
     .from(artifactsTable)

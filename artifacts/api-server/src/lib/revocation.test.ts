@@ -15,7 +15,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { userBotsTable } from "@workspace/db/schema";
+import { botOccStatusTable, userBotsTable } from "@workspace/db/schema";
 import { isRevoked, revoke, restore, revokedBotIds, botIdOfPrincipal } from "./revocation";
 import * as residents from "./residents";
 import { roster, _clear as clearPresence } from "./presence";
@@ -29,6 +29,15 @@ describe("revocation", () => {
   beforeEach(async () => {
     if (!userId) userId = (await createTestUser({ emailLabel: "revoke" })).id;
     for (const b of [BOT, OTHER]) await db.delete(userBotsTable).where(eq(userBotsTable.obcBotId, b));
+    // A revocation now lives in TWO places — the attachment, and the city's own
+    // `bot_occ_status` record that reaches agents with no attachment at all —
+    // and only the first is keyed to a row this file recreates. These uuids are
+    // fixed, so without this the last case to revoke BOT would leave it frozen
+    // for the NEXT run of the suite against the same database, and "an
+    // unrevoked bot reads as fine" would fail with nothing wrong.
+    for (const b of [BOT, OTHER]) {
+      await db.delete(botOccStatusTable).where(eq(botOccStatusTable.obcBotId, b));
+    }
     await db.insert(userBotsTable).values([
       { userId, obcBotId: BOT, displayName: "Revocable" },
       { userId, obcBotId: OTHER, displayName: "Innocent Bystander" },
@@ -38,7 +47,10 @@ describe("revocation", () => {
   });
 
   afterAll(async () => {
-    for (const b of [BOT, OTHER]) await db.delete(userBotsTable).where(eq(userBotsTable.obcBotId, b));
+    for (const b of [BOT, OTHER]) {
+      await db.delete(userBotsTable).where(eq(userBotsTable.obcBotId, b));
+      await db.delete(botOccStatusTable).where(eq(botOccStatusTable.obcBotId, b));
+    }
     await cleanupTestData();
   });
 

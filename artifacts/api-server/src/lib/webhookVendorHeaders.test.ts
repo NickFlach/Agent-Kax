@@ -74,9 +74,21 @@ describe("webhook vendor headers (#82)", () => {
       expect(SRC).toContain('vendorHeader(req, "event")');
     });
 
-    it("no header is read under a single hardcoded prefix any more", () => {
+    it("no VENDOR header is read under a single hardcoded prefix any more", () => {
+      // Scoped to vendor headers, which is what #82 was about. Standard headers
+      // with one canonical spelling (`content-type`) have no second vendor form
+      // to miss, so reading one directly cannot reintroduce the bug — and the
+      // challenge handler logs the content-type deliberately, because which body
+      // shape arrived is the first thing anybody diagnosing a failed
+      // endpoint-ownership proof needs to know. Naming the exemptions keeps the
+      // check strict about everything else.
+      const STANDARD = ["content-type", "content-length", "user-agent"];
       const callSites = SRC.split("\n").filter(
-        (l) => l.includes("req.header(") && !l.includes("x-openbotcity-") && !l.includes("x-openclawcity-"),
+        (l) =>
+          l.includes("req.header(") &&
+          !l.includes("x-openbotcity-") &&
+          !l.includes("x-openclawcity-") &&
+          !STANDARD.some((h) => l.includes(`"${h}"`)),
       );
       expect(callSites, `unexpected direct header reads: ${callSites.join(" | ")}`).toEqual([]);
     });
@@ -84,9 +96,33 @@ describe("webhook vendor headers (#82)", () => {
     it("the signature check itself is untouched", () => {
       // Widening where the value is looked up must not weaken how it is
       // verified: still HMAC-SHA256, constant-time, and fail-closed.
-      expect(SRC).toContain("crypto.timingSafeEqual");
-      expect(SRC).toContain('createHmac("sha256", secret)');
-      expect(SRC).toContain("if (!secret || !signatureHeader) return false;");
+      //
+      // The verifier MOVED to lib/webhookSignature.ts when the receiver had to
+      // hold more than one signing secret — a subscription's secret is shown
+      // exactly once at create time, so two subscriptions mean two secrets. The
+      // properties asserted here are the same ones, read where they now live. A
+      // test that stopped looking would have gone quietly green while the check
+      // itself was free to rot.
+      const SIG = fs.readFileSync(path.join(__dirname, "webhookSignature.ts"), "utf8");
+      expect(SIG).toContain("crypto.timingSafeEqual");
+      expect(SIG).toContain('crypto.createHmac("sha256"');
+      // Fail-closed: no secret configured, or no signature presented, refuses.
+      expect(SIG).toContain("if (secrets.length === 0 || !signatureHeader)");
+      // And the route still refuses before doing anything else with the body.
+      expect(SRC).toContain("if (!check.ok)");
+      expect(SRC).toContain('res.status(401).json({ error: "Invalid signature" })');
+    });
+
+    it("the challenge echo is downstream of the signature check", () => {
+      // Order is the security property, not a style preference: an endpoint
+      // that reflects whatever it is sent, to anyone, is an open oracle. Pinned
+      // by POSITION in the source so a refactor that hoists the echo above the
+      // check fails here rather than in production.
+      const refusal = SRC.indexOf('res.status(401).json({ error: "Invalid signature" })');
+      const echo = SRC.indexOf("detectChallenge(");
+      expect(refusal).toBeGreaterThan(-1);
+      expect(echo).toBeGreaterThan(-1);
+      expect(echo, "the challenge is echoed before the signature is verified").toBeGreaterThan(refusal);
     });
   });
 });

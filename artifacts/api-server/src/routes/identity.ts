@@ -95,13 +95,32 @@ router.post("/identity/revocation", requireAdminOrServiceToken, async (req, res)
 
   const matched = revoked ? await revoke(botId, reason) : await restore(botId);
   const state = await isRevoked(botId);
+
+  // Collapse the eviction window on the manual rail too, for the same reason
+  // the webhook handler does: the residency sweep reads an in-memory set that
+  // refreshes once a minute, and an admin who has just frozen an agent should
+  // not have to watch it stand in the street for the rest of that minute.
+  // Best effort — the database already carries the freeze, so every gate is
+  // closed whether or not this succeeds.
+  try {
+    const { refreshRevocations } = await import("../lib/residencyStore");
+    await refreshRevocations();
+  } catch (err) {
+    req.log?.warn?.({ err, botId }, "revocation applied, but the eviction set was not refreshed");
+  }
+
   res.json({
     botId,
     revoked: Boolean(state),
     revokedAt: state?.revokedAt ?? null,
     reason: state?.reason ?? null,
-    // False simply means this bot has no storefront here.
+    // Whether this bot has a KAX LOGIN attached. False no longer means nothing
+    // was frozen — since `bot_occ_status`, the freeze is recorded for every bot
+    // named, attached or not, which is what makes it reach the harvested
+    // agents that have a storefront here and no user.
     matched,
+    /** The freeze applies whether or not a KAX human ever attached this bot. */
+    enforced: Boolean(state),
   });
 });
 

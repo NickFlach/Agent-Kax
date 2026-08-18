@@ -1,23 +1,9 @@
 import { Router, type IRouter, type Request, type Response, raw } from "express";
-import crypto from "node:crypto";
 import { WebhookEnvelope } from "@workspace/api-zod";
 import { recordWebhookReceived } from "../lib/partnerClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
-
-const router: IRouter = Router();
-
-function verifySignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
-  const secret = process.env["OBC_WEBHOOK_SECRET"];
-  if (!secret || !signatureHeader) return false;
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  const provided = signatureHeader.replace(/^sha256=/, "").trim();
-  if (provided.length !== expected.length) return false;
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
-  } catch {
-    return false;
-  }
-}
+import { verifyWebhookSignature } from "../lib/webhookSignature";
+import { detectChallenge } from "../lib/webhookChallenge";
 
 /** Just enough of express's Request to look a header up. */
 export interface HeaderReader {
@@ -45,16 +31,174 @@ export function vendorHeader(req: HeaderReader, suffix: string): string | undefi
   return req.header(`x-openbotcity-${suffix}`) ?? req.header(`x-openclawcity-${suffix}`);
 }
 
+/** Did these bytes parse as JSON? For the signature-failure log only. */
+function isJsonBody(rawBody: Buffer): boolean {
+  try {
+    JSON.parse(rawBody.toString("utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The payload a handler should read, given a parsed delivery.
+ *
+ * `data` / `payload` / `artifact` are the wrappers we have seen. A delivery
+ * with NONE of them is not empty — it is FLAT, with the agent uuid sitting at
+ * the top level beside the event type, and that is the shape most likely to
+ * differ from our guess. Passing `undefined` on for it fails in the worst
+ * possible way: `agentUuidOf(undefined)` returns null, the handler defers, the
+ * route answers 200 `deferred`, OCC records a delivered webhook and never
+ * retries, and because a deferral is deliberately not written to
+ * `processed_events` the next replay re-offers the same shape and defers again
+ * — forever. Worse, a later handled delivery advances `lastEventUuid` past it,
+ * so startup replay cannot reach back for it either. Silent, permanent, and
+ * indistinguishable from "nothing happened".
+ *
+ * So a flat delivery falls back to the whole envelope. `agentUuidOf` is built
+ * for exactly this: a liberal list of TOP-LEVEL field names.
+ *
+ * `id` is removed when it was consumed as the EVENT uuid, and only then.
+ * `agentUuidOf` reads `id` as a last-resort agent field, so leaving it would
+ * let a flat delivery carrying no agent field at all be read as an event about
+ * the agent named by its own delivery id — a freeze applied to a uuid that is
+ * not an agent, recorded as handled and therefore unrecoverable. When
+ * `event_uuid` is present the route never reads `id` as the event uuid, so
+ * `id` is free to mean the agent and is left alone.
+ */
+export function flatEnvelopePayload(parsed: unknown, usedIdAsEventUuid: boolean): unknown {
+  if (!usedIdAsEventUuid || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return parsed;
+  }
+  const { id: _id, ...rest } = parsed as Record<string, unknown>;
+  return rest;
+}
+
+const router: IRouter = Router();
+
 router.post(
   "/webhooks/openbotcity",
-  raw({ type: "application/json" }),
+  // Capture the raw bytes of EVERY delivery, whatever it claims to be — not
+  // just `application/json`.
+  //
+  // The endpoint-ownership challenge may arrive as a RAW STRING; Vincent named
+  // that shape explicitly. A sender posting a bare string is likely to label it
+  // `text/plain`, or to send no content-type at all. With the parser narrowed
+  // to `application/json`, express leaves `req.body` as `{}` for those, the raw
+  // bytes are gone, the HMAC cannot verify a body it never saw, and the
+  // challenge is refused 401 having never been read — the subscription then
+  // stays `pending` forever with nothing in the log to say why.
+  //
+  // `() => true` rather than `"*/*"` on purpose: the string form goes through
+  // type-is, which declines a request carrying NO content-type header at all,
+  // so that case would still have been lost. The predicate form has no such
+  // gap. The route parses the body itself and the app-level JSON parser already
+  // skips every /api/webhooks/ path, so widening the capture changes nothing
+  // else.
+  raw({ type: () => true }),
   async (req: Request, res: Response) => {
     const sig = vendorHeader(req, "signature");
     const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
 
-    if (!verifySignature(rawBody, sig)) {
-      req.log.warn({ sig: !!sig }, "Webhook signature verification failed");
+    const check = verifyWebhookSignature(rawBody, sig);
+    if (!check.ok) {
+      // We get ONE SHOT at the live test, and this is the branch it fails in.
+      // `{sig: true, secretsConfigured: 1}` says only "something was wrong",
+      // which is the same line for a wrong secret, a signature over a body we
+      // never saw, a base64 digest where hex was expected, and a header whose
+      // label we did not recognise. Each of those has a different fix and there
+      // may be no second delivery to tell them apart, so the SHAPE of what
+      // arrived is recorded.
+      //
+      // Never the secret, and never the signature itself. The length and the
+      // label before the first `=` are enough to separate every case above and
+      // are not signature material: a prefix is only logged when there IS a
+      // separator, so no digest bytes can leak through it.
+      const eq = sig ? sig.indexOf("=") : -1;
+      req.log.warn(
+        {
+          sig: !!sig,
+          secretsConfigured: check.candidates,
+          sigLength: sig ? sig.length : 0,
+          sigPrefix: eq >= 0 ? sig!.slice(0, eq + 1) : null,
+          bodyIsJson: isJsonBody(rawBody),
+          bodyBytes: rawBody.length,
+          contentType: req.header("content-type") ?? null,
+        },
+        "Webhook signature verification failed",
+      );
       res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+
+    // ── Endpoint-ownership challenge ────────────────────────────────────────
+    //
+    // A new subscription starts `pending` and receives nothing until we echo a
+    // challenge string back. It is handled HERE, on the subscription's own
+    // endpoint, because that is the URL the challenge is posted to — "we POST
+    // a signed challenge to your URL".
+    //
+    // AFTER the signature check, never before. An endpoint that echoes back
+    // whatever it is sent, to anyone, is an open oracle: it would let an
+    // unauthenticated caller use KAX to sign nothing but reflect arbitrary
+    // chosen text from our domain, and it would let anyone flip a subscription
+    // THEY created to active by pointing it at us. The HMAC is the only thing
+    // that makes an echo safe, so the echo lives downstream of it.
+    //
+    // The log line is the point of the whole block. We get one attempt at the
+    // live test and a field-name mismatch is the likeliest way to lose it, so
+    // the shape that actually arrived is recorded: which body form, which
+    // field name, which container. Never the challenge value itself and never
+    // a secret — only the SHAPE, which is what a diagnosis needs.
+    //
+    // The event-type header goes in with the body. It is a legitimate place for
+    // a delivery to name its type — it is the fourth fallback in the eventType
+    // chain below — so the discriminator has to be able to see it, or a flat
+    // event typed only in the header is classified with nothing to go on and
+    // echoed as a challenge instead of applied.
+    const challenge = detectChallenge(
+      rawBody,
+      vendorHeader(req, "challenge"),
+      vendorHeader(req, "event"),
+    );
+    if (challenge) {
+      req.log.info(
+        {
+          bodyShape: challenge.bodyShape,
+          field: challenge.field,
+          container: challenge.container,
+          length: challenge.challenge.length,
+          contentType: req.header("content-type") ?? null,
+          eventHeader: vendorHeader(req, "event") ?? null,
+          secretIndex: check.matchedIndex,
+        },
+        "partner endpoint-ownership challenge received — echoing it back",
+      );
+      // Echoed in the SHAPE IT ARRIVED IN. Vincent accepts "raw or as JSON",
+      // so either satisfies the verifier; mirroring is the choice that needs
+      // no guess about which one their checker tries first. The header carries
+      // it a third time, which costs nothing.
+      //
+      // The FIELD NAME is mirrored too. A challenge that arrived as
+      // `{"challenge_string": "..."}` was answered with the key `challenge`,
+      // which is a verifier reading its own field name and finding nothing —
+      // the same lost live test as a body-shape mismatch, one level down.
+      // `challenge` is sent alongside whenever the mirrored name differs, so
+      // both a mirroring verifier and one that only ever looks for `challenge`
+      // are satisfied by the same reply.
+      //
+      // A form-encoded challenge replies as raw text, not as `field=value`:
+      // form is not one of the two shapes Vincent named, and the bare value is.
+      res.setHeader("x-openbotcity-challenge", challenge.challenge);
+      if (challenge.bodyShape === "json-object") {
+        const field = challenge.field ?? "challenge";
+        const body: Record<string, string> = { [field]: challenge.challenge };
+        if (field !== "challenge") body["challenge"] = challenge.challenge;
+        res.status(200).json(body);
+      } else {
+        res.status(200).type("text/plain").send(challenge.challenge);
+      }
       return;
     }
 
@@ -84,8 +228,15 @@ router.post(
       envelope.type ||
       vendorHeader(req, "event") ||
       undefined;
-    const eventData =
+    const wrapped =
       (envelope.data as unknown) ?? (envelope.payload as unknown) ?? (envelope.artifact as unknown);
+    // No wrapper at all means the envelope IS the payload. `parsed`, not
+    // `envelope`: the zod object strips unknown keys, so the flat agent uuid
+    // this fallback exists to find is not on `envelope` any more.
+    const eventData =
+      wrapped !== undefined
+        ? wrapped
+        : flatEnvelopePayload(parsed, !envelope.event_uuid && !!envelope.id);
 
     if (!eventUuid || !eventType) {
       res.status(400).json({ error: "Missing event id or event type" });
