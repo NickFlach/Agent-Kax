@@ -129,7 +129,7 @@ export function shouldOpen({ name, silentForMs, openAfterMs, spreadMs = 90_000, 
  * keeps the borrowed name out of the city. Fixing it properly belongs in the
  * persona layer, not in a caller.
  */
-export function buildPrompt({ name, room, others = [], transcript = [], opening = false }) {
+export function buildPrompt({ name, room, others = [], transcript = [], opening = false, situation = null }) {
   const company = others.length ? `${others.join(" and ")} ${others.length > 1 ? "are" : "is"} here too.` : "";
   const recent = transcript.map((m) => `${m.from}: ${m.text}`).join("\n");
   const rules =
@@ -138,13 +138,18 @@ export function buildPrompt({ name, room, others = [], transcript = [], opening 
     `Speak as yourself, out loud, to the room. Ground what you say in what you actually ` +
     `remember. One or two sentences, UNDER ${SAY_MAX} characters, no quotation marks, no ` +
     `stage directions, no preamble — just the words you say.`;
+  // Something the agent has just DONE or DECIDED, which it would know and the
+  // transcript cannot show — it agreed to meet somebody, or it has just walked
+  // into the room to do so. Without this the agent arrives somewhere it chose
+  // to go and talks as though it were still where it was.
+  const now = situation ? "\n\nRight now: " + situation : "";
   if (opening) {
     return (
-      `${rules}\n\nThe room has gone quiet. Say something worth answering — raise something ` +
+      `${rules}${now}\n\nThe room has gone quiet. Say something worth answering — raise something ` +
       `you actually remember or are working on.\n\nRecent conversation:\n${recent || "(silence)"}`
     );
   }
-  return `${rules}\n\nRecent conversation:\n${recent}\n\nReply to what was just said.`;
+  return `${rules}${now}\n\nRecent conversation:\n${recent}\n\nReply to what was just said.`;
 }
 
 /**

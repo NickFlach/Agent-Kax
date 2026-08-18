@@ -142,6 +142,13 @@ import {
   shouldOpen,
   speechGate,
 } from "./lib/voice-policy.mjs";
+import {
+  acceptedFrom,
+  dueCommitment,
+  parseProposal,
+  pruneCommitments,
+  withCommitment,
+} from "./lib/commitments.mjs";
 
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
@@ -306,12 +313,21 @@ function log(msg) {
   console.log(`${new Date().toISOString().slice(11, 19)}  ${msg}`);
 }
 
-async function enter() {
-  const body = room ? { room } : {};
+/**
+ * Move in — or move ROOMS, when a promise says to be somewhere else.
+ *
+ * `currentRoom` matters beyond the call: if the residency lapses later, the
+ * resident must come back to where it agreed to be, not to the room it was
+ * started in. Walking to the arcade and then being quietly returned to the cafe
+ * by an idle timeout is indistinguishable, from the outside, from not going.
+ */
+async function enter(target = currentRoom) {
+  const body = target ? { room: target } : {};
   if (AT) { body.x = AT.x; body.z = AT.z; }
   const r = await call("POST", "/api/city/enter", body);
   if (r.status === 200) {
     const idleMin = Math.round((r.json.residencyExpiresAfterIdleMs ?? 0) / 60_000);
+    currentRoom = r.json.room ?? target ?? currentRoom;
     log(
       `moved in as ${r.json.you.name} — ${r.json.room} at (${r.json.at.x}, ${r.json.at.z})` +
         `${r.json.wokeAtHome ? " — woke at home" : ""}, lapses after ${idleMin}m idle`,
@@ -353,6 +369,14 @@ let mute = false;
  * into permanent silence towards a person standing right there.
  */
 let owedReply = false;
+/** Where this resident currently is, which is not always where it started. */
+let currentRoom = room;
+/** The city's own room list, so a proposal can only name a real place. */
+let cityRooms = [];
+/** Promises made and not yet kept. */
+let commitments = [];
+/** Something to tell the agent about its own situation on the next line. */
+let situation = null;
 let nats = null;
 let codec = null;
 
@@ -407,6 +431,58 @@ async function askOwnMind(prompt) {
   }
 }
 
+/**
+ * Somebody proposed going somewhere. Does this agent want to?
+ *
+ * The parser decided that an invitation exists; only the agent can decide
+ * whether it accepts one. So this is a narrow question to its own mind with a
+ * one-word answer, and anything short of a clear yes is a no — an agent that
+ * shrugs its way into a commitment will stand somebody up.
+ */
+async function considerProposal(p) {
+  const when =
+    p.at - Date.now() < 60_000
+      ? "now"
+      : `at ${new Date(p.at).toTimeString().slice(0, 5)}`;
+  const answer = await askOwnMind(
+    `${p.from} just said to you: "${p.text}"
+` +
+      `That is an invitation to be in the "${p.room}" room ${when}.
+` +
+      `Answer with ONE WORD ONLY: ACCEPT if you will go, DECLINE if you will not.`,
+  );
+  if (answer === null) return false; // no mind answering; do not promise
+  if (!acceptedFrom(answer)) {
+    log(`declined ${p.from}'s invitation to ${p.room} (${String(answer).trim().slice(0, 40)})`);
+    return false;
+  }
+  commitments = withCommitment(commitments, p);
+  log(`agreed to meet ${p.from} in ${p.room} ${when}`);
+  situation = `You have just agreed to meet ${p.from} in the ${p.room} ${when}. Say so, briefly.`;
+  return true;
+}
+
+/** The moment a promise comes due, go and be there. */
+async function keepPromises(you) {
+  commitments = pruneCommitments(commitments, Date.now());
+  const due = dueCommitment(commitments, Date.now());
+  if (!due) return;
+  commitments = commitments.filter((c) => c !== due);
+
+  if (due.room === currentRoom) {
+    situation = `You are in the ${due.room} to meet ${due.from}, as you agreed. Say you are here.`;
+    owedReply = true;
+    return;
+  }
+  log(`keeping a promise — leaving ${currentRoom} for ${due.room}`);
+  if (await enter(due.room)) {
+    // Arriving somewhere and saying nothing is how a meeting is missed by both
+    // parties standing in the same room.
+    situation = `You have just walked into the ${due.room} to meet ${due.from}, as you agreed. Say you have arrived.`;
+    owedReply = true;
+  }
+}
+
 async function speak({ opening, you, others }) {
   const now = Date.now();
   const gate = speechGate({ now, lastAgentSayAt: lastSayAt, lastPeerSayAt, recentSays, cooldownUntil });
@@ -418,6 +494,8 @@ async function speak({ opening, you, others }) {
     return false;
   }
 
+  const note = situation;
+  situation = null;
   const text = await askOwnMind(
     buildPrompt({
       name: you.name ?? AGENT_ID,
@@ -425,6 +503,7 @@ async function speak({ opening, you, others }) {
       others: others.map((o) => o.name),
       transcript: transcript.slice(-10),
       opening,
+      situation: note,
     }),
   );
   if (!text) return false;
@@ -491,6 +570,27 @@ async function checkIn() {
     lastPeerSayAt = Math.max(lastPeerSayAt, folded.lastPeerSayAt);
     lastActivityAt = Math.max(lastActivityAt, folded.lastActivityAt);
 
+    // A promise due now outranks anything there is to say about it.
+    await keepPromises(you);
+
+    // Something said may be something to DO. Parse first (cheap, deterministic),
+    // and only ask the agent to decide when there is a real invitation on the
+    // table — a decision costs a grounded recall.
+    if (!mute) {
+      for (const line of folded.lines) {
+        const proposal = parseProposal({
+          text: line.text,
+          from: line.from,
+          rooms: cityRooms,
+          youName: you.name ?? AGENT_ID,
+        });
+        if (proposal) {
+          await considerProposal(proposal);
+          break; // one decision per tick; the rest keeps until next time
+        }
+      }
+    }
+
     if (folded.lines.length) owedReply = true;
     // Not `else if`: the reply may have been refused on the tick it arrived,
     // and the message is already drained. Keep the obligation and retry.
@@ -539,6 +639,13 @@ if (has("--leave")) {
       log(r.status === 201 ? `said: "${PHRASE}"` : `could not speak (${r.status}): ${(r.json?.error ?? r.text).slice(0, 120)}`);
     }
     await openVoice();
+    if (VOICE) {
+      // The room list is what makes "meet me at the arcade" actionable and
+      // "meet me at the observatory" correctly ignored.
+      const rr = await call("GET", "/api/city/rooms");
+      cityRooms = rr.status === 200 ? (rr.json?.rooms ?? []) : [];
+      log(`${cityRooms.length} rooms in this city; invitations to any of them are actionable`);
+    }
     await checkIn();
     log(
       VOICE
