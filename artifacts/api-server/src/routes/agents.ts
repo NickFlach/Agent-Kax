@@ -289,9 +289,9 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
   const agentScope = eq(artifactsTable.agentId, agent.id);
   const [
     [statsRow],
-    scoredRow,
-    narratedRow,
-    droppedRow,
+    [scoredRow],
+    [narratedRow],
+    [droppedRow],
     [avgRow],
     scarcityRows,
     recent,
@@ -357,9 +357,9 @@ router.get("/agents/:slug", requireAuth, async (req, res) => {
     agent: formatAgent(agent),
     stats: {
       totalArtifacts: statsRow.total,
-      scoredArtifacts: scoredRow[0].total,
-      narratedArtifacts: narratedRow[0].total,
-      droppedArtifacts: droppedRow[0].total,
+      scoredArtifacts: scoredRow.total,
+      narratedArtifacts: narratedRow.total,
+      droppedArtifacts: droppedRow.total,
     },
     metrics: {
       averageScore: avgRow.avg !== null ? Number(avgRow.avg) : null,
