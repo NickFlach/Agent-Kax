@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { mergeTranscript, type TranscriptLine } from "@/lib/room-transcript";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { NpcFigure } from "./npc";
@@ -128,6 +129,14 @@ export interface PresenceState {
   heard: ChatLine[];
   /** Say something from where you are standing. */
   say: (text: string) => Promise<string | null>;
+  /**
+   * Everything heard in this room this session, kept. `heard` above expires
+   * with the bubbles; this does not, so a visitor can scroll back through a
+   * conversation instead of catching eight seconds of it.
+   */
+  transcript: TranscriptLine[];
+  /** Who the city thinks you are, so a row can be marked as yours. */
+  you: { principal: string; name: string } | null;
 }
 
 /** Publishes your position, keeps the roster, and carries speech both ways. */
@@ -135,6 +144,8 @@ export function usePresence(room: string, enabled = true): PresenceState {
   const { camera } = useThree();
   const [others, setOthers] = useState<RemoteAgent[]>([]);
   const [heard, setHeard] = useState<ChatLine[]>([]);
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [you, setYou] = useState<{ principal: string; name: string } | null>(null);
   const sinceId = useRef(0);
   const stopped = useRef(false);
 
@@ -161,10 +172,17 @@ export function usePresence(room: string, enabled = true): PresenceState {
           if (!stopped.current) setOthers([]);
           return;
         }
-        const j = (await res.json()) as { others?: RemoteAgent[]; messages?: ChatLine[] };
+        const j = (await res.json()) as {
+          others?: RemoteAgent[];
+          messages?: ChatLine[];
+          you?: { principal: string; name: string };
+        };
         if (stopped.current) return;
         setOthers(j.others ?? []);
+        if (j.you) setYou(j.you);
         const fresh = j.messages ?? [];
+        // Kept whether or not the bubbles expire it.
+        setTranscript((prev) => mergeTranscript(prev, fresh));
         if (fresh.length) {
           sinceId.current = Math.max(sinceId.current, ...fresh.map((m) => m.id));
           const now = Date.now();
@@ -218,7 +236,7 @@ export function usePresence(room: string, enabled = true): PresenceState {
     }
   }, [room, camera]);
 
-  return { others, heard, say };
+  return { others, heard, say, transcript, you };
 }
 
 /**
@@ -241,15 +259,24 @@ export function VenuePresence({
   room,
   y = 0,
   onSay,
+  onTranscript,
 }: {
   room: string;
   /** Ground height of this interior, so bodies stand on the floor, not in it. */
   y?: number;
   /** Lifts the speak handle out so a DOM chat box can use it. */
   onSay?: (fn: (t: string) => Promise<string | null>) => void;
+  /**
+   * Lifts the kept conversation out for a DOM pane, same reason as `onSay`:
+   * this component renders inside the <Canvas>, and a scrollable list is not
+   * something the R3F tree can draw. `mergeTranscript` keeps array identity
+   * stable on a quiet tick, so this does not fire on every 900 ms beat.
+   */
+  onTranscript?: (lines: TranscriptLine[], you: { principal: string; name: string } | null) => void;
 }) {
-  const { others, heard, say } = usePresence(room);
+  const { others, heard, say, transcript, you } = usePresence(room);
   useEffect(() => { onSay?.(say); }, [say, onSay]);
+  useEffect(() => { onTranscript?.(transcript, you); }, [transcript, you, onTranscript]);
   return <RemoteAgents agents={others} heard={heard} y={y} />;
 }
 

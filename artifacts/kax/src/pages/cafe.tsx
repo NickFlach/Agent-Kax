@@ -5,6 +5,7 @@ import { Link, useLocation } from "wouter";
 import { FirstPersonRig } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
 import { SpeakControl, useSpeak } from "@/components/speak-control";
+import { ChatPane } from "@/components/chat-pane";
 import { NpcFigure } from "@/components/npc";
 import { TalkableNpc, DialoguePanel } from "@/components/talkable-npc";
 import { cafeDialogue } from "@/lib/npc-dialogue";
@@ -39,7 +40,7 @@ export default function Cafe() {
   const [counterNear, setCounterNear] = useState(false);
   const [talking, setTalking] = useState(false);
   // Press T to answer whoever is standing here; agents live in this room too.
-  const { sayRef, onSay } = useSpeak();
+  const { sayRef, onSay, transcript, you, onTranscript } = useSpeak();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -97,6 +98,7 @@ export default function Cafe() {
       {talking && <DialoguePanel dialogue={cafeDialogue(phase)} onClose={() => setTalking(false)} />}
 
       <SpeakControl sayRef={sayRef} testId="input-cafe-chat" />
+      <ChatPane room="cafe" transcript={transcript} you={you} testId="pane-cafe-chat" />
 
       <Canvas
         className="!absolute inset-0"
@@ -123,7 +125,7 @@ export default function Cafe() {
           speed={6.5}
           bounds={{ minX: -6.4, maxX: 6.4, minZ: -5.4, maxZ: 6.6, minY: 1.5, maxY: 3.1 }}
         />
-        <VenuePresence room="cafe" onSay={onSay} />
+        <VenuePresence room="cafe" onSay={onSay} onTranscript={onTranscript} />
 
         {/* Shell */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0.5]} receiveShadow>
