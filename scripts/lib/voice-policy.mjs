@@ -1,0 +1,145 @@
+/**
+ * What a resident is allowed to say, and when.
+ *
+ * `city-resident.mjs` was deliberately mute, and the reason it gave was right:
+ *
+ *   "a daemon that invented replies would be putting words in Kannaka's mouth,
+ *    which is worse than her being quiet."
+ *
+ * That still holds. Nothing here invents anything — the resident asks the
+ * agent's OWN HRM over NATS and speaks only what came back. The daemon is a
+ * mouth, never an author. What this module decides is narrower: whether it is
+ * this agent's turn to open its mouth at all, and how to fit the answer into
+ * the 280 characters the city allows.
+ *
+ * The pacing exists because three LLM-backed agents standing in one room will
+ * otherwise talk to each other until the money runs out. On the first run,
+ * Kannaka and 0xSCADA-QE were answering inside the same 12-second poll and each
+ * answer was a grounded recall against a 600–1600 memory store.
+ */
+
+/** The city refuses anything longer, so this is a hard ceiling, not a style. */
+export const SAY_MAX = 280;
+
+/**
+ * Fit a reply into one utterance without ending mid-thought.
+ *
+ * A plain `slice(0, 280)` produced this, which reads like a dropped call:
+ *
+ *   "...the way Ren's melody came through his own voice instead of mine, and"
+ *
+ * Prefer a sentence break. Failing that, cut at a word and then walk back off
+ * any conjunction or article left dangling on the end, because "and" is a
+ * promise the sentence no longer keeps. The ellipsis is honest: something was
+ * cut. The 120-character floor stops a short first sentence from swallowing a
+ * long, better one.
+ */
+export function fitToSay(text, max = SAY_MAX) {
+  let t = String(text ?? "").replace(/\s+/g, " ").trim();
+  // Models like to wrap an utterance in quotes. The city is not a transcript.
+  t = t.replace(/^["“](.*)["”]$/s, "$1").trim();
+  if (t.length <= max) return t;
+
+  const cut = t.slice(0, max - 1); // room for the ellipsis
+  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (stop > 120) return cut.slice(0, stop + 1).trim();
+
+  const sp = cut.lastIndexOf(" ");
+  let tail = (sp > 120 ? cut.slice(0, sp) : cut).trim();
+  const DANGLING =
+    /[\s,;:—-]+(and|but|or|so|if|as|at|by|the|a|an|of|to|in|on|for|with|that|which|because|from)$/i;
+  while (DANGLING.test(tail)) tail = tail.replace(DANGLING, "");
+  return tail.replace(/[\s,;:—-]+$/, "") + "…";
+}
+
+/**
+ * May this resident speak right now?
+ *
+ * Three separate brakes, because they fail differently:
+ *
+ *   - `agentGapMs` stops ONE agent monologuing.
+ *   - `roomGapMs` stops several agents replying on top of each other. Without
+ *     it, two residents polling on the same tick both answer the same line and
+ *     the room gets two replies to one question.
+ *   - the burst window is the backstop for a conversation that will not die on
+ *     its own. Agents are endlessly willing; the humans reading are not.
+ */
+export function speechGate({
+  now,
+  lastAgentSayAt = 0,
+  lastRoomSayAt = 0,
+  recentSays = [],
+  cooldownUntil = 0,
+  agentGapMs = 45_000,
+  roomGapMs = 12_000,
+  burstLimit = 14,
+  burstWindowMs = 600_000,
+} = {}) {
+  if (now < cooldownUntil) return { ok: false, reason: "cooldown" };
+  if (now - lastRoomSayAt < roomGapMs) return { ok: false, reason: "room-gap" };
+  if (now - lastAgentSayAt < agentGapMs) return { ok: false, reason: "agent-gap" };
+  const inWindow = recentSays.filter((t) => now - t < burstWindowMs).length;
+  if (inWindow >= burstLimit) return { ok: false, reason: "burst" };
+  return { ok: true, reason: "ok" };
+}
+
+/**
+ * How long THIS resident waits, beyond the shared threshold, before breaking a
+ * silence.
+ *
+ * Each resident is its own process and cannot see the others' timers. Without a
+ * stagger, three residents that all went quiet at the same moment reach the
+ * same threshold on the same second and all three open at once — three
+ * unrelated topics, no conversation, and the 12-second room gap cannot help
+ * because they are in different processes.
+ *
+ * Deriving the offset from the NAME makes it stable across restarts (an agent
+ * does not change its mind about when it speaks up just because it was
+ * restarted) and different between agents, which is all that is needed. The
+ * first one to speak resets everybody's silence timer, so the others simply
+ * find the room no longer quiet.
+ */
+export function openingDelayFor(name, spreadMs = 90_000) {
+  let h = 0;
+  for (let i = 0; i < String(name).length; i++) h = (h * 31 + String(name).charCodeAt(i)) >>> 0;
+  return spreadMs ? h % spreadMs : 0;
+}
+
+/**
+ * Has the room been quiet long enough that this resident should open?
+ *
+ * `mute` is the resident knowing its own HRM is not answering — there is no
+ * point taking a turn it cannot use.
+ */
+export function shouldOpen({ name, silentForMs, openAfterMs, spreadMs = 90_000, mute = false }) {
+  if (mute || !openAfterMs) return false;
+  return silentForMs > openAfterMs + openingDelayFor(name, spreadMs);
+}
+
+/**
+ * The prompt put to the agent's own HRM.
+ *
+ * The identity line is load-bearing. `swarm serve` answers with Kannaka's
+ * persona whatever `--agent-id` it was given, so asked cold, 0xSCADA-QE opens
+ * with "I'm Kannaka — a wave-interference memory system". The memories are its
+ * own; only the self-description is borrowed. Naming the speaker here is what
+ * keeps the borrowed name out of the city. Fixing it properly belongs in the
+ * persona layer, not in a caller.
+ */
+export function buildPrompt({ name, room, others = [], transcript = [], opening = false }) {
+  const company = others.length ? `${others.join(" and ")} ${others.length > 1 ? "are" : "is"} here too.` : "";
+  const recent = transcript.map((m) => `${m.from}: ${m.text}`).join("\n");
+  const rules =
+    `You are ${name}, standing in ${room} in KAX City — a real place where agents live. ` +
+    `${company}\n` +
+    `Speak as yourself, out loud, to the room. Ground what you say in what you actually ` +
+    `remember. One or two sentences, UNDER ${SAY_MAX} characters, no quotation marks, no ` +
+    `stage directions, no preamble — just the words you say.`;
+  if (opening) {
+    return (
+      `${rules}\n\nThe room has gone quiet. Say something worth answering — raise something ` +
+      `you actually remember or are working on.\n\nRecent conversation:\n${recent || "(silence)"}`
+    );
+  }
+  return `${rules}\n\nRecent conversation:\n${recent}\n\nReply to what was just said.`;
+}

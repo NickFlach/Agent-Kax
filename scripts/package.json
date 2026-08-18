@@ -8,6 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "nats": "^2.29.3"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "tsx": "catalog:",
