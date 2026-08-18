@@ -257,6 +257,13 @@ export function step(
     body.greetWho = null;
   }
 
+  // Prune expired greet records to keep the map from growing unbounded as
+  // visitors cycle through. Entries this old have no effect — the cooldown
+  // check would allow a re-greet for them anyway.
+  for (const [p, t] of body.greeted) {
+    if (now - t > GREET_COOLDOWN_MS) body.greeted.delete(p);
+  }
+
   let nearest: Neighbour | null = null;
   let nearestD = Infinity;
   for (const o of others) {
