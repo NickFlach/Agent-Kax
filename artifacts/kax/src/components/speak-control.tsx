@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { TranscriptLine } from "@/lib/room-transcript";
 import { isTypingTarget } from "@/lib/is-typing";
 
 /**
@@ -22,7 +23,11 @@ import { isTypingTarget } from "@/lib/is-typing";
  * hand it over rather than re-implement anything.
  */
 
-/** Holds the room's `say` handle so the DOM control can reach it. */
+/**
+ * Holds the room's `say` handle and its kept conversation, so the DOM controls
+ * can reach both. One hook because every room wants the same pair: something
+ * to talk into, and somewhere to read what was said.
+ */
 export function useSpeak() {
   const sayRef = useRef<(text: string) => Promise<string | null>>(async () => null);
   // Stable identity: `usePresence` returns a fresh `say` each render, and an
@@ -30,7 +35,20 @@ export function useSpeak() {
   const onSay = useCallback((fn: (text: string) => Promise<string | null>) => {
     sayRef.current = fn;
   }, []);
-  return { sayRef, onSay };
+
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [you, setYou] = useState<{ principal: string; name: string } | null>(null);
+  // Also stable, and safe to call on every beat: `mergeTranscript` hands back
+  // the SAME array when nothing is new, so a silent room re-renders nothing.
+  const onTranscript = useCallback(
+    (lines: TranscriptLine[], me: { principal: string; name: string } | null) => {
+      setTranscript(lines);
+      setYou(me);
+    },
+    [],
+  );
+
+  return { sayRef, onSay, transcript, you, onTranscript };
 }
 
 export function SpeakControl({

@@ -13,6 +13,8 @@ import { BackAlley, SideStreet, FlaukowskiCafe, ALLEY_X } from "@/components/cit
 import { usePresence, RemoteAgents } from "@/components/presence";
 import { isTypingTarget } from "@/lib/is-typing";
 import { SpeakControl, useSpeak } from "@/components/speak-control";
+import { ChatPane } from "@/components/chat-pane";
+import type { TranscriptLine } from "@/lib/room-transcript";
 import { useDayPhase } from "@/lib/time-of-day";
 import { NpcFigure, WandererNpc, PlayerTracker } from "@/components/npc";
 import {
@@ -1333,9 +1335,16 @@ function StreetGround({ depth }: { depth: number }) {
  * carries what they say. The say() handle is lifted out to the page so the
  * chat input can live in the DOM rather than inside the canvas.
  */
-function StreetPresence({ onSay }: { onSay: (fn: (t: string) => Promise<string | null>) => void }) {
-  const { others, heard, say } = usePresence("city");
+function StreetPresence({
+  onSay,
+  onTranscript,
+}: {
+  onSay: (fn: (t: string) => Promise<string | null>) => void;
+  onTranscript: (lines: TranscriptLine[], you: { principal: string; name: string } | null) => void;
+}) {
+  const { others, heard, say, transcript, you } = usePresence("city");
   useEffect(() => { onSay(say); }, [say, onSay]);
+  useEffect(() => { onTranscript(transcript, you); }, [transcript, you, onTranscript]);
   return <RemoteAgents agents={others} heard={heard} y={0.12} />;
 }
 
@@ -1360,7 +1369,7 @@ export default function Marketplace3D() {
   // Speech: the handle comes from inside the canvas, the input lives outside it.
   // Shared with every other room — the cafe and the Undercroft had no way to
   // speak at all, and a second copy of this is how that stays true somewhere.
-  const { sayRef, onSay } = useSpeak();
+  const { sayRef, onSay, transcript, you, onTranscript } = useSpeak();
 
   useEffect(() => {
     setWebglSupported(detectWebGL());
@@ -1805,6 +1814,7 @@ export default function Marketplace3D() {
           fill, the Canvas's default height:100% resolves against the parent's
           height and can collapse to a sliver at the top. */}
       <SpeakControl sayRef={sayRef} testId="input-street-chat" />
+      <ChatPane room="city" transcript={transcript} you={you} testId="pane-street-chat" />
 
       <Canvas
         className="!absolute inset-0"
@@ -1860,7 +1870,7 @@ export default function Marketplace3D() {
         {/* No self-avatar in first person — you ARE the camera. */}
         <PlayerTracker onUpdate={setPlayer} />
         {/* Anyone else standing in the street right now. */}
-        <StreetPresence onSay={onSay} />
+        <StreetPresence onSay={onSay} onTranscript={onTranscript} />
         {/* Pedestrians on both sidewalks */}
         {Array.from({ length: 8 }).map((_, i) => (
           <WandererNpc

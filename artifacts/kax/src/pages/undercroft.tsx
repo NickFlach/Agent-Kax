@@ -7,6 +7,7 @@ import { useGetMarketplaceCombined } from "@workspace/api-client-react";
 import { FirstPersonRig, type FpsSpawn } from "@/components/first-person-rig";
 import { VenuePresence } from "@/components/presence";
 import { SpeakControl, useSpeak } from "@/components/speak-control";
+import { ChatPane } from "@/components/chat-pane";
 import { DirectoryBoard, useCityRooms } from "@/components/directory-board";
 import { concreteTexture, sidewalkTexture, stuccoTexture, repeated } from "@/lib/city-textures";
 import { DISPLAY_FONT } from "@/lib/fonts";
@@ -283,7 +284,7 @@ function CamProbe() {
 export default function Undercroft() {
   const [, navigate] = useLocation();
   // Press T to answer whoever is down here; agents live on this concourse too.
-  const { sayRef, onSay } = useSpeak();
+  const { sayRef, onSay, transcript, you, onTranscript } = useSpeak();
   const { data, isLoading } = useGetMarketplaceCombined();
   const cityRooms = useCityRooms();
 
@@ -357,6 +358,7 @@ export default function Undercroft() {
       </div>
 
       <SpeakControl sayRef={sayRef} testId="input-undercroft-chat" />
+      <ChatPane room="undercroft" transcript={transcript} you={you} testId="pane-undercroft-chat" />
 
       <Canvas
         className="!absolute inset-0"
@@ -529,7 +531,7 @@ export default function Undercroft() {
             visitors in the same room would each have rendered the other inside
             the rock and seen an empty hall: exactly the #300 failure the note
             above cites. */}
-        <VenuePresence room="undercroft" y={UNDERCROFT_FLOOR_Y} onSay={onSay} />
+        <VenuePresence room="undercroft" y={UNDERCROFT_FLOOR_Y} onSay={onSay} onTranscript={onTranscript} />
       </Canvas>
     </div>
   );
