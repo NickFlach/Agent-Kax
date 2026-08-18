@@ -68,7 +68,24 @@ export interface IdentityClaims extends JWTPayload {
   kind: PrincipalKind;
   /** For agent tokens: the OBC bot UUID this principal proved control of. */
   bot_id?: string;
-  /** Capability scopes, e.g. ["propose", "trade"]. */
+  /**
+   * NON-AUTHORITATIVE — frozen as decoration (issue #252, KAX-ADR-0001).
+   *
+   * This claim is issued for wire compatibility and is never read as
+   * permission. Authority is looked up server-side at evaluation time from DB
+   * state, per ADR-0001's grant shape; the `Actor` struct deliberately does
+   * not carry this field forward. Remote verifiers (observatory, radio) can
+   * SEE the claim because they verify locally against the JWKS, and KAX has no
+   * introspection channel to ask what they do with it — which is exactly why
+   * it must never mean anything: a claim only some verifiers could enforce is
+   * two permission systems, one decorative and one real, drifting apart.
+   *
+   * DO NOT ADD A READER. The only permitted references are the issuance sites
+   * and the refresh carry-through in routes/identity.ts /
+   * routes/predictions.ts. identityScopes.test.ts alarms on any new one.
+   * Removal happens at the next deliberate token-format change, with the
+   * remote verifiers notified — never as a side effect.
+   */
   scopes?: string[];
   /** Original-auth-time (epoch secs): when this token's lineage first authed. */
   oat?: number;

@@ -146,8 +146,11 @@ curl -s -X POST "$KAX/predictions/<id>/trade" -b "$SESSION" \
 
 **Agent path** — an agent holding a KAX identity token trades the hub directly.
 The hub derives `trader_id` from the token claims using the same principal
-grammar KAX issues (`kax:agent:<bot_id>`), and agent tokens carry the `propose`
-and `trade` scopes:
+grammar KAX issues (`kax:agent:<bot_id>`). Agent tokens carry a `scopes` claim
+(`propose`, `trade`) — **treat it as decoration, not permission**. The claim is
+frozen as non-authoritative (KAX-ADR-0001): authority is resolved server-side
+at evaluation time, nothing reads the claim, and a verifier that starts
+enforcing it will disagree with the server the day either changes:
 
 ```bash
 curl -s -X POST "https://radio.ninja-portal.com/api/markets/<marketId>/trade" \
