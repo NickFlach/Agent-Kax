@@ -23,7 +23,7 @@ import {
   commerceProductsTable,
   userBotsTable,
 } from "@workspace/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import commerceRouter from "./commerce";
 import { authMiddleware } from "../middlewares/authMiddleware";
 import { ApprovalInvalidated, assertApprovalStillValid } from "../lib/approvalPin";
@@ -225,5 +225,109 @@ describe("approval pin (#259, DB)", () => {
         .set({ revokedAt: null, revokedReason: null })
         .where(eq(userBotsTable.obcBotId, botId));
     }
+  });
+
+  describe("pre-submit guard (#263, DB)", () => {
+    it("a stale pin parks the paid order with a DENY decision, and a pinless product passes", async () => {
+      const { approvalGuardBeforeSubmit } = await import("../lib/commerceFulfillmentWorker");
+      const { MAX_FULFILLMENT_ATTEMPTS } = await import("../lib/commerceFulfillmentStages");
+      const { commerceOrdersTable } = await import("@workspace/db/schema");
+  
+      // Seed an approvable product, approve it, then tamper the measured hash
+      // so the pin no longer describes the bytes.
+      const seeded = await (async () => {
+        const [a] = await db
+          .insert(artifactsTable)
+          .values({
+            externalId: makeTestId("guard"),
+            title: "guarded",
+            creatorName: "kax-test-creator",
+            creatorBotId: botId,
+            publicUrl: "inline:unreachable",
+            artifactType: "image",
+            agentId,
+          })
+          .returning({ id: artifactsTable.id });
+        artifacts.push(a!.id);
+        await db.insert(artifactPrintAssetsTable).values({
+          artifactId: a!.id,
+          widthPx: 3600, heightPx: 3600, format: "png", byteSize: 10n,
+          sha256: "c".repeat(64),
+          sourceUrlAtFetch: "https://kfz.supabase.co/guard.png",
+          fetchedAt: new Date(),
+        });
+        const sku = makeTestId("guard-sku");
+        const [p] = await db
+          .insert(commerceProductsTable)
+          .values({
+            sku, title: "guarded poster", itemCents: 3900,
+            merchantId, artifactId: a!.id, productSpecId: "poster_12x12",
+            commerceState: "product_eligible",
+          })
+          .returning({ id: commerceProductsTable.id });
+        products.push(p!.id);
+        return { productId: p!.id, sku };
+      })();
+  
+      const approved = await request(app)
+        .post(`/commerce/products/${seeded.productId}/approve`)
+        .set("Cookie", `sid=${owner.sid}`);
+      expect(approved.status).toBe(200);
+  
+      // A paid order on that sku.
+      const [order] = await db
+        .insert(commerceOrdersTable)
+        .values({
+          clientReference: `guard:${makeTestId("ref")}`,
+          buyerUserId: owner.id,
+          sku: seeded.sku,
+          currency: "usd",
+          itemCents: 3900, shippingCents: 0, taxCents: 0, totalCents: 3900,
+          shipToName: "T", shipToLine1: "1 St", shipToCity: "X",
+          shipToRegion: "Y", shipToPostalCode: "0", shipToCountry: "US",
+          status: "paid",
+        })
+        .returning({ id: commerceOrdersTable.id });
+  
+      // Tamper: the world no longer matches the pin.
+      await db
+        .update(artifactPrintAssetsTable)
+        .set({ sha256: "d".repeat(64) })
+        .where(eq(artifactPrintAssetsTable.artifactId, artifacts[artifacts.length - 1]!));
+  
+      const now = new Date();
+      const result = { skipped: null, submitted: 0, released: 0, parked: 0, retried: 0, reconciled: 0 } as never;
+      const proceed = await approvalGuardBeforeSubmit(order!.id, now, result);
+      expect(proceed).toBe(false);
+  
+      const [after] = await db
+        .select({ attempts: commerceOrdersTable.fulfillmentAttempts, err: commerceOrdersTable.fulfillmentLastError })
+        .from(commerceOrdersTable)
+        .where(eq(commerceOrdersTable.id, order!.id));
+      expect(after!.attempts).toBe(MAX_FULFILLMENT_ATTEMPTS); // parked
+      expect(after!.err).toMatch(/approval_invalidated/);
+  
+      const dec = await db.execute(
+        sql`SELECT decision, capability FROM authority_decisions WHERE decision_id = ${"dec:hold:order:" + order!.id}`,
+      );
+      expect(dec.rows).toHaveLength(1);
+      expect((dec.rows[0] as { decision: string }).decision).toBe("deny");
+  
+      // And a paid order whose product carries NO pin sails through the guard.
+      const [plain] = await db
+        .insert(commerceOrdersTable)
+        .values({
+          clientReference: `guard-plain:${makeTestId("ref")}`,
+          buyerUserId: owner.id,
+          sku: "no-such-product-sku",
+          currency: "usd",
+          itemCents: 100, shippingCents: 0, taxCents: 0, totalCents: 100,
+          shipToName: "T", shipToLine1: "1 St", shipToCity: "X",
+          shipToRegion: "Y", shipToPostalCode: "0", shipToCountry: "US",
+          status: "paid",
+        })
+        .returning({ id: commerceOrdersTable.id });
+      expect(await approvalGuardBeforeSubmit(plain!.id, now, result)).toBe(true);
+    });
   });
 });

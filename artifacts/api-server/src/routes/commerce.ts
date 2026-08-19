@@ -321,6 +321,35 @@ router.post(
 );
 
 /**
+ * Reconciliation read (#263): resolve an outcome_unknown by asking the
+ * provider what actually happened, keyed on the deterministic client
+ * reference. Poll-on-read, not a drift engine — one doubtful order does not
+ * need a scheduler, it needs one honest question. requireCommerceToken: an
+ * operator act. 503s plainly when Printify is not configured, because an
+ * unanswerable question must not read as an answered one.
+ */
+router.get(
+  "/commerce/orders/:id/reconcile",
+  requireCommerceToken,
+  async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "order id must be a positive integer" });
+      return;
+    }
+    const { printifyEnabled, getUncachablePrintifyClient } = await import("../lib/printifyClient");
+    if (!printifyEnabled()) {
+      res.status(503).json({ error: "fulfilment provider not configured; cannot reconcile" });
+      return;
+    }
+    const { reconcileCommerceOrderSubmission } = await import("../lib/commerceFulfillment");
+    const printify = await getUncachablePrintifyClient();
+    const outcome = await reconcileCommerceOrderSubmission(db, printify, id);
+    res.json({ outcome });
+  },
+);
+
+/**
  * The public product read (#260): what the product page renders. Published
  * products ONLY, and both failure exits are the same 404 — a product that
  * exists unpublished must be indistinguishable from one that never existed,
