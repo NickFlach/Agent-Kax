@@ -194,10 +194,12 @@ describe("consumer pin — exactly the sanctioned caller imports printAsset (#25
     };
     walk(SRC);
     // The sanctioned consumers: the #258 evaluate pipeline, the #259
-    // approval re-check, and the #264 custody fetch — which must use the
-    // SAME allowlist + cap as the measurement, hence the import.
+    // approval re-check, the #264 custody fetch (same allowlist + cap as
+    // the measurement), and the #293 raster codec (same SNIFFED-format
+    // rule — the bytes decide, never the filename).
     expect(offenders.map((o) => o.replace(/\\/g, "/")).sort()).toEqual([
       "lib/approvalPin.ts",
+      "lib/print/raster.ts",
       "lib/storage/custody.ts",
       "routes/commerce.ts",
     ]);
