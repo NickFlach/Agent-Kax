@@ -200,3 +200,14 @@ See `lib/db/MIGRATIONS.md` for details and the rules table.
 - `pnpm --filter @workspace/db run push` — Push DB schema changes
 - `pnpm --filter @workspace/api-server run dev` — Start API server
 - `pnpm --filter @workspace/kax run dev` — Start frontend dev server
+
+## Commerce product-management surface (#258)
+
+`KAX_COMMERCE_TOKEN` guards the operator product endpoints (`POST
+/api/commerce/products`, `POST /api/commerce/products/:id/evaluate`). It is
+set as an out-of-band Replit secret; until it is set the surface answers
+**503 "commerce surface disabled (KAX_COMMERCE_TOKEN unset)"** on every
+write — inert by construction, and deliberately NOT a silent fallthrough to
+`KAX_SERVICE_TOKEN` or any ledger token. The router is mounted
+unconditionally so the disabled surface is a sentence, never a 404 that
+reads like a bad deploy.

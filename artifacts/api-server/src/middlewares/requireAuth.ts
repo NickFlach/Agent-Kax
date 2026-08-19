@@ -117,6 +117,27 @@ function bearerEquals(req: Request, expected: string | undefined): boolean {
  * read/trade credential cannot mint. Fails CLOSED (503) when the env var is
  * unset — the mint surface is off until an operator explicitly arms it.
  */
+/**
+ * Guards the commerce PRODUCT-MANAGEMENT surface (#258) — the operator
+ * endpoints that create and evaluate sellable products. Same 503-when-unset
+ * idiom as the ledger tokens, copied deliberately: NEVER the silent
+ * degradation of requireAdminOrServiceToken, and NO fallback to
+ * KAX_SERVICE_TOKEN or any ledger token — a credential that opens the
+ * ledger must not also open commerce by coincidence of deployment.
+ */
+export function requireCommerceToken(req: Request, res: Response, next: NextFunction) {
+  const expected = process.env.KAX_COMMERCE_TOKEN;
+  if (!expected) {
+    res.status(503).json({ error: "commerce surface disabled (KAX_COMMERCE_TOKEN unset)" });
+    return;
+  }
+  if (!bearerEquals(req, expected)) {
+    res.status(401).json({ error: "invalid commerce token" });
+    return;
+  }
+  next();
+}
+
 export function requireLedgerMintToken(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.KAX_LEDGER_MINT_TOKEN;
   if (!expected) {

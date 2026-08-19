@@ -10,7 +10,11 @@ import {
 } from "@workspace/db/schema";
 import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireAuth } from "../middlewares/requireAuth";
+import { requireAuth, requireCommerceToken } from "../middlewares/requireAuth";
+import { artifactPrintAssetsTable, commerceMerchantsTable } from "@workspace/db/schema";
+import { canTransition, parseCommerceState, type CommerceState } from "../lib/commerceOrder";
+import { isCommerceEligible } from "../lib/visibility";
+import { measureArtifactAsset } from "../lib/printAsset";
 import { commerceEnabled, getUncachableStripeClient } from "../lib/stripeClient";
 import { publicBaseUrl } from "../lib/publicBaseUrl";
 import { loadPurchasingSnapshot } from "../lib/purchasingFacts";
@@ -1430,5 +1434,197 @@ router.get("/commerce/orders/:ref", requireAuth, async (req: Request, res: Respo
 
   res.json(toBuyerOrder(order));
 });
+
+// ---------------------------------------------------------------------------
+// Product management (#258). The OPERATOR surface, distinct from the buyer
+// path above: guarded by KAX_COMMERCE_TOKEN with the 503-when-unset idiom, so
+// every write here is inert until an operator arms the secret out of band.
+// The router is mounted unconditionally — an env-gated MOUNT would make the
+// disabled surface 404 indistinguishably from a bad deploy, while the token
+// guard 503s with a sentence that says exactly what is off and why.
+// ---------------------------------------------------------------------------
+
+/** Print specs the evaluator can check against, at Printify's 300 PPI. */
+const PRINT_SPEC_REQUIRED_PX: Record<string, { widthPx: number; heightPx: number }> = {
+  sticker_3_5in: { widthPx: 900, heightPx: 900 },
+  poster_9x11: { widthPx: 2700, heightPx: 3300 },
+  poster_11x14: { widthPx: 3300, heightPx: 4200 },
+  poster_12x12: { widthPx: 3600, heightPx: 3600 },
+  poster_12x18: { widthPx: 3600, heightPx: 5400 },
+};
+
+/** Persist a legal state move; refuse an illegal one loudly. */
+async function moveState(productId: number, from: CommerceState, to: CommerceState): Promise<void> {
+  if (!canTransition(from, to)) {
+    throw new Error(`illegal commerce_state transition ${from} -> ${to} (product ${productId})`);
+  }
+  await db
+    .update(commerceProductsTable)
+    .set({ commerceState: to, updatedAt: new Date() })
+    .where(eq(commerceProductsTable.id, productId));
+}
+
+/** A product and its eligibility state, for the operator and the curious. */
+router.get("/commerce/products/:id", requireAuth, async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "product id must be a positive integer" });
+    return;
+  }
+  const [p] = await db
+    .select()
+    .from(commerceProductsTable)
+    .where(eq(commerceProductsTable.id, id))
+    .limit(1);
+  if (!p) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  res.json({ product: p, commerceState: p.commerceState });
+});
+
+const createProductSchema = z.object({
+  sku: z.string().min(1).max(120),
+  title: z.string().min(1).max(300),
+  itemCents: z.number().int().positive(),
+  shippingCents: z.number().int().min(0).optional(),
+  artifactId: z.number().int().positive().optional(),
+  merchantId: z.number().int().positive().optional(),
+  productSpecId: z.string().max(48).optional(),
+  printifyBlueprintId: z.string().max(64).optional(),
+  printifyVariantId: z.string().max(64).optional(),
+});
+
+/** Create a product row. Born not_evaluated; the machine does the rest. */
+router.post("/commerce/products", requireCommerceToken, async (req: Request, res: Response) => {
+  const parsed = createProductSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "invalid body" });
+    return;
+  }
+  try {
+    const [row] = await db
+      .insert(commerceProductsTable)
+      .values({ ...parsed.data, commerceState: "not_evaluated" })
+      .returning();
+    res.status(201).json({ product: row });
+  } catch (err) {
+    res.status(409).json({ error: scrubDatabaseError("commerce product create", err).message });
+  }
+});
+
+/**
+ * Run the eligibility pipeline one step at a time, exactly the ADR's edges:
+ * rights (isCommerceEligible for the MERCHANT's user) -> asset measurement
+ * (measureArtifactAsset; sentinels and fetch failures are asset_insufficient
+ * and the sentinel path never touches the network — printAsset refuses before
+ * I/O) -> the print-spec comparison at required_px. Each step advances the
+ * state or records the failure state, and every move goes through
+ * canTransition so an illegal edge is a 500 with the edge named, never a
+ * silent skip.
+ */
+router.post(
+  "/commerce/products/:id/evaluate",
+  requireCommerceToken,
+  async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "product id must be a positive integer" });
+      return;
+    }
+    const [p] = await db
+      .select()
+      .from(commerceProductsTable)
+      .where(eq(commerceProductsTable.id, id))
+      .limit(1);
+    if (!p) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    let state = parseCommerceState(p.commerceState);
+    if (state !== "not_evaluated" && state !== "rights_checked" && state !== "asset_checked") {
+      res.status(409).json({ error: `product is ${state}; evaluate runs from not_evaluated` });
+      return;
+    }
+    if (!p.artifactId) {
+      res.status(409).json({ error: "product has no artifact to evaluate" });
+      return;
+    }
+
+    // Rights: the merchant's user must control the creator bot. No merchant
+    // on the row is an inconclusive preflight, which the ADR routes to
+    // review_required rather than guessing either way.
+    if (state === "not_evaluated") {
+      if (!p.merchantId) {
+        await moveState(p.id, state, "review_required");
+        res.json({ commerceState: "review_required", reason: "no merchant on the product; rights preflight inconclusive" });
+        return;
+      }
+      const [merchant] = await db
+        .select({ userId: commerceMerchantsTable.userId })
+        .from(commerceMerchantsTable)
+        .where(eq(commerceMerchantsTable.id, p.merchantId))
+        .limit(1);
+      if (!merchant) {
+        await moveState(p.id, state, "review_required");
+        res.json({ commerceState: "review_required", reason: "merchant row missing" });
+        return;
+      }
+      const rights = await isCommerceEligible(p.artifactId, merchant.userId);
+      if (!rights.ok) {
+        await moveState(p.id, state, "rights_blocked");
+        res.json({ commerceState: "rights_blocked", reason: rights.reason });
+        return;
+      }
+      await moveState(p.id, state, "rights_checked");
+      state = "rights_checked";
+    }
+
+    // Asset: measure the bytes. Failure reasons (sentinel, not_a_url,
+    // fetch_failed, too_large, decode_failed) are all asset_insufficient.
+    if (state === "rights_checked") {
+      const asset = await measureArtifactAsset(p.artifactId);
+      if (asset.failureReason != null) {
+        await moveState(p.id, state, "asset_insufficient");
+        res.json({ commerceState: "asset_insufficient", reason: asset.failureReason });
+        return;
+      }
+      await moveState(p.id, state, "asset_checked");
+      state = "asset_checked";
+    }
+
+    // Spec: compare against required_px. An unknown spec cannot be judged
+    // and stays asset_checked with the gap named, rather than inventing a
+    // verdict the spec table does not support.
+    const spec = p.productSpecId ? PRINT_SPEC_REQUIRED_PX[p.productSpecId] : undefined;
+    if (!spec) {
+      res.json({
+        commerceState: state,
+        reason: `no required_px known for spec '${p.productSpecId ?? "(none)"}'; stopping at asset_checked`,
+      });
+      return;
+    }
+    const [measured] = await db
+      .select()
+      .from(artifactPrintAssetsTable)
+      .where(eq(artifactPrintAssetsTable.artifactId, p.artifactId))
+      .limit(1);
+    const ok =
+      measured?.widthPx != null &&
+      measured?.heightPx != null &&
+      measured.widthPx >= spec.widthPx &&
+      measured.heightPx >= spec.heightPx;
+    if (!ok) {
+      await moveState(p.id, state, "asset_insufficient");
+      res.json({
+        commerceState: "asset_insufficient",
+        reason: `measured ${measured?.widthPx ?? "?"}x${measured?.heightPx ?? "?"} < required ${spec.widthPx}x${spec.heightPx}`,
+      });
+      return;
+    }
+    await moveState(p.id, state, "product_eligible");
+    res.json({ commerceState: "product_eligible" });
+  },
+);
 
 export default router;
