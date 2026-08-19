@@ -62,8 +62,11 @@ describe("commerce_merchants drop-and-repair (DB)", () => {
   });
 });
 
-describe("darkness pin — zero routes reference the table (#253)", () => {
-  it("no file under routes/ mentions commerce_merchants or its drizzle name", () => {
+describe("consumer pin — exactly the sanctioned route reads the table (#253/#258)", () => {
+  it("only routes/commerce.ts (the #258 evaluate pipeline) references commerce_merchants", () => {
+    // The table shipped dark under #253; #258's operator surface is its ONE
+    // sanctioned route consumer (rights preflight resolves the merchant's
+    // user). A second route appearing here should be argued in, not slipped.
     const ROUTES = path.join(__dirname, "..", "routes");
     const offenders: string[] = [];
     for (const entry of fs.readdirSync(ROUTES, { withFileTypes: true })) {
@@ -71,6 +74,6 @@ describe("darkness pin — zero routes reference the table (#253)", () => {
       const src = fs.readFileSync(path.join(ROUTES, entry.name), "utf8");
       if (/commerce_merchants|commerceMerchantsTable/.test(src)) offenders.push(entry.name);
     }
-    expect(offenders).toEqual([]);
+    expect(offenders).toEqual(["commerce.ts"]);
   });
 });
