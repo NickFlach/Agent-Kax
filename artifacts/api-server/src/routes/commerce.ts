@@ -157,6 +157,11 @@ export function printSpecFor(productSpecId: string): { widthPx: number; heightPx
   if (productSpecId === "sticker_4in") {
     return process.env["KAX_PRODUCT_STICKER_4IN"] === "1" ? { widthPx: 1113, heightPx: 1113 } : undefined;
   }
+  if (productSpecId === "poster_12x12") {
+    // #298: the square poster arrives with the SVG-render pipeline and stays
+    // invisible until its flag flips — same rule as the 4in sticker.
+    return process.env["KAX_PRODUCT_POSTER_12X12"] === "1" ? PRINT_SPEC_REQUIRED_PX["poster_12x12"] : undefined;
+  }
   return PRINT_SPEC_REQUIRED_PX[productSpecId];
 }
 

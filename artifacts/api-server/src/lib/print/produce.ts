@@ -3,9 +3,11 @@ import { artifactPrintAssetsTable, type DerivedAsset } from "@workspace/db/schem
 import { eq } from "drizzle-orm";
 import type { StorageAdapter } from "../storage/adapter";
 import { createDerivedAsset, takeCustody } from "../storage/custody";
+import crypto from "node:crypto";
 import { decodeImage, encodePng } from "./raster";
 import { DECONTAMINATE_PIPELINE_VERSION, decontaminate } from "./decontaminate";
 import { RESAMPLE_PIPELINE_VERSION, resampleForPrint } from "./resample";
+import { RASTERIZE_PIPELINE_VERSION, renderSvgMaster } from "./rasterize";
 
 /**
  * print/produce.ts — the production stages that turn a held source into
@@ -102,5 +104,44 @@ export async function produceSticker4inMaster(
     pipelineVersion: RESAMPLE_PIPELINE_VERSION,
     targetProduct: STICKER_4IN.productSpecId,
     targetPx: { width: STICKER_4IN.widthPx, height: STICKER_4IN.heightPx },
+  });
+}
+
+/** #298's placeholder: the aspect-clean 12×12in square poster, 3600×3600. */
+export const POSTER_12X12 = { productSpecId: "poster_12x12", widthPx: 3600, heightPx: 3600 } as const;
+
+export function poster12x12Enabled(): boolean {
+  return process.env["KAX_PRODUCT_POSTER_12X12"] === "1";
+}
+
+/**
+ * #298: render an SVG MASTER to the exact 3600×3600 target. Deterministic —
+ * same SVG + same target = same sha256 (the fixture pins it) — and each
+ * render is its own derived_assets row whose lineage edge (parent_sha256)
+ * is the SVG MASTER's sha, not the source raster's: what was transformed
+ * here is the vector. Raw SVG never leaves KAX (printifyClient refuses
+ * image/svg+xml); what ships to the printer is this render.
+ */
+export async function producePoster12x12Render(
+  sourceArtifactId: number,
+  svgMaster: string,
+  storage: StorageAdapter,
+): Promise<DerivedAsset> {
+  if (!poster12x12Enabled()) {
+    throw new Error("poster_12x12 is not enabled (set KAX_PRODUCT_POSTER_12X12=1)");
+  }
+  const svgSha = crypto.createHash("sha256").update(svgMaster, "utf8").digest("hex");
+  const rendered = renderSvgMaster(svgMaster, POSTER_12X12.widthPx, POSTER_12X12.heightPx);
+  return createDerivedAsset({
+    sourceArtifactId,
+    transformType: "rasterize",
+    transformFactor: 1,
+    bytes: encodePng(rendered),
+    storage,
+    requiredPx: { width: POSTER_12X12.widthPx, height: POSTER_12X12.heightPx },
+    pipelineVersion: RASTERIZE_PIPELINE_VERSION,
+    targetProduct: POSTER_12X12.productSpecId,
+    targetPx: { width: POSTER_12X12.widthPx, height: POSTER_12X12.heightPx },
+    parentSha256: svgSha,
   });
 }

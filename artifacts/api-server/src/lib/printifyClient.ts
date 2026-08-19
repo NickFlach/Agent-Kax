@@ -712,6 +712,13 @@ export function getUncachablePrintifyClient(): PrintifyClient {
     },
 
     async uploadImageByUrl(fileName: string, url: string): Promise<PrintifyUploadRef> {
+      // #298: raw SVG is NEVER uploaded to Printify. A vector master is an
+      // intermediate; what ships to the printer is its deterministic PNG
+      // render (lib/print/rasterize.ts), so an SVG reaching this call is a
+      // pipeline bug to refuse, not a file to forward.
+      if (/\.svg(?:\?|#|$)/i.test(fileName) || /\.svg(?:\?|#|$)/i.test(url)) {
+        throw new PrintifyError(422, null, "raw SVG is never uploaded to Printify — rasterize the master first (image/svg+xml refused)");
+      }
       const payload = await printifyFetch(config, `/uploads/images.json`, "POST", {
         file_name: fileName,
         url,
