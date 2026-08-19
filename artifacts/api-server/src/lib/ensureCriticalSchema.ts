@@ -620,6 +620,42 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON commerce_merchants (user_id)`),
   },
   {
+    /** #257: the money-leg and eligibility columns. Columns get eaten too. */
+    label: "commerce leg + eligibility columns",
+    sql: sql.raw(`
+      ALTER TABLE commerce_products
+        ADD COLUMN IF NOT EXISTS merchant_id integer REFERENCES commerce_merchants(id) ON DELETE RESTRICT,
+        ADD COLUMN IF NOT EXISTS product_spec_id varchar(48),
+        ADD COLUMN IF NOT EXISTS commerce_state varchar(32) NOT NULL DEFAULT 'not_evaluated',
+        ADD COLUMN IF NOT EXISTS printify_blueprint_id varchar,
+        ADD COLUMN IF NOT EXISTS approved_content_hash text,
+        ADD COLUMN IF NOT EXISTS approved_by varchar REFERENCES users(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS approved_at timestamp,
+        ADD COLUMN IF NOT EXISTS unpublished_at timestamp`),
+  },
+  {
+    label: "commerce_orders leg columns",
+    sql: sql.raw(`
+      ALTER TABLE commerce_orders
+        ADD COLUMN IF NOT EXISTS customer_charge_cents integer,
+        ADD COLUMN IF NOT EXISTS tax_jurisdiction varchar(48),
+        ADD COLUMN IF NOT EXISTS tax_rate_bps integer,
+        ADD COLUMN IF NOT EXISTS tax_collector_of_record varchar(16),
+        ADD COLUMN IF NOT EXISTS processor_fee_cents integer,
+        ADD COLUMN IF NOT EXISTS processor_fee_bearer varchar(16),
+        ADD COLUMN IF NOT EXISTS platform_fee_cents integer,
+        ADD COLUMN IF NOT EXISTS platform_fee_rate_bps integer,
+        ADD COLUMN IF NOT EXISTS platform_fee_basis varchar(24),
+        ADD COLUMN IF NOT EXISTS fulfillment_cost_cents integer,
+        ADD COLUMN IF NOT EXISTS fulfillment_shipping_cost_cents integer,
+        ADD COLUMN IF NOT EXISTS fulfillment_cost_payer varchar(16),
+        ADD COLUMN IF NOT EXISTS fulfillment_paid_at timestamp,
+        ADD COLUMN IF NOT EXISTS merchant_net_cents integer,
+        ADD COLUMN IF NOT EXISTS stripe_charge_id varchar,
+        ADD COLUMN IF NOT EXISTS tax_provider_txn varchar,
+        ADD COLUMN IF NOT EXISTS correlation_id text`),
+  },
+  {
     /** #255: the point-of-sale AI disclosure flag. Columns get eaten too. */
     label: "artifacts machine_generated column",
     sql: sql.raw(`ALTER TABLE artifacts
