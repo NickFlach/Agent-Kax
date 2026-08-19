@@ -211,9 +211,11 @@ describe("custody, the guard, and the reprint (DB)", () => {
     });
     expect(undecodable.qualityStatus).toBe("failed");
 
+    // IN spec (2700×3300 meets the poster minimum exactly) so only the
+    // factor sends it to a human — the branch under test.
     const review = await createDerivedAsset({
       sourceArtifactId: id, transformType: "upscale", transformFactor: HUMAN_REVIEW_FACTOR + 1,
-      bytes: pngFixture(3072, 3072), storage, requiredPx: { width: 2700, height: 3300 },
+      bytes: pngFixture(2700, 3300), storage, requiredPx: { width: 2700, height: 3300 },
     });
     expect(review.qualityStatus).toBe("human_review");
     const resolved = await reviewDerivedAsset(review.id, "passed", "kax:user:test-reviewer");
