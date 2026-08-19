@@ -36,6 +36,7 @@ import storeCheckoutRouter from "./store-checkout";
 import purchasingRouter from "./purchasing";
 import commerceRouter from "./commerce";
 import contributionsRouter from "./contributions";
+import exchangeRouter from "./exchange";
 
 const router: IRouter = Router();
 
@@ -66,6 +67,7 @@ router.use(storeCheckoutRouter);
 router.use(purchasingRouter);
 router.use(commerceRouter);
 router.use(contributionsRouter);
+router.use(exchangeRouter);
 router.use(dashboardRouter);
 router.use(shareRouter);
 router.use(webhooksRouter);
