@@ -956,6 +956,114 @@ async function loadChargeInstrument(
 const QuoteBody = z.object({ sku: z.string().min(1).max(120) });
 
 /**
+ * Stripe Checkout Session for the product page (#262). The alternative front
+ * door to the SAME settlement machinery the PaymentIntent path uses: the
+ * session's payment intent carries kaxCommerceOrderId in its metadata, so
+ * the existing /webhooks/stripe handler settles it with zero new webhook
+ * code — one settlement path, two ways in.
+ *
+ * Order-first, per the issue: the row is committed in pending_payment with
+ * the address SNAPSHOT (ship_to_* are NOT NULL by design — the address is
+ * evidence, so the buyer needs a saved address before checkout; Stripe does
+ * not collect one here) and the deterministic client_reference, and only
+ * then is Stripe called. A timeout after the row is recoverable by reading
+ * the row back; the reverse order is not.
+ *
+ * Registered BELOW the commerceEnabled gate on purpose — this endpoint
+ * charges cards, so 404-until-Stripe-is-configured is correct for it, unlike
+ * the operator surface above.
+ */
+router.post("/commerce/checkout", requireAuth, async (req: Request, res: Response) => {
+  const sku = typeof req.body?.sku === "string" ? req.body.sku : "";
+  if (!sku) {
+    res.status(400).json({ error: "sku required" });
+    return;
+  }
+  const [product] = await db
+    .select()
+    .from(commerceProductsTable)
+    .where(eq(commerceProductsTable.sku, sku))
+    .limit(1);
+  if (!product || !product.published) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const [address] = await db
+    .select()
+    .from(userShippingAddressesTable)
+    .where(
+      and(
+        eq(userShippingAddressesTable.userId, req.user!.id),
+        isNull(userShippingAddressesTable.archivedAt),
+      ),
+    )
+    .orderBy(desc(userShippingAddressesTable.createdAt))
+    .limit(1);
+  if (!address) {
+    res.status(409).json({ error: "add a shipping address before checking out" });
+    return;
+  }
+  if (!product.shipToCountries.includes(address.country)) {
+    res.status(409).json({ error: `we can't ship to ${address.country} yet` });
+    return;
+  }
+
+  const clientReference = `checkout:${crypto.randomUUID()}`;
+  const totalCents = product.itemCents + product.shippingCents;
+  const [order] = await db
+    .insert(commerceOrdersTable)
+    .values({
+      clientReference,
+      buyerUserId: req.user!.id,
+      sku: product.sku,
+      currency: product.currency,
+      itemCents: product.itemCents,
+      shippingCents: product.shippingCents,
+      taxCents: 0,
+      totalCents,
+      shipToName: address.name,
+      shipToLine1: address.line1,
+      shipToLine2: address.line2,
+      shipToCity: address.city,
+      shipToRegion: address.region,
+      shipToPostalCode: address.postalCode,
+      shipToCountry: address.country,
+      shipToPhone: address.phone,
+      status: "pending_payment",
+    })
+    .returning();
+
+  const stripe = await getUncachableStripeClient();
+  const base = publicBaseUrl();
+  if (!base) {
+    res.status(503).json({ error: "public URL not configured; cannot build checkout redirect" });
+    return;
+  }
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    client_reference_id: clientReference,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: product.currency,
+          unit_amount: totalCents,
+          product_data: { name: product.title },
+        },
+      },
+    ],
+    // Stripe Tax as CONFIGURATION (#262): no TaxProvider interface in v0.1.
+    automatic_tax: { enabled: true },
+    success_url: `${base}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${base}/checkout/cancel`,
+    payment_intent_data: {
+      metadata: { kaxCommerceOrderId: String(order!.id) },
+    },
+  });
+  res.json({ url: session.url, sessionId: session.id, clientReference });
+});
+
+/**
  * Price a product for this buyer, for five minutes.
  *
  * The state recompute comes first and the price second, because an account that
