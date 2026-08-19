@@ -193,6 +193,11 @@ describe("consumer pin — exactly the sanctioned caller imports printAsset (#25
       }
     };
     walk(SRC);
-    expect(offenders.map((o) => o.replace(/\\/g, "/"))).toEqual(["routes/commerce.ts"]);
+    // The sanctioned consumers: the #258 evaluate pipeline and the #259
+    // approval re-check — both faces of the same measurement discipline.
+    expect(offenders.map((o) => o.replace(/\\/g, "/")).sort()).toEqual([
+      "lib/approvalPin.ts",
+      "routes/commerce.ts",
+    ]);
   });
 });
