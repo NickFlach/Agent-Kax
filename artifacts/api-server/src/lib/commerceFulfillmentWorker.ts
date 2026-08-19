@@ -1,5 +1,6 @@
 import { db } from "@workspace/db";
-import { commerceOrdersTable } from "@workspace/db/schema";
+import { commerceOrdersTable, commerceProductsTable } from "@workspace/db/schema";
+import { recordDecision } from "./authority";
 import { and, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import {
   getUncachablePrintifyClient,
@@ -580,6 +581,60 @@ async function reconcileBeforeSubmit(
   }
 }
 
+/**
+ * The #263 pre-submit revalidation. Applies when the order's product carries
+ * a #259 approval pin — a product without one (the pre-machine seeded
+ * sticker) predates the eligibility machinery and is governed by the
+ * operator-published flag alone; blocking it would break the only live
+ * product on a rule it never entered.
+ *
+ * A failed re-check parks the order (the worker's permanent-hold mechanic —
+ * the issue's `on_hold` by this repo's own vocabulary), records a DENY
+ * decision naming the reason, and never touches Printify.
+ */
+export async function approvalGuardBeforeSubmit(
+  orderId: number,
+  now: Date,
+  result: FulfillmentTickResult,
+): Promise<boolean> {
+  const [order] = await db
+    .select({ sku: commerceOrdersTable.sku })
+    .from(commerceOrdersTable)
+    .where(eq(commerceOrdersTable.id, orderId))
+    .limit(1);
+  if (!order) return true; // submitCommerceOrder will answer not_found itself
+  const [product] = await db
+    .select({ id: commerceProductsTable.id, approvedContentHash: commerceProductsTable.approvedContentHash })
+    .from(commerceProductsTable)
+    .where(eq(commerceProductsTable.sku, order.sku))
+    .limit(1);
+  if (!product?.approvedContentHash) return true;
+  try {
+    const { assertApprovalStillValid } = await import("./approvalPin");
+    await assertApprovalStillValid(product.id);
+    return true;
+  } catch (err) {
+    const { ApprovalInvalidated } = await import("./approvalPin");
+    const reason =
+      err instanceof ApprovalInvalidated
+        ? `approval_invalidated:${err.newState}`
+        : "approval_check_failed";
+    await park(orderId, reason, now);
+    result.parked += 1;
+    await db.transaction((tx) =>
+      recordDecision(tx, {
+        decisionId: `dec:hold:order:${orderId}`,
+        actor: "system:fulfillment-worker",
+        capability: "commerce.hold",
+        resource: String(orderId),
+        decision: "deny",
+        reasonCode: reason.slice(0, 48),
+      }),
+    );
+    return false;
+  }
+}
+
 async function submitPass(
   printify: PrintifyClient,
   now: Date,
@@ -595,11 +650,30 @@ async function submitPass(
       // inside, which is where the decision not to submit is taken.
       if (!(await reconcileBeforeSubmit(printify, orderId, now, result))) continue;
 
+      // #263: re-evaluate at execution, never trust the queued decision. The
+      // approval was pinned to content (#259) possibly days before this tick;
+      // the bytes live in a bucket KAX does not control, and the creator bot
+      // may have been revoked since. A failed re-check PARKS the order — this
+      // repo's out-of-the-worker's-hands mechanic — records a deny decision,
+      // and calls Printify not at all.
+      if (!(await approvalGuardBeforeSubmit(orderId, now, result))) continue;
+
       const outcome = await submitCommerceOrder(db, printify, orderId);
       switch (outcome.kind) {
         case "submitted":
           result.submitted += 1;
           await recordSuccess(orderId, now);
+          // #263: one decision row per consequential transition. Idempotent
+          // on the deterministic id, same discipline as the ledger's.
+          await db.transaction((tx) =>
+            recordDecision(tx, {
+              decisionId: `dec:submit:order:${orderId}`,
+              actor: "system:fulfillment-worker",
+              capability: "commerce.submit",
+              resource: String(orderId),
+              decision: "allow",
+            }),
+          );
           break;
         case "already_submitted":
           // Another instance got there between the claim and the lock. The
