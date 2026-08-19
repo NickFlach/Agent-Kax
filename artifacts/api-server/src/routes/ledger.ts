@@ -20,6 +20,8 @@ import {
   type Posting,
 } from "../lib/ledger-core";
 import { AccountFrozen } from "../lib/frozenAccounts";
+import { sql } from "drizzle-orm";
+import { db } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -346,6 +348,86 @@ router.get("/ledger/my", async (req, res) => {
     // the same number as an exact decimal string for anyone who needs it.
     credits: Number(bal) / Number(MINOR_UNITS_PER_CREDIT),
     creditsExact: minorToCreditsString(bal),
+  });
+});
+
+/**
+ * A principal's OWN statement (#250): the individual postings behind the SUM
+ * that /ledger/my reports, newest first, with a running balance per entry.
+ * Same auth as /ledger/my — bearer identity token ONLY; a session cookie is
+ * 401 (the bearer-means-two-things trap, lib/auth.ts vs lib/actor.ts).
+ *
+ * There is deliberately NO parameter that can name another account: the
+ * account is derived from the verified token, full stop. Support access to
+ * somebody else's statement is a separate, logged capability — not a side
+ * effect of holding a service token — and does not live here.
+ *
+ * Keyset pagination on seq DESC (`before`, exclusive), limit clamped to 100.
+ * Stable across appends by construction: new postings take HIGHER seqs, so a
+ * page anchored below `before` can neither duplicate nor skip.
+ */
+router.get("/ledger/my/statement", async (req, res) => {
+  const m = /^Bearer\s+(.+)$/.exec(req.headers.authorization ?? "");
+  if (!m) {
+    res.status(401).json({ error: "identity token required (Authorization: Bearer)" });
+    return;
+  }
+  const { verifyToken } = await import("../lib/identity");
+  const v = await verifyToken(m[1]);
+  if (!v.ok) {
+    res.status(401).json({ error: `token did not verify: ${v.error}` });
+    return;
+  }
+  const { principalForClaims } = await import("../lib/actor");
+  const principal = principalForClaims(v.claims);
+  const account = `trader:${principal}`;
+
+  const asset = typeof req.query.asset === "string" && req.query.asset ? req.query.asset : "play_credit";
+  const beforeRaw = req.query.before;
+  const before =
+    typeof beforeRaw === "string" && /^\d{1,18}$/.test(beforeRaw) ? Number(beforeRaw) : null;
+  const limitRaw = req.query.limit;
+  const limit = Math.min(
+    100,
+    Math.max(1, typeof limitRaw === "string" && /^\d{1,3}$/.test(limitRaw) ? Number(limitRaw) : 50),
+  );
+
+  // runningBalance is computed in SQL as the sum of this account's postings
+  // up to and including each row's seq. Filtering `seq < before` only removes
+  // NEWER rows, which never participate in an older row's prefix sum, so the
+  // window stays correct on every page.
+  const result = await db.execute(sql`
+    SELECT seq, tx_id, amount::text AS amount, kind, ref, created_at,
+           (SUM(amount) OVER (ORDER BY seq))::text AS running_balance
+    FROM credit_ledger
+    WHERE account = ${account} AND asset = ${asset}
+      ${before === null ? sql`` : sql`AND seq < ${before}`}
+    ORDER BY seq DESC
+    LIMIT ${limit}
+  `);
+  const rows = result.rows as Array<{
+    seq: number | string;
+    tx_id: string;
+    amount: string;
+    kind: string;
+    ref: string | null;
+    created_at: string | Date;
+    running_balance: string;
+  }>;
+  const entries = rows.map((r) => ({
+    seq: Number(r.seq),
+    txId: r.tx_id,
+    amount: r.amount,
+    kind: r.kind,
+    ref: r.ref,
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+    runningBalance: r.running_balance,
+  }));
+  res.json({
+    principal,
+    asset,
+    entries,
+    nextBefore: entries.length === limit ? entries[entries.length - 1]!.seq : null,
   });
 });
 
