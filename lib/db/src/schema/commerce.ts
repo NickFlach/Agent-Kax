@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  bigserial,
   boolean,
   index,
   integer,
@@ -101,6 +102,52 @@ export const artifactPrintAssetsTable = pgTable("artifact_print_assets", {
 
 export type ArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferSelect;
 export type InsertArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferInsert;
+
+/**
+ * commerce_ledger (#265, v0.2, DARK): the fiat ledger. A SEPARATE chain from
+ * credit_ledger — one linear chain and one advisory lock per ledger, and a
+ * fiat asset never enters ALLOWED_ASSETS. Double-entry, integer cents,
+ * hash-chained, append-only by trigger (migration 0040). Account grammar and
+ * the posting vocabulary live in lib/commerceLedger.ts; the reconciliation
+ * queries in lib/commerceReconcile.ts shipped in the same PR, because a
+ * ledger nothing reconciles is the floor_ledger defect repeated.
+ */
+export const commerceLedgerTable = pgTable(
+  "commerce_ledger",
+  {
+    seq: bigserial("seq", { mode: "number" }).primaryKey(),
+    entryHash: text("entry_hash").notNull().unique(),
+    prevHash: text("prev_hash").notNull(),
+    txId: text("tx_id").notNull(),
+    /** Explicit ISO currency; 'usd' in v0.2. Never mixed within a transaction. */
+    currency: varchar("currency", { length: 8 }).notNull(),
+    account: text("account").notNull(),
+    /** Signed integer USD cents. Debit negative, credit positive. */
+    amountCents: bigint("amount_cents", { mode: "bigint" }).notNull(),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    ref: text("ref"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("commerce_ledger_account_idx").on(t.account, t.currency),
+    index("commerce_ledger_tx_idx").on(t.txId),
+    index("commerce_ledger_ref_idx").on(t.ref),
+    uniqueIndex("commerce_ledger_prev_hash_uq").on(t.prevHash),
+  ],
+);
+
+export const commerceLedgerTxidsTable = pgTable("commerce_ledger_txids", {
+  txId: text("tx_id").primaryKey(),
+  postingsHash: text("postings_hash").notNull(),
+  head: text("head").notNull(),
+  entryCount: integer("entry_count").notNull(),
+  actor: text("actor"),
+  decisionId: text("decision_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type CommerceLedgerEntry = typeof commerceLedgerTable.$inferSelect;
+export type CommerceLedgerTxid = typeof commerceLedgerTxidsTable.$inferSelect;
 
 /**
  * Physical commerce: real dollars, a real card, and something that arrives in
