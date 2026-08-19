@@ -1,0 +1,9 @@
+{
+  "calibrated": false,
+  "provenance": "UNCALIBRATED GUESSES carried over from the 2026-08-16 research pass. Replace this file with the output of the labelled calibration run (lib/print/calibrate.ts — sampleCorpusCsv -> human labels -> deriveThresholds). The gate stays report-only until calibrated is true AND a human decided to arm it.",
+  "ssimPass": 0.93,
+  "ssimReview": 0.85,
+  "deltaEPass": 4,
+  "deltaEReview": 8,
+  "flatArtMaxBands": 32
+}

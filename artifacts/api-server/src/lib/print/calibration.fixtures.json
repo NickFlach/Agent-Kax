@@ -1,0 +1,16 @@
+{
+  "note": "Held-out labelled fixtures (#297): unambiguous synthetic cases the SHIPPED thresholds must reproduce at the stated agreement rate. These are not corpus labels — the corpus run is the operator step in calibrate.ts's runbook — they are the floor under any thresholds file anyone ever commits.",
+  "statedAgreementRate": 1.0,
+  "rows": [
+    { "artifactId": 1, "preset": "flat", "widthPx": 1024, "heightPx": 1024, "colorBandCount": 6, "ssim": 0.985, "meanDeltaE2000": 0.8, "pathCount": 12, "nodeCount": 90, "svgBytes": 2100, "label": "pass" },
+    { "artifactId": 2, "preset": "flat", "widthPx": 1024, "heightPx": 1024, "colorBandCount": 11, "ssim": 0.96, "meanDeltaE2000": 2.4, "pathCount": 40, "nodeCount": 300, "svgBytes": 9000, "label": "pass" },
+    { "artifactId": 3, "preset": "detailed", "widthPx": 900, "heightPx": 900, "colorBandCount": 18, "ssim": 0.94, "meanDeltaE2000": 3.5, "pathCount": 120, "nodeCount": 1400, "svgBytes": 40000, "label": "pass" },
+    { "artifactId": 4, "preset": "flat", "widthPx": 1024, "heightPx": 1024, "colorBandCount": 25, "ssim": 0.89, "meanDeltaE2000": 6.1, "pathCount": 300, "nodeCount": 4200, "svgBytes": 120000, "label": "needs_review" },
+    { "artifactId": 5, "preset": "detailed", "widthPx": 800, "heightPx": 800, "colorBandCount": 30, "ssim": 0.87, "meanDeltaE2000": 7.4, "pathCount": 500, "nodeCount": 8000, "svgBytes": 260000, "label": "needs_review" },
+    { "artifactId": 6, "preset": "flat", "widthPx": 1024, "heightPx": 1024, "colorBandCount": 3000, "ssim": 0.62, "meanDeltaE2000": 14, "pathCount": 4000, "nodeCount": 60000, "svgBytes": 1800000, "label": "fail" },
+    { "artifactId": 7, "preset": "poster", "widthPx": 1024, "heightPx": 1024, "colorBandCount": 5200, "ssim": 0.5, "meanDeltaE2000": 22, "pathCount": 8000, "nodeCount": 110000, "svgBytes": 3600000, "label": "fail" },
+    { "artifactId": 8, "preset": "flat", "widthPx": 900, "heightPx": 900, "colorBandCount": 9, "ssim": 0.9, "meanDeltaE2000": 12, "pathCount": 25, "nodeCount": 190, "svgBytes": 5200, "label": "fail" },
+    { "artifactId": 9, "preset": "flat", "widthPx": 64, "heightPx": 64, "colorBandCount": 4, "ssim": 0.99, "meanDeltaE2000": 0.5, "pathCount": 6, "nodeCount": 40, "svgBytes": 900, "label": "fail" },
+    { "artifactId": 10, "preset": "flat", "widthPx": 64, "heightPx": 100, "colorBandCount": 700, "ssim": 0.95, "meanDeltaE2000": 2.0, "pathCount": 60, "nodeCount": 700, "svgBytes": 16000, "label": "fail" }
+  ]
+}
