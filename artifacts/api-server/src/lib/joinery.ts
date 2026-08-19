@@ -382,6 +382,13 @@ export interface PurchaseInput {
   buyerAgentId: number;
   /** The ledger account the credits come from. */
   buyerAccount: string;
+  /**
+   * The buyer's canonical principal, from resolveActor (#245). Passed
+   * explicitly rather than re-derived by stripping `trader:` off
+   * buyerAccount — inferring identity from account-name convention is the
+   * exact practice the actor column exists to end.
+   */
+  buyerPrincipal: string;
   listingId: number;
   slot: Slot;
 }
@@ -547,7 +554,12 @@ export async function purchase(input: PurchaseInput): Promise<PurchaseResult> {
   // helps nobody and the ledger requires every amount to be meaningful.
   const live = postings.filter((p) => p.amount !== 0n);
 
-  const posted = await postTransaction({ txId, asset: "play_credit", postings: live });
+  const posted = await postTransaction({
+    txId,
+    asset: "play_credit",
+    postings: live,
+    actor: input.buyerPrincipal,
+  });
 
   const [row] = await db
     .insert(unitFurnishingsTable)

@@ -43,6 +43,18 @@ export interface PostTxInput {
   txId: string;
   asset: string;
   postings: Posting[];
+  /**
+   * Who authorized this movement (#245). REQUIRED — a transaction with no
+   * actor will not type-check, because an authority layer cannot make a
+   * decision it cannot see the subject of. Recorded on the txids row, NOT in
+   * the hashed tuple: adding it to computeEntryHash or canonicalPostingsHash
+   * would invalidate every existing entry hash and turn every stored
+   * idempotency record into a conflict. Per-transaction, not per-posting.
+   * Conventions in use: `service:ledger-token:<principal>` (shared-secret
+   * routes, provenance visible), `system:signup-grant`, or a bare
+   * `kax:agent:<bot_id>` / `kax:user:<id>` principal (joinery purchases).
+   */
+  actor: string;
 }
 
 /**
@@ -139,6 +151,7 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
           postingsHash,
           head: newHead,
           entryCount: rows.length,
+          actor: input.actor,
         });
         return { txId: input.txId, head: newHead, count: rows.length, idempotentReplay: false };
       });
@@ -171,13 +184,25 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
 }
 
 /** Fetch a recorded transaction by txId (for cross-service reconciliation). */
-export async function getTransaction(txId: string): Promise<{ txId: string; head: string; count: number; postingsHash: string } | null> {
+export async function getTransaction(
+  txId: string,
+): Promise<{ txId: string; head: string; count: number; postingsHash: string; actor: string | null } | null> {
   const [rec] = await db
     .select()
     .from(creditLedgerTxidsTable)
     .where(eq(creditLedgerTxidsTable.txId, txId))
     .limit(1);
-  return rec ? { txId: rec.txId, head: rec.head, count: rec.entryCount, postingsHash: rec.postingsHash } : null;
+  return rec
+    ? {
+        txId: rec.txId,
+        head: rec.head,
+        count: rec.entryCount,
+        postingsHash: rec.postingsHash,
+        // Nullable in the READ shape: rows recorded before migration 0032
+        // legitimately have no actor, and a backfilled guess would be a lie.
+        actor: rec.actor ?? null,
+      }
+    : null;
 }
 
 /**

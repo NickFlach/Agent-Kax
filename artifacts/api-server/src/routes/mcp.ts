@@ -364,6 +364,7 @@ const TOOLS: ToolDef[] = [
         return await purchase({
           buyerAgentId: actor.agent.id,
           buyerAccount: `trader:${actor.principal}`,
+          buyerPrincipal: actor.principal,
           listingId,
           slot: args.slot,
         });

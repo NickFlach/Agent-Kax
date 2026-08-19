@@ -172,6 +172,7 @@ router.post("/joinery/buy", async (req, res) => {
     const result = await purchase({
       buyerAgentId: agentId,
       buyerAccount: `trader:${actor.principal}`,
+      buyerPrincipal: actor.principal,
       listingId: id,
       slot,
     });

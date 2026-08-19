@@ -110,7 +110,7 @@ describe("GET /ledger/my", () => {
     expect(opening.status).toBe(200);
     const topUp = target - BigInt(String(opening.body.balance));
     expect(topUp, "the signup grant already exceeds the target balance").toBeGreaterThan(0n);
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: makeTestId("ledger-my-fund"),
       asset: ASSET,
       postings: [

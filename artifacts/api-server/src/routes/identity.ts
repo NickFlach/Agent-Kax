@@ -37,6 +37,8 @@ async function grantSignupCredits(principal: string, log?: (obj: unknown, msg: s
         { account: HOUSE_ACCOUNT, amount: -SIGNUP_GRANT_MINOR, kind: "grant", ref: "signup grant" },
         { account: `trader:${principal}`, amount: SIGNUP_GRANT_MINOR, kind: "grant", ref: "signup grant" },
       ],
+      // #245: the system, not the recipient, authorizes a signup grant.
+      actor: "system:signup-grant",
     });
     if (!r.idempotentReplay) log?.({ principal }, "signup grant issued");
   } catch (err) {

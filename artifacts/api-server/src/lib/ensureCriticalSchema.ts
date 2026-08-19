@@ -524,6 +524,19 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON commerce_orders (buyer_user_id)`),
   },
   {
+    /**
+     * #245 actor audit columns. The deploy diff eats COLUMNS, not just
+     * tables (documented above for bsky_handle) — without these here, a
+     * deploy that regenerates the table from a stale shape silently drops
+     * the audit trail the authority layer reads.
+     */
+    label: "credit_ledger_txids actor audit columns",
+    sql: sql.raw(`
+      ALTER TABLE credit_ledger_txids
+        ADD COLUMN IF NOT EXISTS actor text,
+        ADD COLUMN IF NOT EXISTS decision_id text`),
+  },
+  {
     label: "commerce_orders payment intent index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
                   ON commerce_orders (stripe_payment_intent_id)`),
