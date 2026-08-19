@@ -35,7 +35,7 @@ beforeEach(() => {
   for (const k of ENV) prior.set(k, process.env[k]);
   process.env["KAX_PRINTIFY_ENABLED"] = "1";
   process.env["KAX_PRINTIFY_API_TOKEN"] = "test-token";
-  process.env["KAX_PRINTIFY_SHOP_ID"] = "28604869";
+  process.env["KAX_PRINTIFY_SHOP_ID"] = "999001";
   outbound = [];
   nextResponse = { status: 200, body: "{}" };
   vi.stubGlobal(
@@ -94,7 +94,7 @@ describe("createProduct (#261)", () => {
     });
     expect(ref).toEqual({ id: "prod_9" });
     expect(outbound).toHaveLength(1);
-    expect(outbound[0]!.url).toMatch(/\/shops\/28604869\/products\.json$/);
+    expect(outbound[0]!.url).toMatch(/\/shops\/999001\/products\.json$/);
     const body = outbound[0]!.body as {
       blueprint_id: number;
       print_provider_id: number;
