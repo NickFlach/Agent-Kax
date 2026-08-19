@@ -136,6 +136,7 @@ const OPEN_AFTER_MS = Math.max(0, Number(flag("--open-after") ?? 0)) * 60_000;
 import { nextRefreshAttempt } from "./lib/refresh-policy.mjs";
 import {
   buildPrompt,
+  conversationIsWarranted,
   fitToSay,
   foldHeard,
   replyStillOwed,
@@ -369,6 +370,15 @@ let mute = false;
  * into permanent silence towards a person standing right there.
  */
 let owedReply = false;
+/**
+ * When a HUMAN last spoke in earshot. The cost governor: replying to a human
+ * is always worth a grounded LLM call; replying to a peer agent is worth one
+ * only while a human has recently been part of the conversation. Eleven
+ * unattended hours of two agents reading each other poetry burned the
+ * operator's API allowance and got the key revoked — which also silenced the
+ * radio's peace oration on the same account.
+ */
+let lastHumanHeardAt = 0;
 /** Where this resident currently is, which is not always where it started. */
 let currentRoom = room;
 /** The city's own room list, so a proposal can only name a real place. */
@@ -563,9 +573,18 @@ async function checkIn() {
     // hello is the reason to answer, not a reason to wait.
     const peerNames = others.filter((o) => o.kind === "agent").map((o) => o.name);
     const folded = foldHeard({ heard, youName: you.name, peerNames });
+    let heardHuman = false;
+    let heardPeer = false;
     for (const line of folded.lines) {
       transcript.push(line);
       if (transcript.length > 40) transcript.shift();
+      // Anyone speaking who is not a known peer agent is treated as human —
+      // erring warm: an unrecognised speaker gets answered, not billed away.
+      if (peerNames.includes(line.from)) heardPeer = true;
+      else {
+        heardHuman = true;
+        lastHumanHeardAt = Math.max(lastHumanHeardAt, line.at || Date.now());
+      }
     }
     lastPeerSayAt = Math.max(lastPeerSayAt, folded.lastPeerSayAt);
     lastActivityAt = Math.max(lastActivityAt, folded.lastActivityAt);
@@ -585,13 +604,34 @@ async function checkIn() {
           youName: you.name ?? AGENT_ID,
         });
         if (proposal) {
+          // A peer's invitation is only considered inside the human-grace
+          // window — same warrant as replies, since deciding costs an ask.
+          const fromPeer = peerNames.includes(proposal.from);
+          if (fromPeer && !conversationIsWarranted({ lastHumanHeardAt, replyingToPeer: true })) {
+            log(`  (ignoring ${proposal.from}'s invitation — no human around to see it kept)`);
+            continue;
+          }
           await considerProposal(proposal);
           break; // one decision per tick; the rest keeps until next time
         }
       }
     }
 
-    if (folded.lines.length) owedReply = true;
+    // The warrant (cost governor): a human's line always creates the reply
+    // obligation; a peer's line does so only inside the human-grace window.
+    // Outside it, the peers' exchange is allowed to end — a resident performs
+    // for people, not for itself.
+    if (folded.lines.length) {
+      const warranted = heardHuman || conversationIsWarranted({
+        lastHumanHeardAt,
+        replyingToPeer: heardPeer && !heardHuman,
+      });
+      if (warranted) {
+        owedReply = true;
+      } else if (heardPeer) {
+        log("  (peer conversation unwarranted — no human heard recently; letting it rest)");
+      }
+    }
     // Not `else if`: the reply may have been refused on the tick it arrived,
     // and the message is already drained. Keep the obligation and retry.
     owedReply = replyStillOwed({ owed: owedReply, lastActivityAt });
@@ -599,6 +639,9 @@ async function checkIn() {
     if (owedReply) {
       if (await speak({ opening: false, you, others })) owedReply = false;
     } else if (
+      // Opening a topic costs a grounded call and is pure performance — so it
+      // requires an AUDIENCE: at least one non-agent standing in the room.
+      others.some((o) => o.kind !== "agent") &&
       shouldOpen({
         name: you.name ?? AGENT_ID,
         silentForMs: Date.now() - (lastActivityAt || 0),

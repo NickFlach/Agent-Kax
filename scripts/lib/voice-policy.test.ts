@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import {
   SAY_MAX,
   buildPrompt,
+  conversationIsWarranted,
   fitToSay,
   foldHeard,
   replyStillOwed,
@@ -253,5 +254,33 @@ describe("replyStillOwed — a refusal must not become permanent silence", () =>
 
   it("owes nothing when nobody has spoken", () => {
     expect(replyStillOwed({ owed: false, lastActivityAt: now, now })).toBe(false);
+  });
+});
+
+describe("conversationIsWarranted — the cost governor", () => {
+  const now = 1_700_000_000_000;
+
+  // The incident: eleven unattended hours of peer-to-peer replies, each a
+  // grounded LLM call, burned the operator's API allowance. He revoked the
+  // key at midnight — which also silenced the radio's peace oration on the
+  // same account. A resident performs for PEOPLE, not for itself.
+  it("a reply to a HUMAN is always warranted", () => {
+    expect(conversationIsWarranted({ lastHumanHeardAt: 0, replyingToPeer: false, now })).toBe(true);
+  });
+
+  it("a reply to a peer is warranted while a human was recently in the conversation", () => {
+    expect(
+      conversationIsWarranted({ lastHumanHeardAt: now - 5 * 60_000, replyingToPeer: true, now }),
+    ).toBe(true);
+  });
+
+  it("a peer exchange with no recent human decays — the empty-room burn", () => {
+    expect(
+      conversationIsWarranted({ lastHumanHeardAt: now - 16 * 60_000, replyingToPeer: true, now }),
+    ).toBe(false);
+  });
+
+  it("a resident that has never heard a human does not talk to peers at all", () => {
+    expect(conversationIsWarranted({ lastHumanHeardAt: 0, replyingToPeer: true, now })).toBe(false);
   });
 });

@@ -213,3 +213,31 @@ export function replyStillOwed({ owed, lastActivityAt = 0, now = Date.now(), win
   if (!owed) return false;
   return now - lastActivityAt < windowMs;
 }
+
+/**
+ * Is anybody actually listening?
+ *
+ * The residents ran unattended for eleven hours, replying to each other every
+ * 45 seconds, each reply a grounded LLM call — and burned through the
+ * operator's API allowance performing for an empty room. He revoked the key
+ * at midnight, which also silenced the radio's peace oration: the first
+ * casualty of an unbounded conversation was an unrelated feature sharing the
+ * same account.
+ *
+ * The principle: a resident performs for PEOPLE, not for itself. Replying to
+ * a HUMAN is always worth a call. Replying to a PEER AGENT is worth a call
+ * only while a human has recently been part of the conversation — after that
+ * the exchange is two daemons reading each other poetry at four dollars an
+ * hour. `graceMs` keeps the room lively while somebody is actually there and
+ * lets a thread wind down naturally after they leave, rather than cutting it
+ * mid-sentence.
+ */
+export function conversationIsWarranted({
+  lastHumanHeardAt = 0,
+  replyingToPeer,
+  now = Date.now(),
+  graceMs = 15 * 60_000,
+} = {}) {
+  if (!replyingToPeer) return true; // a human spoke — always answer
+  return now - lastHumanHeardAt < graceMs;
+}
