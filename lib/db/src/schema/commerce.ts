@@ -165,10 +165,36 @@ export const commerceProductsTable = pgTable(
      * failure, which is the difference between a limitation and a bug.
      */
     shipToCountries: text("ship_to_countries").array().notNull().default(["US"]),
+    // ---- #257: merchant link, spec identity, and the eligibility machine.
+    /** Nullable: rows from before the merchant entity existed have none. */
+    merchantId: integer("merchant_id").references(() => commerceMerchantsTable.id, {
+      onDelete: "restrict",
+    }),
+    /** e.g. poster_12x12 — the print spec this product instantiates. */
+    productSpecId: varchar("product_spec_id", { length: 48 }),
+    /** ADR-0002's eligibility machine; vocabulary + transitions in lib/commerceOrder.ts. */
+    commerceState: varchar("commerce_state", { length: 32 }).notNull().default("not_evaluated"),
+    printifyBlueprintId: varchar("printify_blueprint_id"),
+    /**
+     * The content hash the human approval was pinned to (#259 consumes this):
+     * approval is of BYTES, not of a URL, and a mismatch at re-check drops the
+     * product back to product_eligible for fresh human eyes.
+     */
+    approvedContentHash: text("approved_content_hash"),
+    approvedBy: varchar("approved_by").references(() => usersTable.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at"),
+    unpublishedAt: timestamp("unpublished_at"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("commerce_products_published_idx").on(t.published)],
+  (t) => [
+    index("commerce_products_published_idx").on(t.published),
+    uniqueIndex("commerce_products_merchant_artifact_spec_idx").on(
+      t.merchantId,
+      t.artifactId,
+      t.productSpecId,
+    ),
+  ],
 );
 
 export type CommerceProduct = typeof commerceProductsTable.$inferSelect;
@@ -337,6 +363,35 @@ export const commerceOrdersTable = pgTable(
      * this column exists to make unnecessary. NULL means never checked.
      */
     fulfillmentSyncedAt: timestamp("fulfillment_synced_at", { withTimezone: true }),
+
+    // ── #257: the full money-leg set. Margin cannot be computed from a gross
+    // figure; every leg is an integer of USD cents named with its unit, and
+    // lib/commerceOrder.ts's assertLegsBalance is the discipline that keeps
+    // them summing. Naming equivalences with the issue are documented in
+    // migration 0039 (item_price_cents == item_cents, external_ref ==
+    // client_reference, pod_order_id == printify_order_id, ...).
+    /** The full authorized amount, reconcilable to the Stripe charge. */
+    customerChargeCents: integer("customer_charge_cents"),
+    taxJurisdiction: varchar("tax_jurisdiction", { length: 48 }),
+    taxRateBps: integer("tax_rate_bps"),
+    /** kax | merchant */
+    taxCollectorOfRecord: varchar("tax_collector_of_record", { length: 16 }),
+    processorFeeCents: integer("processor_fee_cents"),
+    /** platform | merchant */
+    processorFeeBearer: varchar("processor_fee_bearer", { length: 16 }),
+    platformFeeCents: integer("platform_fee_cents"),
+    platformFeeRateBps: integer("platform_fee_rate_bps"),
+    /** item_price | customer_charge */
+    platformFeeBasis: varchar("platform_fee_basis", { length: 24 }),
+    fulfillmentCostCents: integer("fulfillment_cost_cents"),
+    fulfillmentShippingCostCents: integer("fulfillment_shipping_cost_cents"),
+    /** kax | merchant */
+    fulfillmentCostPayer: varchar("fulfillment_cost_payer", { length: 16 }),
+    fulfillmentPaidAt: timestamp("fulfillment_paid_at"),
+    merchantNetCents: integer("merchant_net_cents"),
+    stripeChargeId: varchar("stripe_charge_id"),
+    taxProviderTxn: varchar("tax_provider_txn"),
+    correlationId: text("correlation_id"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
