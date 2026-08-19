@@ -15,6 +15,15 @@ export const agentStorefrontSettingsTable = pgTable("agent_storefront_settings",
   socialLinks: jsonb("social_links").$type<Record<string, string> | null>(),
   customDomainHint: text("custom_domain_hint"),
   customCssVars: jsonb("custom_css_vars").$type<Record<string, string> | null>(),
+  /**
+   * #183: owner-curated display order for the store's walls/frames/cabinets.
+   * NULL = automatic newest-first (the pre-#183 behavior, unchanged for
+   * every store that never curates). Ids are validated against the agent's
+   * own works at write time.
+   */
+  curatedArtifactIds: jsonb("curated_artifact_ids").$type<number[] | null>(),
+  /** #183: owner-given names for the two staff NPCs. */
+  staffNames: jsonb("staff_names").$type<{ greeter?: string; attendant?: string } | null>(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdate(() => new Date()),
 });
 

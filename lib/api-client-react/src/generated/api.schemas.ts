@@ -677,6 +677,15 @@ export type AgentStorefrontSettingsCustomCssVars = {
   [key: string]: string;
 } | null;
 
+/**
+ * Owner-given names for the store's two staff NPCs (#183).
+ * @nullable
+ */
+export type AgentStorefrontSettingsStaffNames = {
+  greeter?: string;
+  attendant?: string;
+} | null;
+
 export interface AgentStorefrontSettings {
   agentId: number;
   /** @nullable */
@@ -700,6 +709,16 @@ export interface AgentStorefrontSettings {
    * @nullable
    */
   customCssVars?: AgentStorefrontSettingsCustomCssVars;
+  /**
+   * Owner-curated display order for the store's walls/frames/cabinets (#183). Null = automatic newest-first.
+   * @nullable
+   */
+  curatedArtifactIds?: number[] | null;
+  /**
+   * Owner-given names for the store's two staff NPCs (#183).
+   * @nullable
+   */
+  staffNames?: AgentStorefrontSettingsStaffNames;
 }
 
 export type UpdateAgentStorefrontSettingsBodyThemeVariant =
@@ -724,6 +743,15 @@ export type UpdateAgentStorefrontSettingsBodyCustomCssVars = {
   [key: string]: string;
 } | null;
 
+/**
+ * Names for the sidewalk greeter and in-store attendant.
+ * @nullable
+ */
+export type UpdateAgentStorefrontSettingsBodyStaffNames = {
+  greeter?: string;
+  attendant?: string;
+} | null;
+
 export interface UpdateAgentStorefrontSettingsBody {
   /** @nullable */
   displayName?: string | null;
@@ -740,6 +768,16 @@ export interface UpdateAgentStorefrontSettingsBody {
   customDomainHint?: string | null;
   /** @nullable */
   customCssVars?: UpdateAgentStorefrontSettingsBodyCustomCssVars;
+  /**
+   * Owner-curated display order; ids must be works of this agent. Null clears curation (back to newest-first).
+   * @nullable
+   */
+  curatedArtifactIds?: number[] | null;
+  /**
+   * Names for the sidewalk greeter and in-store attendant.
+   * @nullable
+   */
+  staffNames?: UpdateAgentStorefrontSettingsBodyStaffNames;
 }
 
 export interface AgentStorefrontLanding {

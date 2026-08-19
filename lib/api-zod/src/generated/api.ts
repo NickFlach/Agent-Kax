@@ -2085,6 +2085,19 @@ export const GetAgentStorefrontSettingsResponse = zod.object({
     .describe(
       "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
     ),
+  curatedArtifactIds: zod
+    .array(zod.number())
+    .nullish()
+    .describe(
+      "Owner-curated display order for the store's walls\/frames\/cabinets (#183). Null = automatic newest-first.",
+    ),
+  staffNames: zod
+    .object({
+      greeter: zod.string().optional(),
+      attendant: zod.string().optional(),
+    })
+    .nullish()
+    .describe("Owner-given names for the store's two staff NPCs (#183)."),
 });
 
 /**
@@ -2103,6 +2116,19 @@ export const UpdateAgentStorefrontSettingsBody = zod.object({
   socialLinks: zod.record(zod.string(), zod.string()).nullish(),
   customDomainHint: zod.string().nullish(),
   customCssVars: zod.record(zod.string(), zod.string()).nullish(),
+  curatedArtifactIds: zod
+    .array(zod.number())
+    .nullish()
+    .describe(
+      "Owner-curated display order; ids must be works of this agent. Null clears curation (back to newest-first).",
+    ),
+  staffNames: zod
+    .object({
+      greeter: zod.string().optional(),
+      attendant: zod.string().optional(),
+    })
+    .nullish()
+    .describe("Names for the sidewalk greeter and in-store attendant."),
 });
 
 export const UpdateAgentStorefrontSettingsResponse = zod.object({
@@ -2120,6 +2146,19 @@ export const UpdateAgentStorefrontSettingsResponse = zod.object({
     .describe(
       "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
     ),
+  curatedArtifactIds: zod
+    .array(zod.number())
+    .nullish()
+    .describe(
+      "Owner-curated display order for the store's walls\/frames\/cabinets (#183). Null = automatic newest-first.",
+    ),
+  staffNames: zod
+    .object({
+      greeter: zod.string().optional(),
+      attendant: zod.string().optional(),
+    })
+    .nullish()
+    .describe("Owner-given names for the store's two staff NPCs (#183)."),
 });
 
 /**
@@ -2161,6 +2200,19 @@ export const GetAgentStorefrontResponse = zod.object({
       .describe(
         "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
       ),
+    curatedArtifactIds: zod
+      .array(zod.number())
+      .nullish()
+      .describe(
+        "Owner-curated display order for the store's walls\/frames\/cabinets (#183). Null = automatic newest-first.",
+      ),
+    staffNames: zod
+      .object({
+        greeter: zod.string().optional(),
+        attendant: zod.string().optional(),
+      })
+      .nullish()
+      .describe("Owner-given names for the store's two staff NPCs (#183)."),
   }),
   featured: zod.array(
     zod.object({
@@ -2412,6 +2464,19 @@ export const GetStorefrontMarketplaceResponse = zod.object({
           .describe(
             "Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).",
           ),
+        curatedArtifactIds: zod
+          .array(zod.number())
+          .nullish()
+          .describe(
+            "Owner-curated display order for the store's walls\/frames\/cabinets (#183). Null = automatic newest-first.",
+          ),
+        staffNames: zod
+          .object({
+            greeter: zod.string().optional(),
+            attendant: zod.string().optional(),
+          })
+          .nullish()
+          .describe("Owner-given names for the store's two staff NPCs (#183)."),
       }),
       publishedDropCount: zod.number(),
       artifactCount: zod.number(),

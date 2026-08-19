@@ -10,7 +10,7 @@ import {
   type AgentStorefrontSettings,
   type Agent,
 } from "@workspace/db/schema";
-import { eq, and, desc, count, gte, isNotNull, inArray, or, sql } from "drizzle-orm";
+import { eq, and, desc, count, gte, isNotNull, inArray, notInArray, or, sql } from "drizzle-orm";
 import { decayedHeatSignal } from "../lib/tasteEngine";
 import {
   GetAgentStorefrontSettingsParams,
@@ -71,6 +71,8 @@ function defaultSettings(agent: Agent): AgentStorefrontSettings {
     socialLinks: null,
     customDomainHint: null,
     customCssVars: null,
+    curatedArtifactIds: null,
+    staffNames: null,
     updatedAt: agent.updatedAt,
   };
 }
@@ -86,6 +88,8 @@ function formatSettings(s: AgentStorefrontSettings) {
     socialLinks: s.socialLinks,
     customDomainHint: s.customDomainHint,
     customCssVars: s.customCssVars,
+    curatedArtifactIds: s.curatedArtifactIds,
+    staffNames: s.staffNames,
   };
 }
 
@@ -144,6 +148,35 @@ async function refuseIfStoreFrozen(
     ...(frozen.reason ? { reason: frozen.reason } : {}),
   });
   return true;
+}
+
+/**
+ * #183: validate an owner's curated display order. Every id must be a work
+ * of THIS agent — curation chooses among your own walls' inventory; it
+ * cannot conscript somebody else's artifact onto them. A foreign or unknown
+ * id refuses the WHOLE write (a silently-filtered list would save something
+ * the owner did not ask for). Null/omitted/empty clears back to automatic
+ * newest-first. Exported for tests.
+ */
+export async function validateCuratedIds(
+  agent: Agent,
+  raw: unknown,
+): Promise<{ ok: true; ids: number[] | null } | { ok: false; error: string }> {
+  if (!Array.isArray(raw) || raw.length === 0) return { ok: true, ids: null };
+  const ids = [...new Set(raw.map((n) => Number(n)))];
+  if (ids.length > 64 || ids.some((n) => !Number.isInteger(n) || n <= 0)) {
+    return { ok: false, error: "curatedArtifactIds: up to 64 positive integer artifact ids" };
+  }
+  const owned = await db
+    .select({ id: artifactsTable.id })
+    .from(artifactsTable)
+    .where(and(agentWorksWhere(agent), inArray(artifactsTable.id, ids)));
+  const ownedSet = new Set(owned.map((o) => o.id));
+  const foreign = ids.filter((id) => !ownedSet.has(id));
+  if (foreign.length > 0) {
+    return { ok: false, error: `curatedArtifactIds contains works that are not this agent's: ${foreign.join(", ")}` };
+  }
+  return { ok: true, ids };
 }
 
 async function loadSettingsForAgent(agentId: number): Promise<AgentStorefrontSettings | null> {
@@ -210,6 +243,29 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
     if (Object.keys(cleanedSocial).length === 0) cleanedSocial = null;
   }
 
+  // #183: the curated display order — validated below in validateCuratedIds.
+  const curatedVerdict = await validateCuratedIds(agent, body.curatedArtifactIds);
+  if (!curatedVerdict.ok) {
+    res.status(400).json({ error: curatedVerdict.error });
+    return;
+  }
+  const cleanedCurated = curatedVerdict.ids;
+
+  // #183: staff names — trimmed, printable, 1..40 chars, exactly the two
+  // roles. An empty object clears the names.
+  let cleanedStaff: { greeter?: string; attendant?: string } | null = null;
+  if (body.staffNames && typeof body.staffNames === "object") {
+    cleanedStaff = {};
+    for (const role of ["greeter", "attendant"] as const) {
+      const v = (body.staffNames as Record<string, unknown>)[role];
+      if (typeof v === "string") {
+        const name = v.trim().replace(/[\p{Cc}\p{Cf}]/gu, "");
+        if (name.length >= 1 && name.length <= 40) cleanedStaff[role] = name;
+      }
+    }
+    if (Object.keys(cleanedStaff).length === 0) cleanedStaff = null;
+  }
+
   const values = {
     agentId: agent.id,
     displayName: body.displayName ?? null,
@@ -220,6 +276,8 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
     socialLinks: cleanedSocial,
     customDomainHint: body.customDomainHint ?? null,
     customCssVars: cleanedCssVars,
+    curatedArtifactIds: cleanedCurated,
+    staffNames: cleanedStaff,
     updatedAt: new Date(),
   };
 
@@ -237,6 +295,8 @@ router.put("/agents/:slug/storefront/settings", requireAuth, async (req, res) =>
         socialLinks: values.socialLinks,
         customDomainHint: values.customDomainHint,
         customCssVars: values.customCssVars,
+        curatedArtifactIds: values.curatedArtifactIds,
+        staffNames: values.staffNames,
         updatedAt: values.updatedAt,
       },
     })
@@ -377,17 +437,58 @@ router.get("/storefront/by-agent/:slug/works", async (req, res) => {
     return;
   }
   const where = agentWorksWhere(agent);
-  const [rows, [{ total }]] = await Promise.all([
+
+  // #183: owner curation, when set, leads the walls — curated works first in
+  // the OWNER'S order, then everything else newest-first, one continuous
+  // pageable sequence. A store that never curated keeps the automatic feed
+  // bit-for-bit.
+  const settings = await loadSettingsForAgent(agent.id);
+  const curated = settings?.curatedArtifactIds ?? null;
+
+  if (!curated || curated.length === 0) {
+    const [rows, [{ total }]] = await Promise.all([
+      db
+        .select()
+        .from(artifactsTable)
+        .where(where)
+        .orderBy(desc(artifactsTable.ingestedAt), desc(artifactsTable.id))
+        .limit(limit)
+        .offset(offset),
+      db.select({ total: count() }).from(artifactsTable).where(where),
+    ]);
+    res.json({ artifacts: rows.map(formatArtifact), total });
+    return;
+  }
+
+  const [curatedRows, [{ total }]] = await Promise.all([
     db
       .select()
       .from(artifactsTable)
-      .where(where)
-      .orderBy(desc(artifactsTable.ingestedAt), desc(artifactsTable.id))
-      .limit(limit)
-      .offset(offset),
+      .where(and(where, inArray(artifactsTable.id, curated))),
     db.select({ total: count() }).from(artifactsTable).where(where),
   ]);
-  res.json({ artifacts: rows.map(formatArtifact), total });
+  // Owner order, dropping any curated id whose work has since vanished —
+  // the display degrades to shorter, never to a 500.
+  const byId = new Map(curatedRows.map((r) => [r.id, r]));
+  const lead = curated.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r);
+  const leadCount = lead.length;
+
+  const page: (typeof curatedRows)[number][] = [];
+  if (offset < leadCount) {
+    page.push(...lead.slice(offset, offset + limit));
+  }
+  if (page.length < limit) {
+    const restOffset = Math.max(0, offset - leadCount);
+    const rest = await db
+      .select()
+      .from(artifactsTable)
+      .where(and(where, notInArray(artifactsTable.id, curated)))
+      .orderBy(desc(artifactsTable.ingestedAt), desc(artifactsTable.id))
+      .limit(limit - page.length)
+      .offset(restOffset);
+    page.push(...rest);
+  }
+  res.json({ artifacts: page.map(formatArtifact), total });
 });
 
 // ── Cross-agent store listings ───────────────────────────────────────────

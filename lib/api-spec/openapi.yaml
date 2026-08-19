@@ -2876,6 +2876,19 @@ components:
           description: Allowlisted CSS variables (e.g. `--background`, `--foreground`, `--accent`).
           additionalProperties:
             type: string
+        curatedArtifactIds:
+          type: [array, "null"]
+          description: Owner-curated display order for the store's walls/frames/cabinets (#183). Null = automatic newest-first.
+          items:
+            type: integer
+        staffNames:
+          type: [object, "null"]
+          description: Owner-given names for the store's two staff NPCs (#183).
+          properties:
+            greeter:
+              type: string
+            attendant:
+              type: string
 
     UpdateAgentStorefrontSettingsBody:
       type: object
@@ -2901,6 +2914,19 @@ components:
           type: [object, "null"]
           additionalProperties:
             type: string
+        curatedArtifactIds:
+          type: [array, "null"]
+          description: Owner-curated display order; ids must be works of this agent. Null clears curation (back to newest-first).
+          items:
+            type: integer
+        staffNames:
+          type: [object, "null"]
+          description: Names for the sidewalk greeter and in-store attendant.
+          properties:
+            greeter:
+              type: string
+            attendant:
+              type: string
 
     AgentStorefrontLanding:
       type: object

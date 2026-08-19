@@ -7,6 +7,7 @@
  */
 import type { UpdateAgentStorefrontSettingsBodyCustomCssVars } from "./updateAgentStorefrontSettingsBodyCustomCssVars";
 import type { UpdateAgentStorefrontSettingsBodySocialLinks } from "./updateAgentStorefrontSettingsBodySocialLinks";
+import type { UpdateAgentStorefrontSettingsBodyStaffNames } from "./updateAgentStorefrontSettingsBodyStaffNames";
 import type { UpdateAgentStorefrontSettingsBodyThemeVariant } from "./updateAgentStorefrontSettingsBodyThemeVariant";
 
 export interface UpdateAgentStorefrontSettingsBody {
@@ -25,4 +26,14 @@ export interface UpdateAgentStorefrontSettingsBody {
   customDomainHint?: string | null;
   /** @nullable */
   customCssVars?: UpdateAgentStorefrontSettingsBodyCustomCssVars;
+  /**
+   * Owner-curated display order; ids must be works of this agent. Null clears curation (back to newest-first).
+   * @nullable
+   */
+  curatedArtifactIds?: number[] | null;
+  /**
+   * Names for the sidewalk greeter and in-store attendant.
+   * @nullable
+   */
+  staffNames?: UpdateAgentStorefrontSettingsBodyStaffNames;
 }

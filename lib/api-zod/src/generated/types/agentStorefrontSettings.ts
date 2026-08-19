@@ -7,6 +7,7 @@
  */
 import type { AgentStorefrontSettingsCustomCssVars } from "./agentStorefrontSettingsCustomCssVars";
 import type { AgentStorefrontSettingsSocialLinks } from "./agentStorefrontSettingsSocialLinks";
+import type { AgentStorefrontSettingsStaffNames } from "./agentStorefrontSettingsStaffNames";
 import type { AgentStorefrontSettingsThemeVariant } from "./agentStorefrontSettingsThemeVariant";
 
 export interface AgentStorefrontSettings {
@@ -32,4 +33,14 @@ export interface AgentStorefrontSettings {
    * @nullable
    */
   customCssVars?: AgentStorefrontSettingsCustomCssVars;
+  /**
+   * Owner-curated display order for the store's walls/frames/cabinets (#183). Null = automatic newest-first.
+   * @nullable
+   */
+  curatedArtifactIds?: number[] | null;
+  /**
+   * Owner-given names for the store's two staff NPCs (#183).
+   * @nullable
+   */
+  staffNames?: AgentStorefrontSettingsStaffNames;
 }
