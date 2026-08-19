@@ -139,7 +139,8 @@ export function parseImageHeader(bytes: Uint8Array): ParsedImageHeader | null {
   return null;
 }
 
-function hostAllowed(url: URL): boolean {
+/** Exported for storage/custody.ts (#264): the custody fetch must use the SAME allowlist. */
+export function hostAllowed(url: URL): boolean {
   return (
     url.protocol === "https:" &&
     ALLOWED_HOST_SUFFIXES.some((s) => url.hostname === s.slice(1) || url.hostname.endsWith(s))

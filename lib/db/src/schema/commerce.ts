@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -97,11 +98,52 @@ export const artifactPrintAssetsTable = pgTable("artifact_print_assets", {
   fetchedAt: timestamp("fetched_at"),
   /** not_a_url | sentinel | fetch_failed | too_large | decode_failed */
   failureReason: varchar("failure_reason", { length: 48 }),
+  /**
+   * #264: where the custody copy of the source bytes lives in KAX-controlled
+   * storage (content-addressed). NULL = custody not yet taken, and the guard
+   * in storage/custody.ts refuses to create derived assets while it is.
+   */
+  storageKey: text("storage_key"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type ArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferSelect;
 export type InsertArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferInsert;
+
+/**
+ * derived_assets (#264, ADR-0002 v0.2): a derived print master is a NEW asset
+ * with its own provenance — its own row, its own sha256, its own
+ * source_artifact_id edge, and (downstream) a fresh merchant approval. Lives
+ * in KAX-controlled storage, never in Postgres and never as a re-fetch of the
+ * OBC URL — the source bucket is OBC's and there is no larger original to
+ * re-derive from if it rotates. quality_status is varchar, never pgEnum:
+ * pending | passed | failed | human_review.
+ */
+export const derivedAssetsTable = pgTable(
+  "derived_assets",
+  {
+    id: serial("id").primaryKey(),
+    sourceArtifactId: integer("source_artifact_id")
+      .notNull()
+      .references(() => artifactsTable.id, { onDelete: "cascade" }),
+    /** e.g. 'upscale' */
+    transformType: varchar("transform_type", { length: 32 }).notNull(),
+    transformFactor: real("transform_factor").notNull(),
+    qualityStatus: varchar("quality_status", { length: 24 }).notNull().default("pending"),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    byteSize: bigint("byte_size", { mode: "bigint" }),
+    widthPx: integer("width_px"),
+    heightPx: integer("height_px"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("derived_assets_source_idx").on(t.sourceArtifactId, t.createdAt.desc())],
+);
+
+export type DerivedAsset = typeof derivedAssetsTable.$inferSelect;
+export type InsertDerivedAsset = typeof derivedAssetsTable.$inferInsert;
 
 /**
  * commerce_ledger (#265, v0.2, DARK): the fiat ledger. A SEPARATE chain from

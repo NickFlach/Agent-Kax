@@ -211,3 +211,17 @@ write — inert by construction, and deliberately NOT a silent fallthrough to
 `KAX_SERVICE_TOKEN` or any ledger token. The router is mounted
 unconditionally so the disabled surface is a sentence, never a 404 that
 reads like a bad deploy.
+
+## Object storage custody (#264)
+
+KAX object storage is any **S3-compatible** bucket (Supabase Storage's S3
+gateway, R2, AWS — the commitment is to the protocol, not a vendor), spoken
+to by the dependency-free SigV4 client in
+`artifacts/api-server/src/lib/storage/`. Five out-of-band Replit secrets arm
+it: `KAX_STORAGE_ENDPOINT`, `KAX_STORAGE_BUCKET`, `KAX_STORAGE_REGION`,
+`KAX_STORAGE_ACCESS_KEY_ID`, `KAX_STORAGE_SECRET_ACCESS_KEY`. Until all five
+exist, everything needing custody throws `StorageUnconfigured` — the same
+503-when-unset idiom as `KAX_COMMERCE_TOKEN`, never a silent skip. Custody of
+source bytes is a hard precondition of derived print masters
+(`storage/custody.ts`), and reprints read the KAX-held master, never the OBC
+URL.

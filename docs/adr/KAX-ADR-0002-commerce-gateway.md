@@ -2010,7 +2010,8 @@ registers, who remits, and whose liability the `tax_collected` leg represents.
 | Artifact identity | KAX |
 | Agent attribution | KAX |
 | Product source image (*which* image) | KAX |
-| Print file custody | fulfilment provider, once uploaded |
+| Product source image (*the bytes*) | KAX, **only once custody is taken** (#264); until then, OBC's bucket holds the only copy |
+| Print file custody | fulfilment provider, once uploaded — and KAX, for derived masters (`derived_assets` + the KAX bucket, #264) |
 | Listing payment status | sales channel |
 | Fulfilment status | POD provider |
 | Shipment tracking | POD provider |

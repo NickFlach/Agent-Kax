@@ -193,10 +193,12 @@ describe("consumer pin — exactly the sanctioned caller imports printAsset (#25
       }
     };
     walk(SRC);
-    // The sanctioned consumers: the #258 evaluate pipeline and the #259
-    // approval re-check — both faces of the same measurement discipline.
+    // The sanctioned consumers: the #258 evaluate pipeline, the #259
+    // approval re-check, and the #264 custody fetch — which must use the
+    // SAME allowlist + cap as the measurement, hence the import.
     expect(offenders.map((o) => o.replace(/\\/g, "/")).sort()).toEqual([
       "lib/approvalPin.ts",
+      "lib/storage/custody.ts",
       "routes/commerce.ts",
     ]);
   });

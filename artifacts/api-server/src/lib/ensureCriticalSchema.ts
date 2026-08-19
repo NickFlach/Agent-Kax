@@ -878,6 +878,41 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON authority_reservations (state, created_at)`),
   },
   {
+    /** #264: the custody pointer for source bytes. Columns get eaten too. */
+    label: "artifact_print_assets storage_key column",
+    sql: sql.raw(`ALTER TABLE artifact_print_assets
+                  ADD COLUMN IF NOT EXISTS storage_key text`),
+  },
+  {
+    /**
+     * #264: derived print masters' provenance rows. The bytes live in the
+     * KAX bucket; losing this table would orphan them — content-addressed
+     * keys make them findable again, but the quality verdicts would not be.
+     */
+    label: "derived_assets table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS derived_assets (
+        id                 serial PRIMARY KEY,
+        source_artifact_id integer NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        transform_type     varchar(32) NOT NULL,
+        transform_factor   real NOT NULL,
+        quality_status     varchar(24) NOT NULL DEFAULT 'pending',
+        storage_key        text NOT NULL,
+        sha256             text NOT NULL,
+        byte_size          bigint,
+        width_px           integer,
+        height_px          integer,
+        reviewed_by        text,
+        reviewed_at        timestamp,
+        created_at         timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "derived_assets source index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS derived_assets_source_idx
+                  ON derived_assets (source_artifact_id, created_at DESC)`),
+  },
+  {
     label: "commerce_orders payment intent index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
                   ON commerce_orders (stripe_payment_intent_id)`),
@@ -999,6 +1034,7 @@ const CRITICAL_TABLES = [
   "authority_policies",
   "authority_usage",
   "authority_reservations",
+  "derived_assets",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {
