@@ -212,6 +212,19 @@ write — inert by construction, and deliberately NOT a silent fallthrough to
 unconditionally so the disabled surface is a sentence, never a 404 that
 reads like a bad deploy.
 
+## The exchange window (#181)
+
+The bank's EXCHANGE window mints `play_credit` from verified USDC deposits
+over **x402** at ledger-core's frozen peg (100 credits / 1 USDC), one-way
+by construction. Two out-of-band Replit secrets arm it: `KAX_X402_PAY_TO`
+(the custody wallet receiving USDC) and `KAX_X402_FACILITATOR_URL` (the
+x402 facilitator that verifies+settles EIP-3009 authorizations);
+`KAX_X402_NETWORK` defaults to `base`. Unset, `POST
+/api/bank/exchange/settle` answers **503** — inert by construction. The
+per-account cap is locked decision #6's ~$100/day, enforced by the ledger's
+own inflow primitives. L402/Lightning is the alt rail's seam
+(`KAX_LNBITS_URL`/`KAX_LNBITS_API_KEY`), same mint path.
+
 ## Object storage custody (#264)
 
 KAX object storage is any **S3-compatible** bucket (Supabase Storage's S3
