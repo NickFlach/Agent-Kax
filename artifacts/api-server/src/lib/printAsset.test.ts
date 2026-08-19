@@ -175,8 +175,8 @@ describe("measureArtifactAsset (DB)", () => {
   });
 });
 
-describe("darkness pin — measureArtifactAsset is called from nowhere (#254)", () => {
-  it("no production file imports printAsset", async () => {
+describe("consumer pin — exactly the sanctioned caller imports printAsset (#254/#258)", () => {
+  it("only routes/commerce.ts (the #258 evaluate pipeline) imports printAsset", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const SRC = path.join(__dirname, "..");
@@ -193,6 +193,6 @@ describe("darkness pin — measureArtifactAsset is called from nowhere (#254)", 
       }
     };
     walk(SRC);
-    expect(offenders).toEqual([]);
+    expect(offenders.map((o) => o.replace(/\\/g, "/"))).toEqual(["routes/commerce.ts"]);
   });
 });
