@@ -1,4 +1,4 @@
-import { pgTable, bigserial, bigint, text, timestamp, varchar, index } from "drizzle-orm/pg-core";
+import { pgTable, bigserial, bigint, integer, jsonb, text, timestamp, varchar, index, unique, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * authority_decisions — the immutable decision record of the Agent Economic
@@ -48,3 +48,89 @@ export const authorityDecisionsTable = pgTable(
 
 export type AuthorityDecision = typeof authorityDecisionsTable.$inferSelect;
 export type InsertAuthorityDecision = typeof authorityDecisionsTable.$inferInsert;
+
+/**
+ * authority_policies — Phase 1b (#266): immutable rows, one per version.
+ * Edits INSERT a new row and stamp superseded_at on the prior one; the DB
+ * trigger (migration 0041) permits exactly that transition and nothing else.
+ * Decisions reference the ROW (policy_id, now a real FK) plus document_hash,
+ * because an integer version alone cannot prove which document authorized a
+ * historical action.
+ */
+export const authorityPoliciesTable = pgTable(
+  "authority_policies",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    /** lib/actor.ts's spelling, collapsed via botIdOfPrincipal — derived nowhere else. */
+    principal: text("principal").notNull(),
+    version: integer("version").notNull(),
+    document: jsonb("document").notNull(),
+    /** sha256 of the canonical (sorted-key) document. */
+    documentHash: text("document_hash").notNull(),
+    effectiveFrom: timestamp("effective_from").notNull().defaultNow(),
+    /** NULL = the current version. */
+    supersededAt: timestamp("superseded_at"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [unique("authority_policies_principal_version_unique").on(t.principal, t.version)],
+);
+
+export type AuthorityPolicy = typeof authorityPoliciesTable.$inferSelect;
+
+/**
+ * authority_usage — one row per (principal, capability, asset, discrete
+ * window). Incremented under a ROW-LEVEL lock on this row, never under the
+ * ledger's advisory lock, so cap accounting does not serialize behind every
+ * unrelated append.
+ */
+export const authorityUsageTable = pgTable(
+  "authority_usage",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    principal: text("principal").notNull(),
+    capability: varchar("capability", { length: 64 }).notNull(),
+    asset: text("asset").notNull(),
+    /** 'day:2026-08-18' | 'month:2026-08' — UTC, discrete. */
+    windowKey: text("window_key").notNull(),
+    usedMinor: bigint("used_minor", { mode: "bigint" }).notNull().default(0n),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [unique("authority_usage_window_unique").on(t.principal, t.capability, t.asset, t.windowKey)],
+);
+
+export type AuthorityUsage = typeof authorityUsageTable.$inferSelect;
+
+/**
+ * authority_reservations — reserved -> submitted -> outcome_unknown ->
+ * committed | released. Carries the exact canonical posting array to be
+ * reproduced byte-for-byte on commit (canonicalPostingsHash is order-, asset-
+ * and ref-sensitive; a differing retry raises LedgerIdempotencyConflict).
+ * An outcome_unknown row keeps consuming cap headroom until reconciled.
+ */
+export const authorityReservationsTable = pgTable(
+  "authority_reservations",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    reservationId: text("reservation_id").notNull(),
+    usageId: bigint("usage_id", { mode: "number" })
+      .notNull()
+      .references(() => authorityUsageTable.id),
+    principal: text("principal").notNull(),
+    capability: varchar("capability", { length: 64 }).notNull(),
+    asset: text("asset").notNull(),
+    amountMinor: bigint("amount_minor", { mode: "bigint" }).notNull(),
+    state: varchar("state", { length: 24 }).notNull().default("reserved"),
+    txId: text("tx_id"),
+    postings: jsonb("postings").notNull(),
+    postingsHash: text("postings_hash").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("authority_reservations_reservation_id_key").on(t.reservationId),
+    index("authority_reservations_state_idx").on(t.state, t.createdAt),
+  ],
+);
+
+export type AuthorityReservation = typeof authorityReservationsTable.$inferSelect;

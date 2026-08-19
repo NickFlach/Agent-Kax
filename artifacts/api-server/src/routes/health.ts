@@ -52,4 +52,31 @@ router.get("/health/schema", async (_req, res) => {
   res.status(result.ok ? 200 : 503).json(result);
 });
 
+/**
+ * The authority engine's ageing alert (#266): outcome_unknown reservations
+ * older than the threshold. Each one pins cap headroom for its principal
+ * until a reconciler resolves it, so a non-empty list is an operator event —
+ * 503, same contract as /health/schema. Reports ids and ages, never postings.
+ */
+router.get("/health/authority", async (_req, res) => {
+  try {
+    const { ageingOutcomeUnknown, OUTCOME_UNKNOWN_AGEING_MS } = await import("../lib/authorityPolicy");
+    const ageing = await ageingOutcomeUnknown();
+    res.status(ageing.length === 0 ? 200 : 503).json({
+      ok: ageing.length === 0,
+      thresholdMs: OUTCOME_UNKNOWN_AGEING_MS,
+      ageingOutcomeUnknown: ageing.map((r) => ({
+        reservationId: r.reservationId,
+        principal: r.principal,
+        amountMinor: r.amountMinor.toString(),
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  } catch (e) {
+    // The check itself failing (table missing, no DB) is a 503 with the
+    // error named — fail-closed reporting, matching the engine's own rule.
+    res.status(503).json({ ok: false, error: (e as Error)?.message ?? "authority health check failed" });
+  }
+});
+
 export default router;

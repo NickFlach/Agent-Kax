@@ -1,5 +1,5 @@
 import { db } from "@workspace/db";
-import { creditLedgerTable, creditLedgerTxidsTable } from "@workspace/db/schema";
+import { authorityDecisionsTable, creditLedgerTable, creditLedgerTxidsTable } from "@workspace/db/schema";
 import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
 import {
   GENESIS_HASH,
@@ -33,6 +33,20 @@ export class LedgerIdempotencyConflict extends Error {
     super(`txId ${txId} already recorded with DIFFERENT postings`);
   }
 }
+/** #266: the named admission decision is absent, denied, or for other postings. */
+export class LedgerAdmissionMissing extends Error {
+  readonly code = "admission_missing";
+  constructor(public decisionId: string) {
+    super(`admission ${decisionId} is not a matching allow decision`);
+  }
+}
+/** #266: the admission existed but its expiry passed before the ledger used it. */
+export class LedgerAdmissionExpired extends Error {
+  readonly code = "approval_expired";
+  constructor(public decisionId: string) {
+    super(`admission ${decisionId} expired before the ledger transaction ran`);
+  }
+}
 
 /** SQLSTATE + violated-constraint name of a pg error, if any. */
 function pgError(err: unknown): { code?: string; constraint?: string } {
@@ -63,6 +77,15 @@ export interface PostTxInput {
    * "a movement happened" for callers that predate the vocabulary.
    */
   capability?: string;
+  /**
+   * #266: a decisionId from authorityPolicy.admit(). When present, the
+   * transaction CONFIRMS it with one indexed read — a matching, unexpired
+   * allow row for these exact postings — and links the txids row to it
+   * instead of recording a fresh Phase 1a allow. Admission itself (policy
+   * lookup, revocation, cap reservation) ran BEFORE this transaction opened;
+   * nothing here re-does it. Absent, behavior is exactly Phase 1a.
+   */
+  admissionDecisionId?: string;
 }
 
 /**
@@ -120,6 +143,31 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
           return { txId: input.txId, head: rec.head, count: rec.entryCount, idempotentReplay: true };
         }
 
+        // #266: confirm the admission. ONE indexed read (decision_id is
+        // UNIQUE) — the only authority work permitted inside this
+        // transaction; policy evaluation already happened in admit().
+        if (input.admissionDecisionId) {
+          const [adm] = await tx
+            .select({
+              decision: authorityDecisionsTable.decision,
+              postingsHash: authorityDecisionsTable.postingsHash,
+              expiresAt: authorityDecisionsTable.expiresAt,
+            })
+            .from(authorityDecisionsTable)
+            .where(eq(authorityDecisionsTable.decisionId, input.admissionDecisionId))
+            .limit(1);
+          if (
+            !adm ||
+            adm.decision !== "allow" ||
+            (adm.postingsHash != null && adm.postingsHash !== postingsHash)
+          ) {
+            throw new LedgerAdmissionMissing(input.admissionDecisionId);
+          }
+          if (adm.expiresAt != null && adm.expiresAt.getTime() <= Date.now()) {
+            throw new LedgerAdmissionExpired(input.admissionDecisionId);
+          }
+        }
+
         // Overdraft guard: every debited non-house account must stay >= 0. The
         // SUM is consistent because we hold the advisory lock, so no other
         // append can commit between this read and our insert.
@@ -154,7 +202,10 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
             ref: r.ref ?? null,
           })),
         );
-        const decisionId = decisionIdFor(input.txId);
+        // #266: an admitted transaction links to the decision admit() already
+        // recorded — writing a second allow row would fork the audit trail.
+        // Un-admitted callers keep the Phase 1a record exactly as before.
+        const decisionId = input.admissionDecisionId ?? decisionIdFor(input.txId);
         await tx.insert(creditLedgerTxidsTable).values({
           txId: input.txId,
           postingsHash,
@@ -169,20 +220,28 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
         // is a single INSERT with no reads, so it adds no serialization cost.
         // Phase 1a records "who caused this", never "was it permitted" —
         // permission is the topology rule's job.
-        await recordDecision(tx, {
-          decisionId,
-          actor: input.actor,
-          capability: input.capability ?? "credits.move",
-          asset: input.asset,
-          decision: "allow",
-          txId: input.txId,
-          postingsHash,
-        });
+        if (!input.admissionDecisionId) {
+          await recordDecision(tx, {
+            decisionId,
+            actor: input.actor,
+            capability: input.capability ?? "credits.move",
+            asset: input.asset,
+            decision: "allow",
+            txId: input.txId,
+            postingsHash,
+          });
+        }
         return { txId: input.txId, head: newHead, count: rows.length, idempotentReplay: false };
       });
     } catch (err) {
       // Business errors propagate as-is (the route maps them to 409).
-      if (err instanceof LedgerInsufficientFunds || err instanceof LedgerIdempotencyConflict) throw err;
+      if (
+        err instanceof LedgerInsufficientFunds ||
+        err instanceof LedgerIdempotencyConflict ||
+        err instanceof LedgerAdmissionMissing ||
+        err instanceof LedgerAdmissionExpired
+      )
+        throw err;
       lastErr = err;
       const { code, constraint } = pgError(err);
       if (code === "23505") {
