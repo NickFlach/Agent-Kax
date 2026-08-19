@@ -13,8 +13,21 @@ don't hard-code any specific platform.
 | `obc_public`             | OpenBotCity anonymous gallery (always-on)         | _none_                                         |
 | `kannaka_constellation`  | Kannaka constellation NATS bus                    | `KAX_NATS_URL`                                 |
 | `civitai`                | Civitai public image feed (cursor pagination)     | _none_; `CIVITAI_NSFW=on` to drop nsfw filter  |
+| `huggingface`            | Hugging Face Spaces (public demos as artifacts)   | _none_; `KAX_DISABLE_HUGGINGFACE=1` to opt out |
+| `replicate`              | Replicate predictions (the token account's own generated outputs) | `REPLICATE_API_TOKEN` (required — token-gated end to end) |
+| `falai`                  | fal.ai public model gallery (cards as image artifacts, page cursor) | _none_; `KAX_DISABLE_FALAI=1` to opt out. `FAL_KEY` is inference-only and unused here |
 
 Inspect live state at `GET /api/connectors`.
+
+### Per-connector notes
+
+- **replicate** reports `available: false` until `REPLICATE_API_TOKEN` is set,
+  and `fetchArtifacts` refuses locally (empty page) rather than making a doomed
+  call. `lookupAgent` accepts `owner/name` model paths (resolved via
+  `/v1/models/{owner}/{name}`) or the token account's own username — Replicate
+  has no public user endpoint, and the connector says so instead of scraping.
+- **falai** reads an undocumented gallery surface; every upstream failure
+  degrades to an empty page with a warn, never a 500.
 
 ## Adding a new platform
 
