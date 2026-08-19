@@ -928,6 +928,32 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       END $$`),
   },
   {
+    /** #296: the candidacy gate's report rows — report-only, but losing the
+     *  reports loses the corpus measurement the calibration (#297) needs. */
+    label: "print_fitness_reports table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS print_fitness_reports (
+        id               bigserial PRIMARY KEY,
+        artifact_id      integer NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+        preset           varchar(24),
+        ssim             real,
+        mean_delta_e2000 real,
+        path_count       integer,
+        node_count       integer,
+        svg_bytes        integer,
+        color_band_count integer NOT NULL,
+        verdict          varchar(16) NOT NULL,
+        reason           varchar(64),
+        pipeline_version varchar(24) NOT NULL,
+        created_at       timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "print_fitness_reports artifact index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS print_fitness_reports_artifact_idx
+                  ON print_fitness_reports (artifact_id, created_at DESC)`),
+  },
+  {
     label: "derived_assets cache unique index",
     sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS derived_assets_cache_uq
                   ON derived_assets (parent_sha256, pipeline_version, target_wpx, target_hpx)
@@ -1089,6 +1115,7 @@ const CRITICAL_TABLES = [
   "authority_usage",
   "authority_reservations",
   "derived_assets",
+  "print_fitness_reports",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {
