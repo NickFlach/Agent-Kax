@@ -95,9 +95,14 @@ async function commit(
   txId: string,
   asset: string,
   postings: Posting[],
+  // #245: who authorized this movement. These routes authenticate with a
+  // shared-secret service token, so the actor string carries that provenance
+  // visibly (`service:ledger-token:...`) rather than impersonating the
+  // principal the request names.
+  actor: string,
 ): Promise<void> {
   try {
-    const r = await postTransaction({ txId, asset, postings });
+    const r = await postTransaction({ txId, asset, postings, actor });
     res.status(r.idempotentReplay ? 200 : 201).json({
       ok: true,
       txId: r.txId,
@@ -188,7 +193,7 @@ router.post(
     await commit(res, txId, asset, [
       { account: HOUSE_ACCOUNT, amount: -amount, kind: "grant", ref },
       { account: trader, amount, kind: "grant", ref },
-    ]);
+    ], `service:ledger-token:${req.body.principal}`);
   }),
 );
 
@@ -209,7 +214,7 @@ router.post(
     await commit(res, txId, asset, [
       { account: HOUSE_ACCOUNT, amount: -amount, kind: "escrow", ref },
       { account: amm, amount, kind: "escrow", ref },
-    ]);
+    ], `service:ledger-token:market:${req.body.marketId}`);
   }),
 );
 
@@ -245,7 +250,7 @@ router.post(
             { account: amm, amount: -amount, kind: "trade", ref },
             { account: trader, amount, kind: "trade", ref },
           ];
-    await commit(res, txId, asset, postings);
+    await commit(res, txId, asset, postings, `service:ledger-token:${req.body.principal}`);
   }),
 );
 
@@ -295,7 +300,9 @@ router.post(
     if (residual > 0n) {
       postings.push({ account: HOUSE_ACCOUNT, amount: residual, kind: "payout", ref });
     }
-    await commit(res, txId, asset, postings);
+    // Many winners, one authorizer: the payout is a market-level act, so the
+    // actor names the market rather than pretending any single winner asked.
+    await commit(res, txId, asset, postings, `service:ledger-token:market:${req.body.marketId}`);
   }),
 );
 

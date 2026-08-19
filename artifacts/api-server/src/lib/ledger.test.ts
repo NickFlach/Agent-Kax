@@ -38,7 +38,7 @@ describe("credit ledger (DB)", () => {
     const user = `trader:test:${uniq()}`;
     // Shared, so measure the delta rather than an absolute balance.
     const houseBefore = await balance(HOUSE_ACCOUNT, asset);
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `grant-${uniq()}`,
       asset,
       postings: [
@@ -49,7 +49,7 @@ describe("credit ledger (DB)", () => {
     expect(await balance(user, asset)).toBe(100n);
     expect(await balance(HOUSE_ACCOUNT, asset)).toBe(houseBefore - 100n);
     // A second posting reduces the user's derived balance.
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `spend-${uniq()}`,
       asset,
       postings: [
@@ -60,9 +60,32 @@ describe("credit ledger (DB)", () => {
     expect(await balance(user, asset)).toBe(70n);
   });
 
+  it("records the actor and returns it from getTransaction (#245)", async () => {
+    const txId = `actor-${uniq()}`;
+    const actor = `kax:agent:test-${uniq()}`;
+    await postTransaction({
+      actor,
+      txId,
+      asset: "play_credit",
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -5n, kind: "grant" },
+        { account: `trader:test:${uniq()}`, amount: 5n, kind: "grant" },
+      ],
+    });
+    const rec = await getTransaction(txId);
+    expect(rec?.actor).toBe(actor);
+
+    // The actor lives OUTSIDE the hashed tuple (#245's critical constraint),
+    // so actor-carrying rows must leave the chain verifiable end to end. The
+    // replay/idempotency behaviour itself is covered by the dedicated tests
+    // above, which now also pass an actor.
+    const chain = await verifyLedgerChain();
+    expect(chain.ok).toBe(true);
+  });
+
   it("rejects an unbalanced transaction (double-entry)", async () => {
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `bad-${uniq()}`,
         asset: "play_credit",
         postings: [
@@ -74,7 +97,7 @@ describe("credit ledger (DB)", () => {
   });
 
   it("keeps a verifiable hash chain", async () => {
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `chain-${uniq()}`,
       asset: "play_credit",
       postings: [
@@ -94,7 +117,7 @@ describe("credit ledger (DB)", () => {
     // UPDATE matches zero rows, and the statement resolves without the trigger
     // ever firing — the assertion would pass for the wrong reason on a fresh
     // database, and fail as "resolved instead of rejecting" here.
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `trigger-${uniq()}`,
       asset: "play_credit",
       postings: [
@@ -126,10 +149,10 @@ describe("credit ledger (DB)", () => {
       { account: house, amount: -100n, kind: "grant" as const },
       { account: user, amount: 100n, kind: "grant" as const },
     ];
-    const first = await postTransaction({ txId, asset, postings });
+    const first = await postTransaction({ actor: "test:suite", txId, asset, postings });
     expect(first.idempotentReplay).toBe(false);
     // Replay the SAME txId + postings — must be a no-op returning the original.
-    const replay = await postTransaction({ txId, asset, postings });
+    const replay = await postTransaction({ actor: "test:suite", txId, asset, postings });
     expect(replay.idempotentReplay).toBe(true);
     expect(replay.head).toBe(first.head);
     // Balance applied exactly once, not twice.
@@ -141,12 +164,12 @@ describe("credit ledger (DB)", () => {
   it("rejects a replayed txId carrying DIFFERENT postings", async () => {
     const asset = "play_credit";
     const txId = `conflict-${uniq()}`;
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId, asset,
       postings: [{ account: "house", amount: -5n, kind: "grant" }, { account: `trader:test:${uniq()}`, amount: 5n, kind: "grant" }],
     });
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId, asset,
         postings: [{ account: "house", amount: -6n, kind: "grant" }, { account: `trader:test:${uniq()}`, amount: 6n, kind: "grant" }],
       }),
@@ -156,13 +179,13 @@ describe("credit ledger (DB)", () => {
   it("blocks an overdraft: a debit that would take a non-house account negative", async () => {
     const asset = "play_credit";
     const user = `trader:test:${uniq()}`;
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `seed-${uniq()}`, asset,
       postings: [{ account: "house", amount: -50n, kind: "grant" }, { account: user, amount: 50n, kind: "grant" }],
     });
     // Spending 80 from a 50 balance must be rejected — no credits minted.
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `over-${uniq()}`, asset,
         postings: [{ account: user, amount: -80n, kind: "trade" }, { account: `amm:${uniq()}`, amount: 80n, kind: "trade" }],
       }),
@@ -186,7 +209,7 @@ describe("credit ledger topology (DB)", () => {
   /** A funded trader, granted from the house exactly as signup does. */
   async function fundedTrader(amount: bigint): Promise<string> {
     const account = `trader:test:${uniq()}`;
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `topo-fund-${uniq()}`,
       asset,
       postings: [
@@ -200,7 +223,7 @@ describe("credit ledger topology (DB)", () => {
   it("refuses a redemption and writes nothing", async () => {
     const trader = await fundedTrader(100n);
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `redeem-${uniq()}`,
         asset,
         postings: [
@@ -218,7 +241,7 @@ describe("credit ledger topology (DB)", () => {
     // this test would be the one that noticed.
     const trader = await fundedTrader(100n);
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `fee-cashout-${uniq()}`,
         asset,
         postings: [
@@ -234,7 +257,7 @@ describe("credit ledger topology (DB)", () => {
     const from = await fundedTrader(100n);
     const to = `trader:test:${uniq()}`;
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `transfer-${uniq()}`,
         asset,
         postings: [
@@ -255,7 +278,7 @@ describe("credit ledger topology (DB)", () => {
     const from = await fundedTrader(100n);
     const to = `trader:test:${uniq()}`;
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `sideways-${uniq()}`,
         asset,
         postings: [
@@ -277,7 +300,7 @@ describe("credit ledger topology (DB)", () => {
     // turning a diagnosis into damage.
     const stranger = `merchant:${uniq()}`;
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `merchant-${uniq()}`,
         asset,
         postings: [
@@ -305,14 +328,14 @@ describe("credit ledger topology (DB)", () => {
     ].filter((p) => p.amount !== 0n);
     expect(postings).toHaveLength(2);
 
-    await postTransaction({ txId: `cheap-sale-${uniq()}`, asset, postings });
+    await postTransaction({ actor: "test:suite", txId: `cheap-sale-${uniq()}`, asset, postings });
     expect(await balance(buyer, asset)).toBe(0n);
     expect(await balance(seller, asset)).toBe(split.seller);
   });
 
   it("permits the residual-only payout sweep with no winners", async () => {
     const pool = `amm:test${uniq()}`;
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `escrow-${uniq()}`,
       asset,
       postings: [
@@ -321,7 +344,7 @@ describe("credit ledger topology (DB)", () => {
       ],
     });
     // Nobody held the winning side, so the whole pool goes back to the house.
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `sweep-${uniq()}`,
       asset,
       postings: [

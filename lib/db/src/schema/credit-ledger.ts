@@ -69,6 +69,15 @@ export const creditLedgerTxidsTable = pgTable("credit_ledger_txids", {
   postingsHash: text("postings_hash").notNull(),
   head: text("head").notNull(),
   entryCount: integer("entry_count").notNull(),
+  // Who authorized the movement (#245). On THIS table and not in the hashed
+  // posting tuple, deliberately: the actor is per-transaction, and adding a
+  // field to the canonical forms would invalidate every existing entry hash
+  // and idempotency record. Nullable at the DB level because pre-0032 rows
+  // have no actor; the WRITE path requires it (PostTxInput.actor is a
+  // required string), so every new row carries one.
+  actor: text("actor"),
+  // Reserved for #248: the authority_decisions row that approved this write.
+  decisionId: text("decision_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

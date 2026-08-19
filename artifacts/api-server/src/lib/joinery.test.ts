@@ -23,7 +23,7 @@ import {
   unitFurnishingsTable,
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT } from "./ledger-core";
-import { balance, postTransaction } from "./ledger";
+import { balance, getTransaction, postTransaction } from "./ledger";
 import { MAX_LIST_PRICE_MINOR, saleTxId } from "./joinery-core";
 import {
   AlreadyOwned,
@@ -48,7 +48,7 @@ const MAKER_NAME = "Test Maker Of Chairs";
 let maker: { id: number; botId: string; account: string };
 
 let owner: { id: string };
-let buyer: { id: number; botId: string; account: string };
+let buyer: { id: number; botId: string; principal: string; account: string };
 let seller: { id: number; botId: string; account: string };
 let home: { floor: number; letter: string };
 let artifactIds: number[] = [];
@@ -87,7 +87,7 @@ async function clearFlat() {
 
 /** Put credits in an account, the same way a signup grant does. */
 async function fund(account: string, amount: bigint, tag: string) {
-  await postTransaction({
+  await postTransaction({ actor: "test:suite",
     txId: `test-joinery-fund-${tag}`,
     asset: ASSET,
     postings: [
@@ -121,7 +121,12 @@ describe("joinery purchase", () => {
         .update(agentsTable)
         .set({ obcBotId: makerBot, displayName: makerName })
         .where(eq(agentsTable.id, m.id));
-      buyer = { id: b.id, botId: buyerBot, account: `trader:kax:agent:${buyerBot}` };
+      buyer = {
+        id: b.id,
+        botId: buyerBot,
+        principal: `kax:agent:${buyerBot}`,
+        account: `trader:kax:agent:${buyerBot}`,
+      };
       seller = { id: s.id, botId: sellerBot, account: `trader:kax:agent:${sellerBot}` };
       maker = { id: m.id, botId: makerBot, account: `trader:kax:agent:${makerBot}` };
 
@@ -166,7 +171,7 @@ describe("joinery purchase", () => {
 
     const r = await purchase({
       buyerAgentId: buyer.id,
-      buyerAccount: buyer.account,
+      buyerAccount: buyer.account, buyerPrincipal: buyer.principal,
       listingId,
       slot: "corner",
     });
@@ -188,11 +193,17 @@ describe("joinery purchase", () => {
     // The receipt, on the row: the chair and the transaction that paid for it
     // cannot drift apart.
     expect(r.txId).toBe(saleTxId(listingId, buyer.account));
+
+    // #245 AC: the recorded actor for a joinery purchase is the BUYER'S
+    // principal — passed explicitly from the route, never re-derived by
+    // stripping the trader: prefix off an account name.
+    const rec = await getTransaction(r.txId);
+    expect(rec?.actor).toBe(buyer.principal);
   });
 
   it("does not pay the maker twice when the seller made it", async () => {
     const sellerBefore = await balance(seller.account, ASSET);
-    await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId: ownListingId, slot: "bedside" });
+    await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId: ownListingId, slot: "bedside" });
     // 500 - 50 house = 450, all of it to the seller. No royalty line.
     expect(await balance(seller.account, ASSET)).toBe(sellerBefore + 450n);
     // The seller IS the maker here (same display name), so there is no second
@@ -204,20 +215,20 @@ describe("joinery purchase", () => {
     // A dropped response, an agent that fires twice, a double-submitted form.
     // The deterministic txId means the ledger replays and the money moves once.
     const before = await balance(buyer.account, ASSET);
-    const first = await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId, slot: "corner" });
+    const first = await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId, slot: "corner" });
     const spentOnce = before - (await balance(buyer.account, ASSET));
 
     // Re-running hits AlreadyOwned before it reaches the ledger, which is the
     // fast path. Clearing the row and retrying exercises the ledger's own
     // idempotency — the case where the row write is what failed last time.
     await expect(
-      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId, slot: "wall_left" }),
+      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId, slot: "wall_left" }),
     ).rejects.toBeInstanceOf(AlreadyOwned);
 
     await db.delete(unitFurnishingsTable).where(eq(unitFurnishingsTable.id, first.furnishingId));
     const second = await purchase({
       buyerAgentId: buyer.id,
-      buyerAccount: buyer.account,
+      buyerAccount: buyer.account, buyerPrincipal: buyer.principal,
       listingId,
       slot: "corner",
     });
@@ -226,9 +237,9 @@ describe("joinery purchase", () => {
   });
 
   it("refuses the second thing in a slot", async () => {
-    await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId, slot: "corner" });
+    await purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId, slot: "corner" });
     await expect(
-      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId: ownListingId, slot: "corner" }),
+      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId: ownListingId, slot: "corner" }),
     ).rejects.toBeInstanceOf(SlotTaken);
   });
 
@@ -242,7 +253,7 @@ describe("joinery purchase", () => {
     const before = await balance(buyer.account, ASSET);
 
     await expect(
-      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId, slot: "corner" }),
+      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId, slot: "corner" }),
     ).rejects.toBeInstanceOf(NoHomeToFurnish);
 
     expect(await balance(buyer.account, ASSET), "charged a buyer with no flat").toBe(before);
@@ -257,7 +268,7 @@ describe("joinery purchase", () => {
     const sellerBefore = await balance(seller.account, ASSET);
     await purchase({
       buyerAgentId: buyer.id,
-      buyerAccount: buyer.account,
+      buyerAccount: buyer.account, buyerPrincipal: buyer.principal,
       listingId: strangerListingId,
       slot: "window",
     });
@@ -277,7 +288,7 @@ describe("joinery purchase", () => {
 
     const before = await balance(buyer.account, ASSET);
     await expect(
-      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, listingId: unpriced!.id, slot: "corner" }),
+      purchase({ buyerAgentId: buyer.id, buyerAccount: buyer.account, buyerPrincipal: buyer.principal, listingId: unpriced!.id, slot: "corner" }),
     ).rejects.toBeInstanceOf(ListingNotForSale);
     expect(await balance(buyer.account, ASSET)).toBe(before);
   });
@@ -313,7 +324,7 @@ describe("joinery purchase", () => {
     // And it can actually be bought at the price the seller set.
     const r = await purchase({
       buyerAgentId: buyer.id,
-      buyerAccount: buyer.account,
+      buyerAccount: buyer.account, buyerPrincipal: buyer.principal,
       listingId: listed.listingId,
       slot: "wall_right",
     });
@@ -452,7 +463,7 @@ describe("joinery purchase", () => {
     const makerBefore = await balance(maker.account, ASSET);
     await purchase({
       buyerAgentId: buyer.id,
-      buyerAccount: buyer.account,
+      buyerAccount: buyer.account, buyerPrincipal: buyer.principal,
       listingId: listed.listingId,
       slot: "corner",
     });

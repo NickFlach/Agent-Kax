@@ -58,7 +58,7 @@ async function dispatch(eventType: string, data: unknown, eventUuid = `evt-${uni
 
 /** Give a bot a KAX ledger balance the way the real signup grant does. */
 async function fund(botId: string, amount: bigint): Promise<void> {
-  await postTransaction({
+  await postTransaction({ actor: "test:suite",
     txId: `test-fund-${botId}-${uniq()}`,
     asset: "play_credit",
     postings: [
@@ -290,7 +290,7 @@ describe("rule six — the money", () => {
   it("lets an unrevoked agent move credits — the positive control", async () => {
     const before = await balance(account, "play_credit");
     expect(before).toBeGreaterThan(0n);
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `spend-${uniq()}`,
       asset: "play_credit",
       postings: [
@@ -304,7 +304,7 @@ describe("rule six — the money", () => {
   it("refuses to debit a frozen account", async () => {
     await dispatch("verification.revoked", { agent_uuid: botId, reason: "frozen" });
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `spend-${uniq()}`,
         asset: "play_credit",
         postings: [
@@ -319,7 +319,7 @@ describe("rule six — the money", () => {
     // Somebody paying a suspended agent is the thing the suspension is about.
     await dispatch("verification.revoked", { agent_uuid: botId, reason: "frozen" });
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `pay-${uniq()}`,
         asset: "play_credit",
         postings: [
@@ -354,7 +354,7 @@ describe("rule six — the money", () => {
     const before = await balance(account, "play_credit");
     await dispatch("verification.revoked", { agent_uuid: botId, reason: "temporary" });
     await expect(
-      postTransaction({
+      postTransaction({ actor: "test:suite",
         txId: `blocked-${uniq()}`,
         asset: "play_credit",
         postings: [
@@ -368,7 +368,7 @@ describe("rule six — the money", () => {
     expect(await isRevoked(botId)).toBeNull();
     expect(await balance(account, "play_credit"), "value was lost across the freeze").toBe(before);
 
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `after-restore-${uniq()}`,
       asset: "play_credit",
       postings: [
@@ -383,7 +383,7 @@ describe("rule six — the money", () => {
     await dispatch("verification.revoked", { agent_uuid: botId, reason: "frozen" });
     // A different bot, the house, and a market pool must all still move.
     const other = `trader:kax:agent:${newBot()}`;
-    await postTransaction({
+    await postTransaction({ actor: "test:suite",
       txId: `unrelated-${uniq()}`,
       asset: "play_credit",
       postings: [
@@ -471,6 +471,7 @@ describe("rule six — open positions on the Joinery counter", () => {
       purchase({
         buyerAgentId: buyer!.id,
         buyerAccount: `trader:kax:agent:${buyerBot}`,
+        buyerPrincipal: `kax:agent:${buyerBot}`,
         listingId,
         slot: "corner",
       }),
