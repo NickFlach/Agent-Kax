@@ -590,6 +590,34 @@ collector-of-record are separable questions and this ADR answers them separately
 the merchant as MoR and leaves KAX as the probable tax collector, with the consequence
 traced in the custody timeline below.
 
+### Saved cards under direct charges: a platform-merchant-only feature (#292)
+
+Direct charges collide with the in-city checkout design (#282–#289), which saves a
+Customer and PaymentMethod **on the platform account** to make one-click purchase
+possible. Under direct charges, Customers and their saved PaymentMethods live
+**per-connected-account** — cards saved against the platform do not transfer, Stripe
+copies PaymentMethods between accounts only through a support-assisted process, and
+re-collecting cards from every existing buyer is a catastrophic re-onboarding. The
+collision only becomes expensive after real buyers save cards, which makes the cheapest
+moment to decide **before the first card is saved** — that is, before #284/#285 ship.
+
+**Decision (#292): direct charges stay; saved cards are scoped to KAX-owned stores.**
+This ADR is not reversed on the strength of a convenience feature. Never holding a third
+party's money is the harder constraint — it is what decision 4 of #181 bought, and the
+money-transmission exposure would be real while third-party merchants are hypothetical.
+The consequences, accepted deliberately as **two tiers rather than discovered later**:
+
+- **KAX-owned stores** (the entire v0.1/v0.2 near-term surface — Kannaka, 0xSCADA-QE):
+  saved cards and in-city one-click purchase, exactly as designed. The platform is the
+  merchant; the saved cards are charged by the account they live on. No conflict exists.
+- **Third-party merchant stores** (when they exist): **per-purchase flow, no saved
+  cards** — embedded Checkout on the connected account is the natural fit. One-click does
+  not cross the merchant boundary, and no card saved on the platform is ever charged for
+  goods whose merchant of record is somebody else.
+- A buyer's platform-saved card is never migrated, copied, or "made to work" against a
+  connected account. If a future decision ever revisits this, it must arrive BEFORE that
+  merchant's first sale, as a rewrite of this section — not as a data migration.
+
 ## Verified identity — one record, two attestation levels
 
 Stated identically in KAX-ADR-0001.
