@@ -17,6 +17,8 @@ import { obcPartnerConnector, obcPublicConnector } from "./obc";
 import { constellationConnector } from "./constellation";
 import { civitaiConnector } from "./civitai";
 import { huggingfaceConnector } from "./huggingface";
+import { replicateConnector } from "./replicate";
+import { falaiConnector } from "./falai";
 
 /** All connectors known to KAX, regardless of whether they're configured. */
 export const ALL_CONNECTORS: AgenticConnector[] = [
@@ -25,6 +27,8 @@ export const ALL_CONNECTORS: AgenticConnector[] = [
   constellationConnector,
   civitaiConnector,
   huggingfaceConnector,
+  replicateConnector,
+  falaiConnector,
 ];
 
 /** Just the ones currently available (env configured, etc.). */
