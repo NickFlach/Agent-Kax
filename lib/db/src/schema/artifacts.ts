@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { boolean, pgTable, serial, text, integer, real, timestamp, jsonb, pgEnum, varchar, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./auth";
@@ -46,6 +46,12 @@ export const artifactsTable = pgTable("artifacts", {
   previousHeat: integer("previous_heat"),
   lastHeatDecayAt: timestamp("last_heat_decay_at"),
   lastReactionAt: timestamp("last_reaction_at"),
+  // #255: true by construction — every connector ingests agent-created work,
+  // so the default asserts it and a future non-AI path carries the burden of
+  // proof. connector_id is NOT a proxy (provenance-of-ingest, not creation).
+  // formatArtifact() spreads the row, so this publishes on every public
+  // surface automatically — deliberate: disclosure is the point.
+  machineGenerated: boolean("machine_generated").notNull().default(true),
   artifactType: artifactTypeEnum("artifact_type").notNull().default("image"),
   status: artifactStatusEnum("status").notNull().default("raw"),
   kannakaScore: real("kannaka_score"),

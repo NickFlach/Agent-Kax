@@ -620,6 +620,12 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON commerce_merchants (user_id)`),
   },
   {
+    /** #255: the point-of-sale AI disclosure flag. Columns get eaten too. */
+    label: "artifacts machine_generated column",
+    sql: sql.raw(`ALTER TABLE artifacts
+                  ADD COLUMN IF NOT EXISTS machine_generated boolean NOT NULL DEFAULT true`),
+  },
+  {
     /** #254: the printability engine's measurement side table. */
     label: "artifact_print_assets table",
     sql: sql.raw(`

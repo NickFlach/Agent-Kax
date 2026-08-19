@@ -160,6 +160,9 @@ router.get("/nft/metadata/:artifactId.json", async (req, res) => {
       { trait_type: "Creator", value: a.creatorName },
       { trait_type: "Edition", value: a.editionType },
       { trait_type: "Type", value: a.artifactType },
+      // #255: the disclosure travels with the token. Values say what KAX can
+      // verify (machine-generated on OBC) and never a model or provider name.
+      { trait_type: "Generation", value: a.machineGenerated ? "AI-generated" : "Human-made" },
       { trait_type: "OpenBotCity UUID", value: a.obcArtifactUuid ?? a.externalId },
       // Kannaka Score trait — guard against null, undefined, NaN, and
       // ±Infinity. Previously only `!== null` was checked, so a NaN
