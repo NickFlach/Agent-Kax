@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "@workspace/db";
 import { artifactPrintAssetsTable, artifactsTable, derivedAssetsTable, type DerivedAsset } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { PRINT_ASSET_BYTE_CAP, hostAllowed, parseImageHeader } from "../printAsset";
 import type { StorageAdapter } from "./adapter";
 
@@ -136,14 +136,16 @@ export async function takeCustody(
 }
 
 /** The custody guard, importable wherever a derived master is about to exist. */
-export async function assertSourceCustody(artifactId: number): Promise<string> {
+export async function assertSourceCustody(
+  artifactId: number,
+): Promise<{ storageKey: string; sha256: string | null }> {
   const [asset] = await db
-    .select({ storageKey: artifactPrintAssetsTable.storageKey })
+    .select({ storageKey: artifactPrintAssetsTable.storageKey, sha256: artifactPrintAssetsTable.sha256 })
     .from(artifactPrintAssetsTable)
     .where(eq(artifactPrintAssetsTable.artifactId, artifactId))
     .limit(1);
   if (!asset?.storageKey) throw new CustodyMissing(artifactId);
-  return asset.storageKey;
+  return { storageKey: asset.storageKey, sha256: asset.sha256 };
 }
 
 /** Upscale factors above this go to a human, even when the pixels check out. */
@@ -166,9 +168,18 @@ export async function createDerivedAsset(input: {
   storage: StorageAdapter;
   /** The print spec's minimum for the target product, e.g. 2700×3300. */
   requiredPx?: { width: number; height: number };
+  /**
+   * #294: the cache identity. When all three are given, the row is UNIQUE on
+   * (source bytes, pipeline, target) and regeneration returns the existing
+   * row instead of inserting a twin — idempotency enforced by the schema,
+   * not by caller discipline.
+   */
+  pipelineVersion?: string;
+  targetProduct?: string;
+  targetPx?: { width: number; height: number };
 }): Promise<DerivedAsset> {
   // AC: no derived print master for an artifact whose bytes KAX does not hold.
-  await assertSourceCustody(input.sourceArtifactId);
+  const custody = await assertSourceCustody(input.sourceArtifactId);
 
   const sha256 = crypto.createHash("sha256").update(input.bytes).digest("hex");
   const header = parseImageHeader(input.bytes);
@@ -197,21 +208,83 @@ export async function createDerivedAsset(input: {
   const contentType = header?.format === "jpeg" ? "image/jpeg" : header?.format === "webp" ? "image/webp" : "image/png";
   await input.storage.put(storageKey, input.bytes, contentType);
 
-  const [row] = await db
+  const cacheable =
+    custody.sha256 != null && input.pipelineVersion != null && input.targetPx != null;
+  const values = {
+    sourceArtifactId: input.sourceArtifactId,
+    transformType: input.transformType,
+    transformFactor: input.transformFactor,
+    qualityStatus,
+    storageKey,
+    sha256,
+    byteSize: BigInt(input.bytes.length),
+    widthPx: header?.widthPx ?? null,
+    heightPx: header?.heightPx ?? null,
+    parentSha256: cacheable ? custody.sha256 : null,
+    pipelineVersion: input.pipelineVersion ?? null,
+    targetProduct: input.targetProduct ?? null,
+    targetWpx: input.targetPx?.width ?? null,
+    targetHpx: input.targetPx?.height ?? null,
+  };
+  const inserted = await db
     .insert(derivedAssetsTable)
-    .values({
-      sourceArtifactId: input.sourceArtifactId,
-      transformType: input.transformType,
-      transformFactor: input.transformFactor,
-      qualityStatus,
-      storageKey,
-      sha256,
-      byteSize: BigInt(input.bytes.length),
-      widthPx: header?.widthPx ?? null,
-      heightPx: header?.heightPx ?? null,
-    })
+    .values(values)
+    .onConflictDoNothing()
     .returning();
-  return row!;
+  if (inserted.length > 0) return inserted[0]!;
+  // The cache hit (#294): this exact (source bytes, pipeline, target) was
+  // already produced. Return the EXISTING row — its verdicts and approval
+  // state are the truth about these bytes; a twin would fork them.
+  const [existing] = await db
+    .select()
+    .from(derivedAssetsTable)
+    .where(
+      and(
+        eq(derivedAssetsTable.parentSha256, custody.sha256!),
+        eq(derivedAssetsTable.pipelineVersion, input.pipelineVersion!),
+        eq(derivedAssetsTable.targetWpx, input.targetPx!.width),
+        eq(derivedAssetsTable.targetHpx, input.targetPx!.height),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new Error("derived-asset insert conflicted but no cached row was found");
+  return existing;
+}
+
+/**
+ * MERCHANT approval (#294): pending -> approved | rejected, once, and the DB
+ * trigger independently refuses approved without quality passed — a derived
+ * asset cannot reach an approved state without a pass or a human-cleared
+ * review (which resolves INTO passed).
+ */
+export async function approveDerivedAsset(
+  id: number,
+  verdict: "approved" | "rejected",
+  approvedBy: string,
+): Promise<DerivedAsset> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(derivedAssetsTable)
+      .where(eq(derivedAssetsTable.id, id))
+      .limit(1)
+      .for("update");
+    if (!row) throw new Error(`derived asset ${id} does not exist`);
+    if (row.approvalStatus !== "pending") {
+      throw new Error(`derived asset ${id} approval is already ${row.approvalStatus}`);
+    }
+    if (verdict === "approved" && row.qualityStatus !== "passed") {
+      throw new Error(
+        `derived asset ${id} cannot be approved with quality_status ${row.qualityStatus} — a pass is required`,
+      );
+    }
+    const [updated] = await tx
+      .update(derivedAssetsTable)
+      .set({ approvalStatus: verdict, approvedBy, approvedAt: new Date() })
+      .where(eq(derivedAssetsTable.id, id))
+      .returning();
+    return updated!;
+  });
 }
 
 /** The human-review branch resolving: human_review -> passed | failed, once. */

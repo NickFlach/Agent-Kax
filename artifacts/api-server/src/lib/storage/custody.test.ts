@@ -10,14 +10,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import crypto from "node:crypto";
 import { db } from "@workspace/db";
-import { artifactsTable } from "@workspace/db/schema";
-import { inArray } from "drizzle-orm";
+import { artifactsTable, derivedAssetsTable } from "@workspace/db/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 import { MemoryStorageAdapter, STORAGE_ENV_VARS, StorageUnconfigured, storageFromEnv } from "./adapter";
 import { encodeKeyPath, signV4, type S3Config } from "./s3";
 import {
   CustodyMissing,
   HUMAN_REVIEW_FACTOR,
   SourceDrifted,
+  approveDerivedAsset,
   createDerivedAsset,
   derivedKeyFor,
   fetchSourceBytes,
@@ -255,6 +256,67 @@ describe("custody, the guard, and the reprint (DB)", () => {
     // A tampered master is refused, never printed.
     await storage.put(derivedKeyFor(id, master.sha256), pngFixture(2, 2), "image/png");
     await expect(reprintMasterBytes(master.id, storage)).rejects.toThrow(/hash mismatch/);
+  });
+
+  it("#294: the cache is enforced by the schema — one row per (source bytes, pipeline, target)", async () => {
+    const id = await makeArtifact("https://kfz.supabase.co/cache.png");
+    const body = pngFixture(1024, 1024);
+    const serve: typeof fetch = async () => new Response(body, { status: 200 });
+    await measureArtifactAsset(id, serve);
+    const storage = new MemoryStorageAdapter();
+    await takeCustody(id, storage, serve);
+
+    const key = {
+      sourceArtifactId: id, transformType: "upscale", transformFactor: 1.1,
+      storage, pipelineVersion: "v1", targetProduct: "sticker_4in",
+      targetPx: { width: 1113, height: 1113 },
+    };
+    const first = await createDerivedAsset({ ...key, bytes: pngFixture(1113, 1113) });
+    expect(first.parentSha256).toBeTruthy();
+    // Same cache identity, DIFFERENT bytes (a non-deterministic re-run):
+    // the schema refuses a twin and the EXISTING row is returned.
+    const replay = await createDerivedAsset({ ...key, bytes: pngFixture(1113, 1113, 2) });
+    expect(replay.id).toBe(first.id);
+    expect(replay.sha256).toBe(first.sha256);
+    const twins = await db
+      .select()
+      .from(derivedAssetsTable)
+      .where(eq(derivedAssetsTable.parentSha256, first.parentSha256!));
+    expect(twins).toHaveLength(1);
+  });
+
+  it("#294: a derived asset cannot reach approved without a pass — app AND trigger refuse", async () => {
+    const id = await makeArtifact("https://kfz.supabase.co/approve.png");
+    const body = pngFixture(1024, 1024);
+    const serve: typeof fetch = async () => new Response(body, { status: 200 });
+    await measureArtifactAsset(id, serve);
+    const storage = new MemoryStorageAdapter();
+    await takeCustody(id, storage, serve);
+
+    const failed = await createDerivedAsset({
+      sourceArtifactId: id, transformType: "upscale", transformFactor: 2,
+      bytes: new Uint8Array(64), storage, // undecodable → failed
+    });
+    expect(failed.qualityStatus).toBe("failed");
+    await expect(approveDerivedAsset(failed.id, "approved", "kax:user:approver")).rejects.toThrow(/a pass is required/);
+    // The DB-level guard holds even against a writer that skips the app path.
+    const err = await db
+      .execute(sql`UPDATE derived_assets SET approval_status = 'approved' WHERE id = ${failed.id}`)
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err, "the approval trigger did not refuse a non-passed approval").not.toBe(null);
+    // Rejection needs no pass; it is the honest verdict for a failed asset.
+    expect((await approveDerivedAsset(failed.id, "rejected", "kax:user:approver")).approvalStatus).toBe("rejected");
+
+    const passed = await createDerivedAsset({
+      sourceArtifactId: id, transformType: "upscale", transformFactor: 2,
+      bytes: pngFixture(2048, 2048), storage,
+    });
+    expect(passed.qualityStatus).toBe("passed");
+    const approved = await approveDerivedAsset(passed.id, "approved", "kax:user:approver");
+    expect(approved.approvalStatus).toBe("approved");
+    expect(approved.approvedBy).toBe("kax:user:approver");
+    await expect(approveDerivedAsset(passed.id, "approved", "kax:user:approver")).rejects.toThrow(/already approved/);
   });
 
   it("the sha256 recorded on the derived row matches the stored bytes", async () => {

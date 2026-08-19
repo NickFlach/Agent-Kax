@@ -913,6 +913,60 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON derived_assets (source_artifact_id, created_at DESC)`),
   },
   {
+    /** #294: cache identity + merchant approval columns. */
+    label: "derived_assets approval columns",
+    sql: sql.raw(`
+      DO $$ BEGIN
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS parent_sha256 text;
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS pipeline_version varchar(24);
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS target_product varchar(48);
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS target_wpx integer;
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS target_hpx integer;
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS approval_status varchar(24) NOT NULL DEFAULT 'pending';
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS approved_by text;
+        ALTER TABLE derived_assets ADD COLUMN IF NOT EXISTS approved_at timestamp;
+      END $$`),
+  },
+  {
+    label: "derived_assets cache unique index",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS derived_assets_cache_uq
+                  ON derived_assets (parent_sha256, pipeline_version, target_wpx, target_hpx)
+                  WHERE parent_sha256 IS NOT NULL
+                    AND pipeline_version IS NOT NULL
+                    AND target_wpx IS NOT NULL
+                    AND target_hpx IS NOT NULL`),
+  },
+  {
+    label: "derived_assets approval guard",
+    sql: sql.raw(`
+      CREATE OR REPLACE FUNCTION derived_assets_approval_guard() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.approval_status = 'approved'
+           AND (TG_OP = 'INSERT' OR OLD.approval_status IS DISTINCT FROM 'approved')
+           AND NEW.quality_status <> 'passed' THEN
+          RAISE EXCEPTION
+            'derived asset cannot be approved with quality_status %; a pass (or a human-cleared review resolving to passed) is required',
+            NEW.quality_status;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql`),
+  },
+  {
+    label: "derived_assets approval trigger binding",
+    sql: sql.raw(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'derived_assets_approval_gate'
+        ) THEN
+          CREATE TRIGGER derived_assets_approval_gate
+            BEFORE INSERT OR UPDATE ON derived_assets
+            FOR EACH ROW EXECUTE FUNCTION derived_assets_approval_guard();
+        END IF;
+      END $$`),
+  },
+  {
     label: "commerce_orders payment intent index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
                   ON commerce_orders (stripe_payment_intent_id)`),
