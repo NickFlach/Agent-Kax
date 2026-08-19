@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { Raster } from "./raster";
 import type { SvgStats } from "./vectorize";
 
@@ -35,12 +37,67 @@ export interface GateMetrics {
 /** Below this edge length a source cannot candidate at all (#296 AC). */
 export const SOURCE_FLOOR_PX = 65;
 
-// Uncalibrated guesses (#297 owns making these real). Named, not inline.
+// Uncalibrated guesses. The LIVE values come from
+// config/print-fitness-thresholds.json (#297: thresholds live in config,
+// not code); these constants are the fallback when the config is absent
+// (a bundled deploy without the file) and the provenance of the committed
+// config's initial numbers.
 export const GUESS_SSIM_PASS = 0.93;
 export const GUESS_SSIM_REVIEW = 0.85;
 export const GUESS_DELTA_E_PASS = 4;
 export const GUESS_DELTA_E_REVIEW = 8;
 export const GUESS_MAX_BAND_COUNT_FLAT = 32;
+
+export interface Thresholds {
+  calibrated: boolean;
+  ssimPass: number;
+  ssimReview: number;
+  deltaEPass: number;
+  deltaEReview: number;
+  flatArtMaxBands: number;
+}
+
+export const FALLBACK_THRESHOLDS: Thresholds = {
+  calibrated: false,
+  ssimPass: GUESS_SSIM_PASS,
+  ssimReview: GUESS_SSIM_REVIEW,
+  deltaEPass: GUESS_DELTA_E_PASS,
+  deltaEReview: GUESS_DELTA_E_REVIEW,
+  flatArtMaxBands: GUESS_MAX_BAND_COUNT_FLAT,
+};
+
+/**
+ * The live thresholds: KAX_PRINT_FITNESS_THRESHOLDS (an explicit path, for
+ * the bundled deploy) or the repo's config/print-fitness-thresholds.json,
+ * else the fallback guesses. Read per call — a recalibration takes effect
+ * without a restart, the requireCommerceToken lesson again.
+ */
+export function activeThresholds(): Thresholds {
+  const candidates = [
+    process.env["KAX_PRINT_FITNESS_THRESHOLDS"],
+    // Repo-relative works in dev/test; the bundled deploy (no __dirname
+    // anchored to src/) uses the env path above instead.
+    typeof __dirname === "string"
+      ? path.join(__dirname, "..", "..", "..", "..", "..", "config", "print-fitness-thresholds.json")
+      : undefined,
+  ].filter((p): p is string => !!p);
+  for (const p of candidates) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as Partial<Thresholds>;
+      if (
+        typeof parsed.ssimPass === "number" &&
+        typeof parsed.ssimReview === "number" &&
+        typeof parsed.deltaEPass === "number" &&
+        typeof parsed.deltaEReview === "number"
+      ) {
+        return { ...FALLBACK_THRESHOLDS, ...parsed } as Thresholds;
+      }
+    } catch {
+      // fall through — an unreadable config never silently disables metrics
+    }
+  }
+  return FALLBACK_THRESHOLDS;
+}
 
 // ---------------------------------------------------------------------------
 // SSIM — grayscale, 8×8 windows, the standard constants.
@@ -194,6 +251,8 @@ export function judge(input: {
   /** The vectorized candidate re-rendered at source dimensions, if the tool ran. */
   rendered?: Raster | null;
   svgStats?: SvgStats | null;
+  /** Explicit thresholds (calibration uses this); default = activeThresholds(). */
+  thresholds?: Thresholds;
 }): GateMetrics {
   const bands = colorBandCount(input.source);
   // The floor first: a 64×64-class source fails with its reason and no
@@ -225,18 +284,19 @@ export function judge(input: {
       reason: input.svgStats ? "renderer_unavailable" : "vectorizer_unavailable",
     };
   }
+  const t = input.thresholds ?? activeThresholds();
   const s = ssim(input.source, input.rendered);
   const dE = meanDeltaE2000(input.source, input.rendered, 4);
   let verdict: GateVerdict;
   let reason: string | null = null;
-  if (s >= GUESS_SSIM_PASS && dE <= GUESS_DELTA_E_PASS) {
+  if (s >= t.ssimPass && dE <= t.deltaEPass) {
     verdict = "pass";
-  } else if (s >= GUESS_SSIM_REVIEW && dE <= GUESS_DELTA_E_REVIEW) {
+  } else if (s >= t.ssimReview && dE <= t.deltaEReview) {
     verdict = "needs_review";
     reason = "between_thresholds";
   } else {
     verdict = "fail";
-    reason = s < GUESS_SSIM_REVIEW ? "ssim_below_floor" : "delta_e_above_ceiling";
+    reason = s < t.ssimReview ? "ssim_below_floor" : "delta_e_above_ceiling";
   }
   return {
     ssim: s,
