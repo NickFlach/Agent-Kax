@@ -760,6 +760,124 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       END $$`),
   },
   {
+    /**
+     * #266 (ADR-0001 Phase 1b): policy storage. A vanished policy table is a
+     * halted economy — correct (fail-closed), but the repair must not wait on
+     * a redeploy, so the shape lives here too.
+     */
+    label: "authority_policies table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS authority_policies (
+        id             bigserial PRIMARY KEY,
+        principal      text NOT NULL,
+        version        integer NOT NULL,
+        document       jsonb NOT NULL,
+        document_hash  text NOT NULL,
+        effective_from timestamp NOT NULL DEFAULT now(),
+        superseded_at  timestamp,
+        created_by     text NOT NULL,
+        created_at     timestamp NOT NULL DEFAULT now(),
+        UNIQUE (principal, version)
+      )`),
+  },
+  {
+    label: "authority_policies current index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS authority_policies_current_idx
+                  ON authority_policies (principal) WHERE superseded_at IS NULL`),
+  },
+  {
+    label: "authority_policies immutability function",
+    sql: sql.raw(`
+      CREATE OR REPLACE FUNCTION authority_policies_immutable() RETURNS trigger AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'authority_policies is append-only: DELETE is not permitted';
+        END IF;
+        IF OLD.superseded_at IS NOT NULL
+           OR NEW.superseded_at IS NULL
+           OR NEW.id            IS DISTINCT FROM OLD.id
+           OR NEW.principal     IS DISTINCT FROM OLD.principal
+           OR NEW.version       IS DISTINCT FROM OLD.version
+           OR NEW.document      IS DISTINCT FROM OLD.document
+           OR NEW.document_hash IS DISTINCT FROM OLD.document_hash
+           OR NEW.effective_from IS DISTINCT FROM OLD.effective_from
+           OR NEW.created_by    IS DISTINCT FROM OLD.created_by
+           OR NEW.created_at    IS DISTINCT FROM OLD.created_at THEN
+          RAISE EXCEPTION 'authority_policies rows are immutable except stamping superseded_at once';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql`),
+  },
+  {
+    label: "authority_policies trigger binding",
+    sql: sql.raw(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'authority_policies_no_mutate'
+        ) THEN
+          CREATE TRIGGER authority_policies_no_mutate
+            BEFORE UPDATE OR DELETE ON authority_policies
+            FOR EACH ROW EXECUTE FUNCTION authority_policies_immutable();
+        END IF;
+      END $$`),
+  },
+  {
+    // NOT VALID on purpose: this is the REPAIR path. If the policies table
+    // was dropped and rebuilt, surviving decision rows reference policy ids
+    // that no longer exist — a validating ADD CONSTRAINT would refuse forever
+    // and block the repair. New rows are still enforced; the migration (0041)
+    // adds the validating form for the normal path.
+    label: "authority_decisions policy FK",
+    sql: sql.raw(`
+      DO $$ BEGIN
+        ALTER TABLE authority_decisions
+          ADD CONSTRAINT authority_decisions_policy_id_fk
+          FOREIGN KEY (policy_id) REFERENCES authority_policies(id) NOT VALID;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$`),
+  },
+  {
+    /** #266: cap accounting — one row per (principal, capability, asset, window). */
+    label: "authority_usage table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS authority_usage (
+        id          bigserial PRIMARY KEY,
+        principal   text NOT NULL,
+        capability  varchar(64) NOT NULL,
+        asset       text NOT NULL,
+        window_key  text NOT NULL,
+        used_minor  bigint NOT NULL DEFAULT 0,
+        updated_at  timestamp NOT NULL DEFAULT now(),
+        UNIQUE (principal, capability, asset, window_key)
+      )`),
+  },
+  {
+    /** #266: the reservation lifecycle rows. */
+    label: "authority_reservations table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS authority_reservations (
+        id             bigserial PRIMARY KEY,
+        reservation_id text NOT NULL UNIQUE,
+        usage_id       bigint NOT NULL REFERENCES authority_usage(id),
+        principal      text NOT NULL,
+        capability     varchar(64) NOT NULL,
+        asset          text NOT NULL,
+        amount_minor   bigint NOT NULL,
+        state          varchar(24) NOT NULL DEFAULT 'reserved',
+        tx_id          text,
+        postings       jsonb NOT NULL,
+        postings_hash  text NOT NULL,
+        created_at     timestamp NOT NULL DEFAULT now(),
+        updated_at     timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "authority_reservations state index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS authority_reservations_state_idx
+                  ON authority_reservations (state, created_at)`),
+  },
+  {
     label: "commerce_orders payment intent index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
                   ON commerce_orders (stripe_payment_intent_id)`),
@@ -878,6 +996,9 @@ const CRITICAL_TABLES = [
   "artifact_print_assets",
   "commerce_ledger",
   "commerce_ledger_txids",
+  "authority_policies",
+  "authority_usage",
+  "authority_reservations",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {

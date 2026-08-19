@@ -43,6 +43,16 @@ export interface RecordDecisionInput {
   txId?: string;
   postingsHash?: string;
   correlationId?: string;
+  /**
+   * Phase 1b (#266): the policy ROW that authorized this, plus its document
+   * hash — an integer version alone cannot prove which document authorized a
+   * historical action. Decisions are append-only, so these must ride the
+   * initial insert; there is no stamping them in later.
+   */
+  policyId?: number;
+  policyDocumentHash?: string;
+  /** When an admission stops being usable by the ledger (Phase 1b). */
+  expiresAt?: Date;
 }
 
 /**
@@ -69,6 +79,9 @@ export async function recordDecision(tx: DbTx, input: RecordDecisionInput): Prom
       txId: input.txId ?? null,
       postingsHash: input.postingsHash ?? null,
       correlationId: input.correlationId ?? null,
+      policyId: input.policyId ?? null,
+      policyDocumentHash: input.policyDocumentHash ?? null,
+      expiresAt: input.expiresAt ?? null,
     })
     .onConflictDoNothing({ target: authorityDecisionsTable.decisionId });
 }
