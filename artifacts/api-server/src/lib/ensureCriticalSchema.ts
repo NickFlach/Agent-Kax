@@ -974,6 +974,13 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       )`),
   },
   {
+    /** #183: the curation/staff columns. Columns get eaten too (user_bots). */
+    label: "agent_storefront_settings curation columns",
+    sql: sql.raw(`ALTER TABLE agent_storefront_settings
+                    ADD COLUMN IF NOT EXISTS curated_artifact_ids jsonb,
+                    ADD COLUMN IF NOT EXISTS staff_names jsonb`),
+  },
+  {
     label: "contribution_credits indexes",
     sql: sql.raw(`
       DO $$ BEGIN
