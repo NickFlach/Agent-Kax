@@ -28,10 +28,11 @@ import { db } from "@workspace/db";
 import {
   artifactsTable,
   dropsTable,
+  userBotsTable,
   type Artifact,
   type Drop,
 } from "@workspace/db/schema";
-import { eq, and, inArray, sql, type SQL } from "drizzle-orm";
+import { eq, and, inArray, isNull, sql, type SQL } from "drizzle-orm";
 
 /** Artifact statuses that may appear on a public surface when attached to a published drop. */
 export const PUBLISHABLE_STATUSES = ["narrated", "dropped"] as const;
@@ -96,4 +97,72 @@ export async function getPublicArtifact(id: number): Promise<Artifact | null> {
     .where(and(eq(artifactsTable.id, id), publicArtifactWhere()))
     .limit(1);
   return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Commerce eligibility (#256, KAX-ADR-0002). The repo's THIRD visibility
+// predicate, named and defined once — deliberately independent of the two
+// above. Public visibility asks "may anyone see this?"; storefront visibility
+// (agent-storefront.ts) deliberately asks nothing; commerce eligibility asks
+// "does the REQUESTING PRINCIPAL control the bot OBC names as creator?".
+// A route that wants "sellable" must call this, never improvise a fourth.
+//
+// What this proves, precisely: the requesting user has a live (non-revoked)
+// user_bots attachment to the artifact's creator_bot_id. What it does NOT
+// prove: that the bot actually created the work — creator_bot_id arrives from
+// OBC's partner feed and KAX never independently verifies authorship. That
+// gap belongs to the rights preflight's human half, not to this predicate.
+// ---------------------------------------------------------------------------
+
+/**
+ * Drizzle WHERE clause constraining a query to artifacts commerce-eligible
+ * for `userId`: a creator bot is on record, and it is attached to this user
+ * with the attachment not revoked. Sub-select for the same reason as
+ * publicArtifactWhere — callers keep their select shape.
+ */
+export function commerceEligibleWhere(userId: string): SQL {
+  const controlledBotIds = db
+    .select({ botId: userBotsTable.obcBotId })
+    .from(userBotsTable)
+    .where(and(eq(userBotsTable.userId, userId), isNull(userBotsTable.revokedAt)));
+  return and(
+    sql`${artifactsTable.creatorBotId} IS NOT NULL`,
+    inArray(artifactsTable.creatorBotId, controlledBotIds),
+  )!;
+}
+
+/**
+ * Single-artifact check with a DISTINCT reason per failure, so a form
+ * mismatch is never mistaken for a rights denial (#256 AC). Reasons are
+ * stable strings — receipts and support both grep them.
+ *
+ * The not-attached-to-you reason deliberately does not distinguish "attached
+ * to somebody else" from "attached to nobody": the caller's remedy is the
+ * same (attach the bot), and the difference is another user's business.
+ */
+export async function isCommerceEligible(
+  artifactId: number,
+  userId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const [a] = await db
+    .select({ creatorBotId: artifactsTable.creatorBotId })
+    .from(artifactsTable)
+    .where(eq(artifactsTable.id, artifactId))
+    .limit(1);
+  if (!a) return { ok: false, reason: "artifact not found" };
+  if (a.creatorBotId == null) {
+    return { ok: false, reason: "artifact has no creator bot on record" };
+  }
+  const [attachment] = await db
+    .select({ userId: userBotsTable.userId, revokedAt: userBotsTable.revokedAt })
+    .from(userBotsTable)
+    .where(eq(userBotsTable.obcBotId, a.creatorBotId))
+    .limit(1);
+  if (!attachment || attachment.userId !== userId) {
+    return { ok: false, reason: "creator bot is not attached to the requesting principal" };
+  }
+  if (attachment.revokedAt != null) {
+    return { ok: false, reason: "the creator bot's attachment is revoked" };
+  }
+  return { ok: true };
 }
