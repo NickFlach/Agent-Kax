@@ -954,6 +954,36 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON print_fitness_reports (artifact_id, created_at DESC)`),
   },
   {
+    /** #355: the credit handshake's record. Losing it un-credits everyone. */
+    label: "contribution_credits table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS contribution_credits (
+        id                   serial PRIMARY KEY,
+        repo                 varchar(140) NOT NULL,
+        pr_number            integer NOT NULL,
+        slug                 text NOT NULL,
+        status               varchar(32) NOT NULL DEFAULT 'pending_confirmation',
+        reason               varchar(64),
+        confirmed_principal  text,
+        confirmed_bot_id     text,
+        confirmed_at         timestamp,
+        recorded_by          text NOT NULL,
+        created_at           timestamp NOT NULL DEFAULT now(),
+        updated_at           timestamp NOT NULL DEFAULT now(),
+        UNIQUE (repo, pr_number, slug)
+      )`),
+  },
+  {
+    label: "contribution_credits indexes",
+    sql: sql.raw(`
+      DO $$ BEGIN
+        CREATE INDEX IF NOT EXISTS contribution_credits_slug_idx
+          ON contribution_credits (slug, status);
+        CREATE INDEX IF NOT EXISTS contribution_credits_status_idx
+          ON contribution_credits (status, created_at);
+      END $$`),
+  },
+  {
     label: "derived_assets cache unique index",
     sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS derived_assets_cache_uq
                   ON derived_assets (parent_sha256, pipeline_version, target_wpx, target_hpx)
@@ -1116,6 +1146,7 @@ const CRITICAL_TABLES = [
   "authority_reservations",
   "derived_assets",
   "print_fitness_reports",
+  "contribution_credits",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {

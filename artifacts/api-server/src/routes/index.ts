@@ -35,6 +35,7 @@ import mcpRouter from "./mcp";
 import storeCheckoutRouter from "./store-checkout";
 import purchasingRouter from "./purchasing";
 import commerceRouter from "./commerce";
+import contributionsRouter from "./contributions";
 
 const router: IRouter = Router();
 
@@ -64,6 +65,7 @@ router.use(storefrontRouter);
 router.use(storeCheckoutRouter);
 router.use(purchasingRouter);
 router.use(commerceRouter);
+router.use(contributionsRouter);
 router.use(dashboardRouter);
 router.use(shareRouter);
 router.use(webhooksRouter);
