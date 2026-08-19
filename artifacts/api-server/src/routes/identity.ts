@@ -39,6 +39,7 @@ async function grantSignupCredits(principal: string, log?: (obj: unknown, msg: s
       ],
       // #245: the system, not the recipient, authorizes a signup grant.
       actor: "system:signup-grant",
+      capability: "credits.grant",
     });
     if (!r.idempotentReplay) log?.({ principal }, "signup grant issued");
   } catch (err) {

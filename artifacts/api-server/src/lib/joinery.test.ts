@@ -199,6 +199,15 @@ describe("joinery purchase", () => {
     // stripping the trader: prefix off an account name.
     const rec = await getTransaction(r.txId);
     expect(rec?.actor).toBe(buyer.principal);
+
+    // #248 AC, joinery path: the same purchase produced exactly one authority
+    // decision, attributed to the buyer with the commerce capability.
+    const decisions = await db.execute(
+      sql`SELECT actor, capability FROM authority_decisions WHERE tx_id = ${r.txId}`,
+    );
+    expect(decisions.rows).toHaveLength(1);
+    expect((decisions.rows[0] as { actor: string }).actor).toBe(buyer.principal);
+    expect((decisions.rows[0] as { capability: string }).capability).toBe("commerce.purchase");
   });
 
   it("does not pay the maker twice when the seller made it", async () => {
