@@ -285,6 +285,44 @@ export interface PrintifyClient {
    * failed read throws, and the caller changes nothing.
    */
   getOrder(printifyOrderId: string): Promise<PrintifyOrderState | null>;
+  /**
+   * Store an image in the merchant's Printify media library BY URL (#261).
+   * This is the call that makes v0.1 need no KAX object storage: the print
+   * file then lives durably at Printify rather than depending on OBC's URL
+   * surviving. A write, so it is never retried here — the caller decides.
+   */
+  uploadImageByUrl(fileName: string, url: string): Promise<PrintifyUploadRef>;
+  /**
+   * Create (never publish) a product in the shop (#261). Publishing is a
+   * separate, deliberate act this adapter does not perform implicitly.
+   */
+  createProduct(input: PrintifyCreateProductInput): Promise<PrintifyProductRef>;
+  /**
+   * Cancel an order that has not shipped (#261). A write; the 404-vs-error
+   * distinction is the same as getOrder's: 404 throws here rather than
+   * returning null, because cancelling an order Printify does not have is a
+   * caller bug, not a fact to smooth over.
+   */
+  cancelOrder(printifyOrderId: string): Promise<PrintifyOrderRef>;
+}
+
+export interface PrintifyUploadRef {
+  id: string;
+  fileName: string | null;
+}
+
+export interface PrintifyCreateProductInput {
+  title: string;
+  blueprintId: number;
+  printProviderId: number;
+  /** Variant ids with prices in USD cents; only these are enabled. */
+  variants: Array<{ id: number; priceCents: number }>;
+  /** The uploaded image (uploadImageByUrl's id) placed on the front, full-bleed. */
+  imageId: string;
+}
+
+export interface PrintifyProductRef {
+  id: string;
 }
 
 /**
@@ -671,6 +709,63 @@ export function getUncachablePrintifyClient(): PrintifyClient {
         null,
         "Printify order search hit its page budget without reaching the end of the list",
       );
+    },
+
+    async uploadImageByUrl(fileName: string, url: string): Promise<PrintifyUploadRef> {
+      const payload = await printifyFetch(config, `/uploads/images.json`, "POST", {
+        file_name: fileName,
+        url,
+      });
+      const record = payload as { id?: unknown; file_name?: unknown };
+      if (typeof record?.id !== "string" || !record.id) {
+        // A 2xx with no id is the submission-ambiguity shape again: Printify
+        // very likely stored the file and we lost its name. Refuse loudly —
+        // the media library is browsable, so an operator can recover it, and
+        // a silent retry would store the bytes twice.
+        throw new PrintifyError(502, null, "Printify upload returned no id");
+      }
+      return {
+        id: record.id,
+        fileName: typeof record.file_name === "string" ? record.file_name : null,
+      };
+    },
+
+    async createProduct(input: PrintifyCreateProductInput): Promise<PrintifyProductRef> {
+      const variantIds = input.variants.map((v) => v.id);
+      const payload = await printifyFetch(config, `/shops/${config.shopId}/products.json`, "POST", {
+        title: input.title,
+        blueprint_id: input.blueprintId,
+        print_provider_id: input.printProviderId,
+        variants: input.variants.map((v) => ({ id: v.id, price: v.priceCents, is_enabled: true })),
+        print_areas: [
+          {
+            variant_ids: variantIds,
+            placeholders: [
+              {
+                position: "front",
+                images: [{ id: input.imageId, x: 0.5, y: 0.5, scale: 1, angle: 0 }],
+              },
+            ],
+          },
+        ],
+      });
+      const record = payload as { id?: unknown };
+      if (typeof record?.id !== "string" || !record.id) {
+        throw new PrintifyError(502, null, "Printify product create returned no id");
+      }
+      // Created, NEVER published: publishing is a separate deliberate act
+      // (POST /publish.json) this adapter does not perform implicitly.
+      return { id: record.id };
+    },
+
+    async cancelOrder(printifyOrderId: string): Promise<PrintifyOrderRef> {
+      const payload = await printifyFetch(
+        config,
+        `/shops/${config.shopId}/orders/${encodeURIComponent(printifyOrderId)}/cancel.json`,
+        "POST",
+        {},
+      );
+      return readOrderRef(payload, printifyOrderId);
     },
 
     async getOrder(printifyOrderId: string): Promise<PrintifyOrderState | null> {
