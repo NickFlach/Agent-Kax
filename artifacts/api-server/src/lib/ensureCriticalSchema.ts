@@ -620,6 +620,26 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
                   ON commerce_merchants (user_id)`),
   },
   {
+    /** #254: the printability engine's measurement side table. */
+    label: "artifact_print_assets table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS artifact_print_assets (
+        artifact_id         integer PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
+        width_px            integer,
+        height_px           integer,
+        format              varchar(16),
+        has_alpha           boolean,
+        color_space         varchar(16),
+        assumed_srgb        boolean NOT NULL DEFAULT false,
+        byte_size           bigint,
+        sha256              text,
+        source_url_at_fetch text,
+        fetched_at          timestamp,
+        failure_reason      varchar(48),
+        created_at          timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
     label: "authority_decisions trigger binding",
     sql: sql.raw(`
       DO $$
@@ -749,6 +769,7 @@ const CRITICAL_TABLES = [
   "bot_occ_status",
   "authority_decisions",
   "commerce_merchants",
+  "artifact_print_assets",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {

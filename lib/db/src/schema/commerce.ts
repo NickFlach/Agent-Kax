@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -66,6 +67,40 @@ export const commerceMerchantsTable = pgTable(
 
 export type CommerceMerchant = typeof commerceMerchantsTable.$inferSelect;
 export type InsertCommerceMerchant = typeof commerceMerchantsTable.$inferInsert;
+
+/**
+ * artifact_print_assets (#254): what the bytes behind an artifact's public
+ * URL actually are — dimensions, format, checksum — measured lazily and
+ * kept in a SIDE TABLE so formatArtifact()'s row spread can never leak it
+ * onto a public surface by accident.
+ *
+ * A row is a measurement receipt either way: success fills the media
+ * columns, failure fills failure_reason. Both record source_url_at_fetch
+ * and fetched_at, because a measurement of a URL KAX does not control is
+ * only meaningful with its provenance attached.
+ */
+export const artifactPrintAssetsTable = pgTable("artifact_print_assets", {
+  artifactId: integer("artifact_id")
+    .primaryKey()
+    .references(() => artifactsTable.id, { onDelete: "cascade" }),
+  widthPx: integer("width_px"),
+  heightPx: integer("height_px"),
+  format: varchar("format", { length: 16 }),
+  hasAlpha: boolean("has_alpha"),
+  /** NULL means unknown; see assumedSrgb. */
+  colorSpace: varchar("color_space", { length: 16 }),
+  assumedSrgb: boolean("assumed_srgb").notNull().default(false),
+  byteSize: bigint("byte_size", { mode: "bigint" }),
+  sha256: text("sha256"),
+  sourceUrlAtFetch: text("source_url_at_fetch"),
+  fetchedAt: timestamp("fetched_at"),
+  /** not_a_url | sentinel | fetch_failed | too_large | decode_failed */
+  failureReason: varchar("failure_reason", { length: 48 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type ArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferSelect;
+export type InsertArtifactPrintAsset = typeof artifactPrintAssetsTable.$inferInsert;
 
 /**
  * Physical commerce: real dollars, a real card, and something that arrives in
