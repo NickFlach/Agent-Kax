@@ -211,6 +211,13 @@ export async function getTransaction(
  * sum). Used to enforce a per-day mint cap on `/ledger/grant` so a compromised
  * mint token can't drain the house in one burst. Best-effort (a small race
  * window across concurrent grants is acceptable for play credits).
+ *
+ * This is a GLOBAL house-outflow cap and must not be extended for per-account
+ * limits (#246): it has no account dimension, and its best-effort race window
+ * is acceptable only because play credits are play. Per-account caps use
+ * accountInflow / accountInflowTx below — the Tx variant exists precisely so
+ * the read can run under postTransaction's advisory lock, where the race
+ * window is zero.
  */
 export async function houseOutflow(kind: string, asset: string, since: Date): Promise<bigint> {
   const [row] = await db
@@ -225,6 +232,72 @@ export async function houseOutflow(kind: string, asset: string, since: Date): Pr
       ),
     );
   return -BigInt(row?.s ?? "0");
+}
+
+// ---------------------------------------------------------------------------
+// Per-account inflow (#246). Ships INERT: no route calls these yet. The
+// primitive for locked decision #6's ~$100/day per-account purchase cap,
+// landed before the on-ramp that will enforce it, so the cap arrives as a
+// one-line comparison rather than a query someone writes under deadline.
+// ---------------------------------------------------------------------------
+
+/** The transaction handle db.transaction() hands its callback. */
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function inflowSum(
+  executor: typeof db | DbTx,
+  account: string,
+  kind: string,
+  asset: string,
+  since: Date,
+): Promise<bigint> {
+  // One indexed read (credit_ledger_account_kind_created_idx, migration
+  // 0033): positive postings only — an account's SPENDING must never offset
+  // what has arrived, or a busy account could exceed the cap forever.
+  const [row] = await executor
+    .select({ s: sql<string>`COALESCE(SUM(${creditLedgerTable.amount}), 0)` })
+    .from(creditLedgerTable)
+    .where(
+      and(
+        eq(creditLedgerTable.account, account),
+        eq(creditLedgerTable.asset, asset),
+        eq(creditLedgerTable.kind, kind),
+        sql`${creditLedgerTable.amount} > 0`,
+        gte(creditLedgerTable.createdAt, since),
+      ),
+    );
+  return BigInt(row?.s ?? "0");
+}
+
+/** Total value that has ARRIVED in an account for a kind+asset since an instant. */
+export async function accountInflow(account: string, kind: string, asset: string, since: Date): Promise<bigint> {
+  return inflowSum(db, account, kind, asset, since);
+}
+
+/**
+ * Same, on an existing tx handle so it can run INSIDE postTransaction's
+ * advisory lock — where no concurrent append can commit between this read and
+ * the caller's insert, closing the race window houseOutflow tolerates. Single
+ * round trip by construction.
+ */
+export async function accountInflowTx(
+  tx: DbTx,
+  account: string,
+  kind: string,
+  asset: string,
+  since: Date,
+): Promise<bigint> {
+  return inflowSum(tx, account, kind, asset, since);
+}
+
+/** The rolling-window start: 24 hours before `now`. */
+export function rollingDayStart(now: Date): Date {
+  return new Date(now.getTime() - 24 * 3600 * 1000);
+}
+
+/** The 1st of `now`'s month, 00:00 UTC — calendar-month windows are UTC. */
+export function calendarMonthStartUTC(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
 /** An account's balance for an asset, derived by summing its postings in the DB. */

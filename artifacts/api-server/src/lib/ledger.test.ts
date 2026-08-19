@@ -9,6 +9,10 @@ import {
   balance,
   verifyLedgerChain,
   getTransaction,
+  accountInflow,
+  accountInflowTx,
+  rollingDayStart,
+  calendarMonthStartUTC,
   LedgerInsufficientFunds,
   LedgerIdempotencyConflict,
 } from "./ledger";
@@ -353,5 +357,74 @@ describe("credit ledger topology (DB)", () => {
       ],
     });
     expect(await balance(pool, asset)).toBe(0n);
+  });
+});
+
+describe("per-account inflow (#246, DB)", () => {
+  const asset = "play_credit";
+
+  it("sums only positive postings, only for the named account, only since the instant", async () => {
+    const a = `trader:test:${uniq()}`;
+    const b = `trader:test:${uniq()}`;
+    const pool = `amm:test:${uniq()}`;
+    const past = new Date(Date.now() - 60_000);
+
+    // Two grants to A, one to B, then A SPENDS 30 (a negative posting on A).
+    for (const [acct, amt] of [[a, 100n], [a, 50n], [b, 70n]] as const) {
+      await postTransaction({ actor: "test:suite",
+        txId: `inflow-${uniq()}`,
+        asset,
+        postings: [
+          { account: HOUSE_ACCOUNT, amount: -amt, kind: "grant" },
+          { account: acct, amount: amt, kind: "grant" },
+        ],
+      });
+    }
+    await postTransaction({ actor: "test:suite",
+      txId: `inflow-spend-${uniq()}`,
+      asset,
+      postings: [
+        { account: a, amount: -30n, kind: "trade" },
+        { account: pool, amount: 30n, kind: "trade" },
+      ],
+    });
+
+    // A received 150 by grant; the spend must not offset it, and B is invisible.
+    expect(await accountInflow(a, "grant", asset, past)).toBe(150n);
+    expect(await accountInflow(b, "grant", asset, past)).toBe(70n);
+    // Different kind, different answer: the pool received A's 30 as a trade.
+    expect(await accountInflow(a, "trade", asset, past)).toBe(0n);
+    expect(await accountInflow(pool, "trade", asset, past)).toBe(30n);
+    // The since filter excludes everything when the window opens in the future.
+    const future = new Date(Date.now() + 60_000);
+    expect(await accountInflow(a, "grant", asset, future)).toBe(0n);
+  });
+
+  it("accountInflowTx reads the same answer inside a db.transaction", async () => {
+    const a = `trader:test:${uniq()}`;
+    const past = new Date(Date.now() - 60_000);
+    await postTransaction({ actor: "test:suite",
+      txId: `inflow-tx-${uniq()}`,
+      asset,
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -40n, kind: "grant" },
+        { account: a, amount: 40n, kind: "grant" },
+      ],
+    });
+    // The production caller holds the ledger advisory lock inside
+    // postTransaction; here the property under test is that the Tx variant
+    // works on a transaction handle at all (one read, no extra round trips).
+    const seen = await db.transaction(async (tx) => accountInflowTx(tx, a, "grant", asset, past));
+    expect(seen).toBe(40n);
+  });
+
+  it("window helpers are pure and UTC-honest", () => {
+    const now = new Date("2026-08-19T15:30:45.000Z");
+    expect(rollingDayStart(now).toISOString()).toBe("2026-08-18T15:30:45.000Z");
+    expect(calendarMonthStartUTC(now).toISOString()).toBe("2026-08-01T00:00:00.000Z");
+    // A local-timezone month boundary must not leak in: Jan 1 00:30 UTC is
+    // still January in UTC whatever the server timezone says.
+    const edge = new Date("2026-01-01T00:30:00.000Z");
+    expect(calendarMonthStartUTC(edge).toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 });
