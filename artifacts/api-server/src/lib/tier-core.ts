@@ -52,8 +52,67 @@ export interface MergeEvidence {
   ciCoveredChangedPaths: boolean;
   /** Was the merge within the agent's granted scope? */
   withinScope: boolean;
-  /** Was this merge later reverted? */
-  reverted: boolean;
+  /**
+   * Was this merge later reverted — and BY WHOM. Null means never reverted.
+   *
+   * This was a bare boolean, and the boolean was a hole (#356 review, F1):
+   * a revert always reset the subject's promotion streak, with no provenance
+   * on who reverted. `evaluateDemotion` had just finished refusing an
+   * overlapping-allowlist peer demotion authority under #347 — and the same
+   * peer's same revert, arriving here as `reverted: true`, wiped the streak
+   * anyway. Not "I can demote you", but "you can never promote while I
+   * object", held by exactly the principal the rule excludes.
+   *
+   * A streak reset blocks a tier change, so it is tier-affecting, and the
+   * amended doctrine applies: signals that move tiers cite their provenance.
+   */
+  reverted: RevertProvenance | null;
+}
+
+/** Who performed a revert, carried wherever a revert is used as a signal. */
+export interface RevertProvenance {
+  /** Principal that performed the revert. */
+  by: string;
+  /**
+   * MUST be derived by the wrapper from the principal grammar
+   * (`kax:user:` vs `kax:agent:`), never accepted from the reporting party —
+   * the same rule as `RevertEvidence.revertedByKind` (H2).
+   */
+  byKind: "human" | "agent";
+  /** When the reverter is an agent: does its allowlist overlap the paths? */
+  byOverlapsPaths: boolean;
+}
+
+/**
+ * Does this revert carry authority over the tier record of `subject`?
+ *
+ * One function, used by BOTH doors — the demotion arm of `evaluateDemotion`
+ * and the streak-reset decision in `judgeMerge` — so the two cannot drift
+ * apart again. Drift is how F1 happened: the demotion door learned #347's
+ * refusals while the streak door still took a boolean on faith.
+ *
+ *   - a HUMAN revert carries authority;
+ *   - an AGENT revert carries authority only when its allowlist does NOT
+ *     overlap the reverted paths (#347: an overlapping agent has a standing
+ *     conflict of interest — its revert is valid as code, inert as authority);
+ *   - a SELF revert carries none: a self-report is not an external signal.
+ */
+export function revertAuthority(
+  subject: string,
+  r: { by: string; byKind: "human" | "agent"; byOverlapsPaths: boolean },
+): { ok: boolean; reason: string } {
+  if (r.by === subject) {
+    return { ok: false, reason: "self-revert carries no demotion authority" };
+  }
+  if (r.byKind === "agent" && r.byOverlapsPaths) {
+    return {
+      ok: false,
+      reason:
+        "reverting agent's allowlist overlaps the reverted paths: " +
+        "conflict of interest, no demotion authority (#347)",
+    };
+  }
+  return { ok: true, reason: `revert by ${r.by} carries authority` };
 }
 
 /** One revert, as the demotion evaluator receives it. */
@@ -259,7 +318,32 @@ function judgeMerge(subject: string, e: MergeEvidence): CreditDecision {
   // every peer: land failing work of your own, wipe their counters.
   if (e.author !== subject) return no("not the subject's work");
   if (!e.ciGreen) return no("CI failed on the merge commit", true);
-  if (e.reverted) return no("merge was reverted", true);
+  if (e.reverted !== null) {
+    // A reverted merge NEVER credits — the work did not survive. Whether it
+    // also erases the streak depends on who reverted (#356 review, F1):
+    //
+    //   - a revert with demotion authority resets — the same signal that may
+    //     demote may certainly reset;
+    //   - a SELF-revert also resets, deliberately, though it carries no
+    //     demotion authority: an agent cleaning up its own bad work pays for
+    //     it in streak, and that cost only ever falls on the subject — it is
+    //     not a channel a peer can reach;
+    //   - a conflicted peer's revert does NEITHER: the merge is disqualified
+    //     (their revert is real as code), but the streak stands, or one
+    //     revert commit is an indefinite promotion veto held by exactly the
+    //     principal #347 excludes.
+    const auth = revertAuthority(subject, e.reverted);
+    if (e.reverted.by === subject) {
+      return no("merge was self-reverted: no credit, streak reset", true);
+    }
+    if (auth.ok) {
+      return no(`merge was reverted by ${e.reverted.by}: no credit, streak reset`, true);
+    }
+    return no(
+      `merge was reverted without demotion authority (${auth.reason}): ` +
+        "no credit, streak intact",
+    );
+  }
   if (!e.withinScope) return no("outside the agent's granted scope");
   if (e.mergedBy === subject) {
     return no("self-merged: an agent must not manufacture its own record (#346)");
@@ -362,14 +446,15 @@ export function evaluateDemotion(
     };
   }
 
-  if (evidence.revertedBy === subject) {
-    return refusal("self-revert carries no demotion authority");
-  }
-  if (evidence.revertedByKind === "agent" && evidence.revertedByOverlapsPaths) {
-    return refusal(
-      "reverting agent's allowlist overlaps the reverted paths: " +
-        "conflict of interest, no demotion authority (#347)",
-    );
+  // The same authority question the streak-reset door asks, answered by the
+  // same function — the two doors drifting apart is how F1 happened.
+  const auth = revertAuthority(subject, {
+    by: evidence.revertedBy,
+    byKind: evidence.revertedByKind,
+    byOverlapsPaths: evidence.revertedByOverlapsPaths,
+  });
+  if (!auth.ok) {
+    return refusal(auth.reason);
   }
   return {
     subject,

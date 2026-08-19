@@ -17,6 +17,7 @@ import {
   evaluateDemotion,
   evaluatePromotion,
   pathMatchesGlob,
+  revertAuthority,
   type MergeEvidence,
   type RevertEvidence,
   type Tier,
@@ -38,7 +39,7 @@ function merge(over: Partial<MergeEvidence>): MergeEvidence {
     ciGreen: true,
     ciCoveredChangedPaths: false,
     withinScope: true,
-    reverted: false,
+    reverted: null,
     ...over,
   };
 }
@@ -284,5 +285,100 @@ describe("#356 Hunt H2 — a violation is recomputed, never taken on assertion",
     // regex metacharacters in paths are literal, not operators
     expect(pathMatchesGlob("a/b+c.ts", "a/b+c.ts")).toBe(true);
     expect(pathMatchesGlob("a/bbc.ts", "a/b+c.ts")).toBe(false);
+  });
+});
+
+describe("#356 review F1 — a conflicted revert disqualifies the merge but not the streak", () => {
+  // The demotion door refused an overlapping-allowlist peer under #347, and
+  // the streak door then took `reverted` as a bare boolean and wiped the
+  // subject's counter anyway. Not "I can demote you" — "you can never promote
+  // while I object", held by exactly the principal the rule excludes.
+  const conflictedRevert = { by: PEER, byKind: "agent" as const, byOverlapsPaths: false };
+
+  // MUTATION-SENSITIVE (F1): make any revert reset the streak and this goes red.
+  it("a conflicted peer's revert does not reset the author's streak", () => {
+    const evidence = [
+      merge({ prNumber: 1, reviewedBy: PEER }),
+      merge({ prNumber: 2, reviewedBy: PEER }),
+      merge({ prNumber: 3, reviewedBy: PEER }),
+      // The subject's own merge, reverted by an agent whose allowlist
+      // overlaps the reverted paths — real as code, inert as authority.
+      merge({
+        prNumber: 66,
+        reviewedBy: PEER,
+        reverted: { by: PEER, byKind: "agent", byOverlapsPaths: true },
+      }),
+      merge({ prNumber: 4, reviewedBy: PEER }),
+      merge({ prNumber: 5, reviewedBy: PEER }),
+    ];
+    const d = evaluatePromotion(AGENT, 0 as Tier, evidence, 5);
+    expect(d.changed).toBe(true);
+    const c = d.decisions.find((x) => x.prNumber === 66)!;
+    expect(c.credited).toBe(false); // the reverted merge itself never credits
+    expect(c.resetStreak).toBe(false);
+    expect(c.reason).toMatch(/streak intact/);
+    expect(c.reason).toMatch(/#347/);
+  });
+
+  it("an authoritative revert still resets — human", () => {
+    const evidence = [
+      merge({ prNumber: 1, reviewedBy: PEER }),
+      merge({
+        prNumber: 66,
+        reviewedBy: PEER,
+        reverted: { by: HUMAN, byKind: "human", byOverlapsPaths: false },
+      }),
+      merge({ prNumber: 2, reviewedBy: PEER }),
+    ];
+    const d = evaluatePromotion(AGENT, 0 as Tier, evidence, 2);
+    expect(d.changed).toBe(false);
+    expect(d.decisions.find((x) => x.prNumber === 66)?.resetStreak).toBe(true);
+  });
+
+  it("an authoritative revert still resets — non-overlapping agent", () => {
+    const evidence = [
+      merge({ prNumber: 1, reviewedBy: PEER }),
+      merge({ prNumber: 66, reviewedBy: PEER, reverted: conflictedRevert }),
+      merge({ prNumber: 2, reviewedBy: PEER }),
+    ];
+    const d = evaluatePromotion(AGENT, 0 as Tier, evidence, 2);
+    expect(d.changed).toBe(false);
+    expect(d.decisions.find((x) => x.prNumber === 66)?.resetStreak).toBe(true);
+  });
+
+  // The fix must not overcorrect: a self-revert carries no demotion authority
+  // but DOES reset — an agent cleaning up its own bad work pays in streak,
+  // and that cost only ever falls on the subject itself.
+  it("a self-revert resets the streak even though it cannot demote", () => {
+    const evidence = [
+      merge({ prNumber: 1, reviewedBy: PEER }),
+      merge({
+        prNumber: 66,
+        reviewedBy: PEER,
+        reverted: { by: AGENT, byKind: "agent", byOverlapsPaths: true },
+      }),
+      merge({ prNumber: 2, reviewedBy: PEER }),
+    ];
+    const d = evaluatePromotion(AGENT, 0 as Tier, evidence, 2);
+    expect(d.changed).toBe(false);
+    expect(d.decisions.find((x) => x.prNumber === 66)?.resetStreak).toBe(true);
+    expect(d.decisions.find((x) => x.prNumber === 66)?.reason).toMatch(/self-reverted/);
+  });
+
+  it("both doors answer the authority question identically", () => {
+    // The helper is shared so the doors cannot drift; this pins the sharing.
+    const r = { by: PEER, byKind: "agent" as const, byOverlapsPaths: true };
+    const streakSide = revertAuthority(AGENT, r);
+    const demotionSide = evaluateDemotion(2 as Tier, {
+      kind: "revert",
+      prNumber: 1,
+      author: AGENT,
+      revertedBy: r.by,
+      revertedByKind: r.byKind,
+      revertedByOverlapsPaths: r.byOverlapsPaths,
+    });
+    expect(streakSide.ok).toBe(false);
+    expect(demotionSide.demoted).toBe(false);
+    expect(demotionSide.reason).toBe(streakSide.reason);
   });
 });
