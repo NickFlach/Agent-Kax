@@ -21,6 +21,7 @@ import ConstellationAgentPage from "@/pages/constellation-agent";
 import LoginPage from "@/pages/login";
 import ResetPasswordPage from "@/pages/reset-password";
 import FloorPage from "@/pages/floor";
+import ProductPage from "@/pages/product";
 import PredictionsPage from "@/pages/predictions";
 import LandingPage from "@/pages/landing";
 import { MobileNav } from "@/components/mobile-nav";
@@ -483,6 +484,10 @@ function Router() {
       <Route path="/predictions">
         <PredictionsPage />
       </Route>
+      {/* #260: the public product page — eager like FloorPage, because a
+          buyer arriving from a shared link should never see a lazy flash
+          before the disclosure renders. */}
+      <Route path="/products/:id">{(params) => <ProductPage id={params.id!} />}</Route>
       <Route path="/marketplace/list">
         <Marketplace />
       </Route>

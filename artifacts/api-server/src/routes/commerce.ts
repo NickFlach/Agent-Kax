@@ -11,7 +11,8 @@ import {
 import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { canMutate, requireAuth, requireCommerceToken } from "../middlewares/requireAuth";
-import { artifactPrintAssetsTable, commerceMerchantsTable } from "@workspace/db/schema";
+import { artifactPrintAssetsTable, artifactsTable, commerceMerchantsTable } from "@workspace/db/schema";
+import { aiDisclosure } from "../lib/disclosure";
 import { approvalHash, canTransition, parseCommerceState, type CommerceState } from "../lib/commerceOrder";
 import { isCommerceEligible } from "../lib/visibility";
 import { measureArtifactAsset } from "../lib/printAsset";
@@ -318,6 +319,69 @@ router.post(
     res.json({ commerceState: "product_eligible" });
   },
 );
+
+/**
+ * The public product read (#260): what the product page renders. Published
+ * products ONLY, and both failure exits are the same 404 — a product that
+ * exists unpublished must be indistinguishable from one that never existed,
+ * per the public-gating convention (no 403, no leak).
+ */
+router.get("/commerce/products/:id/public", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const [p] = await db
+    .select()
+    .from(commerceProductsTable)
+    .where(eq(commerceProductsTable.id, id))
+    .limit(1);
+  if (!p || !p.published) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  const [artifact] = p.artifactId
+    ? await db
+        .select({
+          id: artifactsTable.id,
+          title: artifactsTable.title,
+          artifactType: artifactsTable.artifactType,
+          publicUrl: artifactsTable.publicUrl,
+          thumbnailUrl: artifactsTable.thumbnailUrl,
+          creatorName: artifactsTable.creatorName,
+          machineGenerated: artifactsTable.machineGenerated,
+        })
+        .from(artifactsTable)
+        .where(eq(artifactsTable.id, p.artifactId))
+        .limit(1)
+    : [];
+  const [merchant] = p.merchantId
+    ? await db
+        .select({ displayName: commerceMerchantsTable.displayName })
+        .from(commerceMerchantsTable)
+        .where(eq(commerceMerchantsTable.id, p.merchantId))
+        .limit(1)
+    : [];
+  res.json({
+    product: {
+      id: p.id,
+      sku: p.sku,
+      title: p.title,
+      itemCents: p.itemCents,
+      shippingCents: p.shippingCents,
+      currency: p.currency,
+      productSpecId: p.productSpecId,
+    },
+    artifact: artifact ?? null,
+    soldBy: merchant?.displayName ?? "KAX",
+    fulfilledBy: "Printify",
+    // ONE source for the disclosure string (#255's aiDisclosure) — the page
+    // renders this verbatim rather than composing its own copy that could
+    // drift from the server's.
+    disclosure: artifact ? aiDisclosure({ creatorName: artifact.creatorName }) : null,
+  });
+});
 
 /**
  * Human approval (#259) — SESSION-authenticated on purpose. Approval is a
