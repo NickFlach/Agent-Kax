@@ -13,6 +13,7 @@ export * from "./floor";
 export * from "./store-listings";
 export * from "./listing-orders";
 export * from "./credit-ledger"
+export * from "./authority";
 export * from "./residences";
 export * from "./city";
 export * from "./furnishings";

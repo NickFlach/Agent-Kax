@@ -537,6 +537,70 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         ADD COLUMN IF NOT EXISTS decision_id text`),
   },
   {
+    /**
+     * #247: the authority decision record (ADR-0001 Phase 1a), here for the
+     * same reason as city_residents — the deploy diff eats new tables, an
+     * applied migration never re-runs, and an authority record that silently
+     * vanishes is an audit trail that lies by omission.
+     */
+    label: "authority_decisions table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS authority_decisions (
+        id             bigserial PRIMARY KEY,
+        decision_id    text NOT NULL UNIQUE,
+        actor          text NOT NULL,
+        on_behalf_of   text,
+        principal      text,
+        capability     varchar(64) NOT NULL,
+        resource       text,
+        channel        varchar(32),
+        asset          text,
+        amount_minor   bigint,
+        decision       varchar(24) NOT NULL,
+        reason_code    varchar(48),
+        tx_id          text,
+        postings_hash  text,
+        policy_id      bigint,
+        policy_document_hash text,
+        correlation_id text,
+        expires_at     timestamp,
+        created_at     timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "authority_decisions actor index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS authority_decisions_actor_idx
+                  ON authority_decisions (actor, created_at DESC)`),
+  },
+  {
+    label: "authority_decisions tx index",
+    sql: sql.raw(`CREATE INDEX IF NOT EXISTS authority_decisions_tx_idx
+                  ON authority_decisions (tx_id)`),
+  },
+  {
+    label: "authority_decisions append-only trigger",
+    sql: sql.raw(`
+      CREATE OR REPLACE FUNCTION authority_decisions_append_only() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'authority_decisions is append-only: % on a decision record is not permitted', TG_OP;
+      END;
+      $$ LANGUAGE plpgsql`),
+  },
+  {
+    label: "authority_decisions trigger binding",
+    sql: sql.raw(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'authority_decisions_no_mutate'
+        ) THEN
+          CREATE TRIGGER authority_decisions_no_mutate
+            BEFORE UPDATE OR DELETE ON authority_decisions
+            FOR EACH ROW EXECUTE FUNCTION authority_decisions_append_only();
+        END IF;
+      END $$`),
+  },
+  {
     label: "commerce_orders payment intent index",
     sql: sql.raw(`CREATE INDEX IF NOT EXISTS commerce_orders_payment_intent_idx
                   ON commerce_orders (stripe_payment_intent_id)`),
@@ -636,11 +700,35 @@ export interface EnsureResult {
   error?: string;
 }
 
+/**
+ * Every table this file rebuilds. `repaired` used to probe residence_units
+ * alone, so a deploy that ate ONLY a newer table (city_residents on
+ * 2026-08-15; authority_decisions is the same shape of risk) would be
+ * repaired silently while the result said repaired: false — a self-heal the
+ * log never admits to is one nobody investigates.
+ */
+const CRITICAL_TABLES = [
+  "residence_units",
+  "city_residents",
+  "unit_furnishings",
+  "listing_orders",
+  "user_shipping_addresses",
+  "bot_occ_status",
+  "authority_decisions",
+] as const;
+
 export async function ensureCriticalSchema(): Promise<EnsureResult> {
   let existedBefore = true;
   try {
-    const probe = await db.execute(sql`SELECT to_regclass('public.residence_units') AS t`);
-    existedBefore = (probe.rows[0] as { t: string | null } | undefined)?.t != null;
+    for (const table of CRITICAL_TABLES) {
+      const probe = await db.execute(
+        sql`SELECT to_regclass(${`public.${table}`}) AS t`,
+      );
+      if ((probe.rows[0] as { t: string | null } | undefined)?.t == null) {
+        existedBefore = false;
+        break;
+      }
+    }
   } catch {
     existedBefore = false;
   }
