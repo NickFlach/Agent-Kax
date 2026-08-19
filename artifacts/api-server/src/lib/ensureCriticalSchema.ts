@@ -656,6 +656,70 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
         ADD COLUMN IF NOT EXISTS correlation_id text`),
   },
   {
+    /** #265: the fiat ledger, dark. Same deploy-diff insurance as the rest. */
+    label: "commerce_ledger table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS commerce_ledger (
+        seq         bigserial PRIMARY KEY,
+        entry_hash  text NOT NULL UNIQUE,
+        prev_hash   text NOT NULL,
+        tx_id       text NOT NULL,
+        currency    varchar(8) NOT NULL,
+        account     text NOT NULL,
+        amount_cents bigint NOT NULL,
+        kind        varchar(32) NOT NULL,
+        ref         text,
+        created_at  timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "commerce_ledger indexes",
+    sql: sql.raw(`
+      CREATE INDEX IF NOT EXISTS commerce_ledger_account_idx ON commerce_ledger (account, currency);
+      CREATE INDEX IF NOT EXISTS commerce_ledger_tx_idx ON commerce_ledger (tx_id);
+      CREATE INDEX IF NOT EXISTS commerce_ledger_ref_idx ON commerce_ledger (ref);
+      CREATE UNIQUE INDEX IF NOT EXISTS commerce_ledger_prev_hash_uq ON commerce_ledger (prev_hash)`),
+  },
+  {
+    label: "commerce_ledger_txids table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS commerce_ledger_txids (
+        tx_id         text PRIMARY KEY,
+        postings_hash text NOT NULL,
+        head          text NOT NULL,
+        entry_count   integer NOT NULL,
+        actor         text,
+        decision_id   text,
+        created_at    timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "commerce_ledger append-only function",
+    sql: sql.raw(`
+      CREATE OR REPLACE FUNCTION commerce_ledger_append_only() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'commerce_ledger is append-only: % is not permitted', TG_OP;
+      END;
+      $$ LANGUAGE plpgsql`),
+  },
+  {
+    label: "commerce_ledger trigger bindings",
+    sql: sql.raw(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'commerce_ledger_no_mutate') THEN
+          CREATE TRIGGER commerce_ledger_no_mutate
+            BEFORE UPDATE OR DELETE ON commerce_ledger
+            FOR EACH ROW EXECUTE FUNCTION commerce_ledger_append_only();
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'commerce_ledger_txids_no_mutate') THEN
+          CREATE TRIGGER commerce_ledger_txids_no_mutate
+            BEFORE UPDATE OR DELETE ON commerce_ledger_txids
+            FOR EACH ROW EXECUTE FUNCTION commerce_ledger_append_only();
+        END IF;
+      END $$`),
+  },
+  {
     /** #255: the point-of-sale AI disclosure flag. Columns get eaten too. */
     label: "artifacts machine_generated column",
     sql: sql.raw(`ALTER TABLE artifacts
@@ -812,6 +876,8 @@ const CRITICAL_TABLES = [
   "authority_decisions",
   "commerce_merchants",
   "artifact_print_assets",
+  "commerce_ledger",
+  "commerce_ledger_txids",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {
