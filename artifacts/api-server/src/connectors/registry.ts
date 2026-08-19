@@ -66,11 +66,10 @@ export async function broadcastEvent(event: KaxEvent): Promise<void> {
       if (!c.publish) return;
       try {
         await c.publish(event);
-      } catch (err) {
-        // We don't have a passed-in logger here; the connector's own
+      } catch {
+        // Connector failures are swallowed — each connector's own
         // implementation is responsible for surfacing publish failures
         // it deems important.
-        void err;
       }
     }),
   );
