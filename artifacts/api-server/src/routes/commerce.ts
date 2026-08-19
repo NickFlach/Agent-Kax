@@ -10,9 +10,9 @@ import {
 } from "@workspace/db/schema";
 import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireAuth, requireCommerceToken } from "../middlewares/requireAuth";
+import { canMutate, requireAuth, requireCommerceToken } from "../middlewares/requireAuth";
 import { artifactPrintAssetsTable, commerceMerchantsTable } from "@workspace/db/schema";
-import { canTransition, parseCommerceState, type CommerceState } from "../lib/commerceOrder";
+import { approvalHash, canTransition, parseCommerceState, type CommerceState } from "../lib/commerceOrder";
 import { isCommerceEligible } from "../lib/visibility";
 import { measureArtifactAsset } from "../lib/printAsset";
 import { commerceEnabled, getUncachableStripeClient } from "../lib/stripeClient";
@@ -318,6 +318,76 @@ router.post(
     res.json({ commerceState: "product_eligible" });
   },
 );
+
+/**
+ * Human approval (#259) — SESSION-authenticated on purpose. Approval is a
+ * human act: requireAuth accepts only a signed-in session, so an agent
+ * identity token (a bearer with no session) 401s here by construction, and
+ * canMutate then requires the session user to OWN the merchant (or be
+ * admin). The approval is pinned to CONTENT: sha256 over what was measured
+ * (source URL at fetch + asset bytes hash), the spec, and the price — any of
+ * the four changing makes the pin a new decision, not a stale valid one.
+ */
+router.post("/commerce/products/:id/approve", requireAuth, async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "product id must be a positive integer" });
+    return;
+  }
+  const [p] = await db
+    .select()
+    .from(commerceProductsTable)
+    .where(eq(commerceProductsTable.id, id))
+    .limit(1);
+  if (!p) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  if (!p.merchantId || !p.artifactId || !p.productSpecId) {
+    res.status(409).json({ error: "product is missing merchant, artifact or spec; nothing to approve" });
+    return;
+  }
+  const [merchant] = await db
+    .select({ userId: commerceMerchantsTable.userId })
+    .from(commerceMerchantsTable)
+    .where(eq(commerceMerchantsTable.id, p.merchantId))
+    .limit(1);
+  if (!merchant || !(await canMutate(req, merchant.userId))) {
+    res.status(403).json({ error: "only the merchant's owner may approve" });
+    return;
+  }
+  const state = parseCommerceState(p.commerceState);
+  if (!canTransition(state, "merchant_approved")) {
+    res.status(409).json({ error: `cannot approve from ${state}; run /evaluate first` });
+    return;
+  }
+  const [asset] = await db
+    .select()
+    .from(artifactPrintAssetsTable)
+    .where(eq(artifactPrintAssetsTable.artifactId, p.artifactId))
+    .limit(1);
+  if (!asset || asset.failureReason != null || !asset.sha256 || !asset.sourceUrlAtFetch) {
+    res.status(409).json({ error: "no successful measurement on record; run /evaluate first" });
+    return;
+  }
+  const pin = approvalHash({
+    sourceUrlAtFetch: asset.sourceUrlAtFetch,
+    assetSha256: asset.sha256,
+    productSpecId: p.productSpecId,
+    itemCents: p.itemCents,
+  });
+  await db
+    .update(commerceProductsTable)
+    .set({
+      commerceState: "merchant_approved",
+      approvedContentHash: pin,
+      approvedBy: req.user!.id,
+      approvedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(commerceProductsTable.id, p.id));
+  res.json({ commerceState: "merchant_approved", approvedContentHash: pin });
+});
 
 // NOTE (#258): the operator product-management surface is registered ABOVE
 // the commerceEnabled() gate on purpose. That gate 404s the BUYER path until

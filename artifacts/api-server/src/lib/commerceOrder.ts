@@ -95,6 +95,38 @@ export function isOrderStatus(s: string | null | undefined): s is OrderStatus {
 }
 
 // ---------------------------------------------------------------------------
+// The approval pin (#259). Rights assertions are time-bound snapshots: the
+// bytes behind artifacts.public_url live in a bucket KAX does not control and
+// can change with no KAX-side write. Approval is therefore pinned to CONTENT
+// — what was seen, at what spec, at what price — never to a timestamp.
+// ---------------------------------------------------------------------------
+
+import crypto from "node:crypto";
+
+export interface ApprovalPinInput {
+  /** The URL as it was at measurement (artifact_print_assets.source_url_at_fetch). */
+  sourceUrlAtFetch: string;
+  /** sha256 of the measured bytes (artifact_print_assets.sha256). */
+  assetSha256: string;
+  productSpecId: string;
+  /** The list price (commerce_products.item_cents; the issue's list_price_cents). */
+  itemCents: number;
+}
+
+/**
+ * The content hash a human approval is pinned to. Any of the four inputs
+ * changing — the bytes, where they came from, the spec, or the price —
+ * changes the hash, and a changed hash is a NEW approval decision, not a
+ * stale valid one.
+ */
+export function approvalHash(i: ApprovalPinInput): string {
+  const body = [i.sourceUrlAtFetch, i.assetSha256, i.productSpecId, String(i.itemCents)]
+    .map((s) => `${s.length}:${s}`)
+    .join("");
+  return crypto.createHash("sha256").update(body, "utf8").digest("hex");
+}
+
+// ---------------------------------------------------------------------------
 // The legs. Same discipline as validatePostings: the set must balance, and a
 // set that does not is refused loudly with the delta named.
 // ---------------------------------------------------------------------------
