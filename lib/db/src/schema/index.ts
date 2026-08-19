@@ -20,3 +20,4 @@ export * from "./furnishings";
 export * from "./purchasing";
 export * from "./commerce";
 export * from "./bot-occ-status";
+export * from "./print";
