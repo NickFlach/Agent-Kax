@@ -428,3 +428,70 @@ describe("per-account inflow (#246, DB)", () => {
     expect(calendarMonthStartUTC(edge).toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 });
+
+describe("authority decision per transaction (#248, DB)", () => {
+  const asset = "play_credit";
+
+  async function decisionRows(txId: string) {
+    const r = await db.execute(
+      sql`SELECT decision_id, actor, capability, decision, postings_hash
+          FROM authority_decisions WHERE tx_id = ${txId}`,
+    );
+    return r.rows as Array<{ decision_id: string; actor: string; capability: string; decision: string; postings_hash: string }>;
+  }
+
+  it("every successful post writes exactly one row, matched on tx_id and postings_hash", async () => {
+    const txId = `authz-${uniq()}`;
+    const actor = `kax:agent:test-${uniq()}`;
+    const r = await postTransaction({
+      actor,
+      capability: "credits.grant",
+      txId,
+      asset,
+      postings: [
+        { account: HOUSE_ACCOUNT, amount: -7n, kind: "grant" },
+        { account: `trader:test:${uniq()}`, amount: 7n, kind: "grant" },
+      ],
+    });
+    const rows = await decisionRows(txId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe(actor);
+    expect(rows[0]!.capability).toBe("credits.grant");
+    expect(rows[0]!.decision).toBe("allow");
+    // The decision and the idempotency record must agree on WHICH postings.
+    expect(rows[0]!.postings_hash).toBe((await getTransaction(txId))?.postingsHash);
+    // And the txids row carries the decision id, so the two records point at
+    // each other rather than merely coexisting.
+    expect(rows[0]!.decision_id).toBe(`dec:tx:${txId}`);
+    void r;
+  });
+
+  it("an idempotent replay does not write a second row", async () => {
+    const txId = `authz-replay-${uniq()}`;
+    const postings = [
+      { account: HOUSE_ACCOUNT, amount: -9n, kind: "grant" as const },
+      { account: `trader:test:${uniq()}`, amount: 9n, kind: "grant" as const },
+    ];
+    await postTransaction({ actor: "test:suite", txId, asset, postings });
+    const replay = await postTransaction({ actor: "test:suite", txId, asset, postings });
+    expect(replay.idempotentReplay).toBe(true);
+    expect(await decisionRows(txId)).toHaveLength(1);
+  });
+
+  it("a failed post writes NO row — one DB transaction, all or nothing", async () => {
+    const txId = `authz-fail-${uniq()}`;
+    await expect(
+      postTransaction({
+        actor: "test:suite",
+        txId,
+        asset,
+        postings: [
+          // Overdraft: a fresh trader debited from zero.
+          { account: `trader:test:${uniq()}`, amount: -50n, kind: "trade" },
+          { account: `amm:test:${uniq()}`, amount: 50n, kind: "trade" },
+        ],
+      }),
+    ).rejects.toThrow(LedgerInsufficientFunds);
+    expect(await decisionRows(txId)).toHaveLength(0);
+  });
+});

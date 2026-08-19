@@ -12,6 +12,7 @@ import {
   type ChainRow,
   type Posting,
 } from "./ledger-core";
+import { decisionIdFor, recordDecision } from "./authority";
 
 // A single advisory-lock key serializes ALL ledger appends into a FIFO queue,
 // so concurrent transactions never optimistically collide on UNIQUE(prev_hash)
@@ -55,6 +56,13 @@ export interface PostTxInput {
    * `kax:agent:<bot_id>` / `kax:user:<id>` principal (joinery purchases).
    */
   actor: string;
+  /**
+   * What kind of consequential action this is, for the authority decision
+   * record (#248): credits.grant | credits.trade | credits.payout |
+   * credits.escrow | commerce.purchase. Defaults to credits.move — an honest
+   * "a movement happened" for callers that predate the vocabulary.
+   */
+  capability?: string;
 }
 
 /**
@@ -146,12 +154,29 @@ export async function postTransaction(input: PostTxInput): Promise<PostResult> {
             ref: r.ref ?? null,
           })),
         );
+        const decisionId = decisionIdFor(input.txId);
         await tx.insert(creditLedgerTxidsTable).values({
           txId: input.txId,
           postingsHash,
           head: newHead,
           entryCount: rows.length,
           actor: input.actor,
+          decisionId,
+        });
+        // #248: one immutable decision per consequential action, in the SAME
+        // transaction — the postings, the txids row and the decision commit
+        // or roll back together. Runs under the advisory lock; recordDecision
+        // is a single INSERT with no reads, so it adds no serialization cost.
+        // Phase 1a records "who caused this", never "was it permitted" —
+        // permission is the topology rule's job.
+        await recordDecision(tx, {
+          decisionId,
+          actor: input.actor,
+          capability: input.capability ?? "credits.move",
+          asset: input.asset,
+          decision: "allow",
+          txId: input.txId,
+          postingsHash,
         });
         return { txId: input.txId, head: newHead, count: rows.length, idempotentReplay: false };
       });

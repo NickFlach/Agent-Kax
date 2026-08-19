@@ -100,9 +100,10 @@ async function commit(
   // visibly (`service:ledger-token:...`) rather than impersonating the
   // principal the request names.
   actor: string,
+  capability: string,
 ): Promise<void> {
   try {
-    const r = await postTransaction({ txId, asset, postings, actor });
+    const r = await postTransaction({ txId, asset, postings, actor, capability });
     res.status(r.idempotentReplay ? 200 : 201).json({
       ok: true,
       txId: r.txId,
@@ -193,7 +194,7 @@ router.post(
     await commit(res, txId, asset, [
       { account: HOUSE_ACCOUNT, amount: -amount, kind: "grant", ref },
       { account: trader, amount, kind: "grant", ref },
-    ], `service:ledger-token:${req.body.principal}`);
+    ], `service:ledger-token:${req.body.principal}`, "credits.grant");
   }),
 );
 
@@ -214,7 +215,7 @@ router.post(
     await commit(res, txId, asset, [
       { account: HOUSE_ACCOUNT, amount: -amount, kind: "escrow", ref },
       { account: amm, amount, kind: "escrow", ref },
-    ], `service:ledger-token:market:${req.body.marketId}`);
+    ], `service:ledger-token:market:${req.body.marketId}`, "credits.escrow");
   }),
 );
 
@@ -250,7 +251,7 @@ router.post(
             { account: amm, amount: -amount, kind: "trade", ref },
             { account: trader, amount, kind: "trade", ref },
           ];
-    await commit(res, txId, asset, postings, `service:ledger-token:${req.body.principal}`);
+    await commit(res, txId, asset, postings, `service:ledger-token:${req.body.principal}`, "credits.trade");
   }),
 );
 
@@ -302,7 +303,7 @@ router.post(
     }
     // Many winners, one authorizer: the payout is a market-level act, so the
     // actor names the market rather than pretending any single winner asked.
-    await commit(res, txId, asset, postings, `service:ledger-token:market:${req.body.marketId}`);
+    await commit(res, txId, asset, postings, `service:ledger-token:market:${req.body.marketId}`, "credits.payout");
   }),
 );
 

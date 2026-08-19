@@ -559,6 +559,7 @@ export async function purchase(input: PurchaseInput): Promise<PurchaseResult> {
     asset: "play_credit",
     postings: live,
     actor: input.buyerPrincipal,
+    capability: "commerce.purchase",
   });
 
   const [row] = await db

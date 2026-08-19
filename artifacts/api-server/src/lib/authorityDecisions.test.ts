@@ -67,10 +67,11 @@ describe("authority_decisions (#247, DB)", () => {
     expect(`${cause?.message ?? ""}${(err as Error)?.message ?? ""}`).toMatch(/append-only/);
   });
 
-  it("has zero non-test writers — the table is dark until #248", () => {
-    // Source-level ON PURPOSE, and only as the dark-ness pin (the behavioural
-    // properties above are behavioural): walk production sources for inserts
-    // into the table by either its drizzle identifier or its SQL name.
+  it("has exactly ONE sanctioned writer: lib/authority.ts (#248)", () => {
+    // Source-level ON PURPOSE, as the single-funnel pin (the behavioural
+    // properties live in ledger.test.ts): walk production sources for inserts
+    // into the table by either its drizzle identifier or its SQL name. A
+    // second writer forks the audit trail — route it through recordDecision.
     const SRC = path.join(__dirname, "..");
     const offenders: string[] = [];
     const walk = (dir: string): void => {
@@ -83,15 +84,12 @@ describe("authority_decisions (#247, DB)", () => {
             /insert\(authorityDecisionsTable\)/.test(src) ||
             /INSERT INTO authority_decisions/i.test(src)
           ) {
-            offenders.push(path.relative(SRC, full));
+            offenders.push(path.relative(SRC, full).replace(/\\/g, "/"));
           }
         }
       }
     };
     walk(SRC);
-    expect(
-      offenders,
-      "a production writer appeared; if this is #248 landing, move this pin to assert the ONE sanctioned writer",
-    ).toEqual([]);
+    expect(offenders).toEqual(["lib/authority.ts"]);
   });
 });
