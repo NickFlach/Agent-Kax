@@ -146,6 +146,20 @@ const PRINT_SPEC_REQUIRED_PX: Record<string, { widthPx: number; heightPx: number
   poster_12x18: { widthPx: 3600, heightPx: 5400 },
 };
 
+/**
+ * #295: specs that exist only while their env flag does. Resolved at USE
+ * time, not module load (the requireCommerceToken lesson) — flip the flag
+ * off and the evaluator stops judging the spec on the next request, which
+ * makes the SKU invisible: a product on an unknown spec stays at
+ * asset_checked and can never pass evaluation.
+ */
+export function printSpecFor(productSpecId: string): { widthPx: number; heightPx: number } | undefined {
+  if (productSpecId === "sticker_4in") {
+    return process.env["KAX_PRODUCT_STICKER_4IN"] === "1" ? { widthPx: 1113, heightPx: 1113 } : undefined;
+  }
+  return PRINT_SPEC_REQUIRED_PX[productSpecId];
+}
+
 /** Persist a legal state move; refuse an illegal one loudly. */
 async function moveState(productId: number, from: CommerceState, to: CommerceState): Promise<void> {
   if (!canTransition(from, to)) {
@@ -289,7 +303,7 @@ router.post(
     // Spec: compare against required_px. An unknown spec cannot be judged
     // and stays asset_checked with the gap named, rather than inventing a
     // verdict the spec table does not support.
-    const spec = p.productSpecId ? PRINT_SPEC_REQUIRED_PX[p.productSpecId] : undefined;
+    const spec = p.productSpecId ? printSpecFor(p.productSpecId) : undefined;
     if (!spec) {
       res.json({
         commerceState: state,
