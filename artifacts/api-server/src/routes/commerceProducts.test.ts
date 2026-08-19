@@ -148,6 +148,33 @@ describe("product create + evaluate (#258, DB)", () => {
     expect([200, 401]).toContain(read.status);
   });
 
+  it("public read (#260): unpublished and missing are the SAME 404", async () => {
+    const create = await request(app)
+      .post("/commerce/products")
+      .set("Authorization", `Bearer ${TOKEN}`)
+      .send({ sku: makeTestId("pub"), title: "unpublished", itemCents: 1000 });
+    expect(create.status).toBe(201);
+    const pid = create.body.product.id as number;
+    madeProducts.push(pid);
+
+    // Exists but unpublished: 404, indistinguishable from never-existed.
+    const unpub = await request(app).get(`/commerce/products/${pid}/public`);
+    expect(unpub.status).toBe(404);
+    const missing = await request(app).get(`/commerce/products/999999999/public`);
+    expect(missing.status).toBe(404);
+    expect(unpub.body).toEqual(missing.body);
+
+    // Published: visible, carrying the server-side disclosure source.
+    await db
+      .update(commerceProductsTable)
+      .set({ published: true })
+      .where(eq(commerceProductsTable.id, pid));
+    const pub = await request(app).get(`/commerce/products/${pid}/public`);
+    expect(pub.status).toBe(200);
+    expect(pub.body.soldBy).toBeDefined();
+    expect(pub.body.fulfilledBy).toBe("Printify");
+  });
+
   it("an inline: sentinel evaluates to asset_insufficient with the reason, no fetch", async () => {
     const artifactId = await makeSentinelArtifact();
     const create = await request(app)
