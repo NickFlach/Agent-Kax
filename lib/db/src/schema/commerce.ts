@@ -137,6 +137,25 @@ export const derivedAssetsTable = pgTable(
     heightPx: integer("height_px"),
     reviewedBy: text("reviewed_by"),
     reviewedAt: timestamp("reviewed_at"),
+    /**
+     * #294: the cache identity — sha256 of the SOURCE bytes plus which
+     * pipeline produced this at which target. UNIQUE together (partial index,
+     * migration 0043), so regeneration is idempotent by construction.
+     */
+    parentSha256: text("parent_sha256"),
+    pipelineVersion: varchar("pipeline_version", { length: 24 }),
+    targetProduct: varchar("target_product", { length: 48 }),
+    targetWpx: integer("target_wpx"),
+    targetHpx: integer("target_hpx"),
+    /**
+     * #294: MERCHANT approval, separate from the quality review — an approval
+     * pinned to source bytes does not carry to a file KAX generated afterwards
+     * (ADR-0002). pending | approved | rejected; the DB trigger (0043) refuses
+     * approved unless quality_status is passed.
+     */
+    approvalStatus: varchar("approval_status", { length: 24 }).notNull().default("pending"),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("derived_assets_source_idx").on(t.sourceArtifactId, t.createdAt.desc())],
