@@ -177,6 +177,13 @@ export async function createDerivedAsset(input: {
   pipelineVersion?: string;
   targetProduct?: string;
   targetPx?: { width: number; height: number };
+  /**
+   * #298: the sha256 of THIS transform's direct input, when it is not the
+   * source artifact's bytes — a render's parent is its SVG master, and the
+   * cache identity must key on what was actually transformed. Defaults to
+   * the custody sha (a first-generation derivation from the source).
+   */
+  parentSha256?: string;
 }): Promise<DerivedAsset> {
   // AC: no derived print master for an artifact whose bytes KAX does not hold.
   const custody = await assertSourceCustody(input.sourceArtifactId);
@@ -208,8 +215,8 @@ export async function createDerivedAsset(input: {
   const contentType = header?.format === "jpeg" ? "image/jpeg" : header?.format === "webp" ? "image/webp" : "image/png";
   await input.storage.put(storageKey, input.bytes, contentType);
 
-  const cacheable =
-    custody.sha256 != null && input.pipelineVersion != null && input.targetPx != null;
+  const parentSha = input.parentSha256 ?? custody.sha256;
+  const cacheable = parentSha != null && input.pipelineVersion != null && input.targetPx != null;
   const values = {
     sourceArtifactId: input.sourceArtifactId,
     transformType: input.transformType,
@@ -220,7 +227,7 @@ export async function createDerivedAsset(input: {
     byteSize: BigInt(input.bytes.length),
     widthPx: header?.widthPx ?? null,
     heightPx: header?.heightPx ?? null,
-    parentSha256: cacheable ? custody.sha256 : null,
+    parentSha256: cacheable ? parentSha : null,
     pipelineVersion: input.pipelineVersion ?? null,
     targetProduct: input.targetProduct ?? null,
     targetWpx: input.targetPx?.width ?? null,
@@ -240,7 +247,7 @@ export async function createDerivedAsset(input: {
     .from(derivedAssetsTable)
     .where(
       and(
-        eq(derivedAssetsTable.parentSha256, custody.sha256!),
+        eq(derivedAssetsTable.parentSha256, parentSha!),
         eq(derivedAssetsTable.pipelineVersion, input.pipelineVersion!),
         eq(derivedAssetsTable.targetWpx, input.targetPx!.width),
         eq(derivedAssetsTable.targetHpx, input.targetPx!.height),
