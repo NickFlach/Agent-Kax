@@ -1,7 +1,71 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { artifactsTable } from "./artifacts";
 import { usersTable } from "./auth";
+
+/**
+ * commerce_merchants (#253, KAX-ADR-0002): the entity that sells. v0.1 has
+ * exactly ONE — the KAX operating entity (is_first_party) — but the shape is
+ * the general one, because locked decision #2 gates KYC at bank-account
+ * creation and that gate needs an object to hang on.
+ *
+ * KAX does not perform verification; it RECORDS WHO DID. verification_verdict
+ * holds the provider's machine verdict (account id, charges_enabled,
+ * payouts_enabled, requirements_currently_due) — never documents, which must
+ * not be stored here under any future.
+ *
+ * Status fields are VARCHAR, never pgEnum (adding enum values breaks the
+ * deploy flow — routes/identity.ts:220, the user_bots.attached_via pattern).
+ * Validation lives in lib/commerceMerchant.ts.
+ */
+export const commerceMerchantsTable = pgTable(
+  "commerce_merchants",
+  {
+    id: serial("id").primaryKey(),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "restrict" }),
+    displayName: text("display_name").notNull(),
+    legalName: text("legal_name"),
+    isFirstParty: boolean("is_first_party").notNull().default(false),
+    /** none | pending | verified | failed */
+    buyerCipStatus: varchar("buyer_cip_status", { length: 24 }).notNull().default("none"),
+    /** none | pending | verified | failed */
+    payeeKybStatus: varchar("payee_kyb_status", { length: 24 }).notNull().default("none"),
+    /** e.g. 'stripe_connect' — who performed the verification KAX records. */
+    verificationProvider: varchar("verification_provider", { length: 32 }),
+    verificationVerdict: jsonb("verification_verdict").$type<{
+      account_id?: string;
+      charges_enabled?: boolean;
+      payouts_enabled?: boolean;
+      requirements_currently_due?: string[];
+    }>(),
+    verifiedAt: timestamp("verified_at"),
+    indemnityText: text("indemnity_text"),
+    indemnityVersion: varchar("indemnity_version", { length: 16 }),
+    indemnityAcceptedBy: varchar("indemnity_accepted_by").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    indemnityAcceptedAt: timestamp("indemnity_accepted_at"),
+    disabledAt: timestamp("disabled_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("commerce_merchants_user_idx").on(t.userId)],
+);
+
+export type CommerceMerchant = typeof commerceMerchantsTable.$inferSelect;
+export type InsertCommerceMerchant = typeof commerceMerchantsTable.$inferInsert;
 
 /**
  * Physical commerce: real dollars, a real card, and something that arrives in

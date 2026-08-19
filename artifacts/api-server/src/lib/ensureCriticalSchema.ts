@@ -587,6 +587,39 @@ const STATEMENTS: Array<{ label: string; sql: ReturnType<typeof sql.raw> }> = [
       $$ LANGUAGE plpgsql`),
   },
   {
+    /**
+     * #253: the merchant entity, dark. Same deploy-diff insurance as every
+     * table above; the KYC gate of locked decision #2 hangs on this object
+     * existing, so a deploy that eats it silently un-gates nothing today
+     * (no writers) but would corrupt the gate's foundation tomorrow.
+     */
+    label: "commerce_merchants table",
+    sql: sql.raw(`
+      CREATE TABLE IF NOT EXISTS commerce_merchants (
+        id                   serial PRIMARY KEY,
+        user_id              varchar NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        display_name         text NOT NULL,
+        legal_name           text,
+        is_first_party       boolean NOT NULL DEFAULT false,
+        buyer_cip_status     varchar(24) NOT NULL DEFAULT 'none',
+        payee_kyb_status     varchar(24) NOT NULL DEFAULT 'none',
+        verification_provider varchar(32),
+        verification_verdict  jsonb,
+        verified_at          timestamp,
+        indemnity_text       text,
+        indemnity_version    varchar(16),
+        indemnity_accepted_by varchar REFERENCES users(id) ON DELETE SET NULL,
+        indemnity_accepted_at timestamp,
+        disabled_at          timestamp,
+        created_at           timestamp NOT NULL DEFAULT now()
+      )`),
+  },
+  {
+    label: "commerce_merchants user unique",
+    sql: sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS commerce_merchants_user_idx
+                  ON commerce_merchants (user_id)`),
+  },
+  {
     label: "authority_decisions trigger binding",
     sql: sql.raw(`
       DO $$
@@ -715,6 +748,7 @@ const CRITICAL_TABLES = [
   "user_shipping_addresses",
   "bot_occ_status",
   "authority_decisions",
+  "commerce_merchants",
 ] as const;
 
 export async function ensureCriticalSchema(): Promise<EnsureResult> {
