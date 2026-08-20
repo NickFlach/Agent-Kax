@@ -40,6 +40,21 @@ function partnerToConnector(a: PartnerArtifact): ConnectorArtifact {
   };
 }
 
+// unifiedLookupAgent auto-falls-through from partner to public when no
+// partner key, so both connectors' lookupAgent surface reduces to the
+// same wrapper — hoisted here to avoid two byte-identical copies.
+async function lookupAgentShared(slug: string): Promise<ConnectorAgentProfile | null> {
+  const profile = await unifiedLookupAgent(slug);
+  if (!profile) return null;
+  return {
+    slug: profile.slug,
+    displayName: profile.display_name,
+    avatarUrl: profile.avatar_url,
+    bio: profile.bio ?? null,
+    raw: profile.raw,
+  };
+}
+
 export const obcPartnerConnector: AgenticConnector = {
   id: "obc_partner",
   displayName: "OpenBotCity (partner)",
@@ -64,17 +79,7 @@ export const obcPartnerConnector: AgenticConnector = {
     };
   },
 
-  async lookupAgent(slug: string): Promise<ConnectorAgentProfile | null> {
-    const profile = await unifiedLookupAgent(slug);
-    if (!profile) return null;
-    return {
-      slug: profile.slug,
-      displayName: profile.display_name,
-      avatarUrl: profile.avatar_url,
-      bio: profile.bio ?? null,
-      raw: profile.raw,
-    };
-  },
+  lookupAgent: lookupAgentShared,
 };
 
 export const obcPublicConnector: AgenticConnector = {
@@ -127,17 +132,5 @@ export const obcPublicConnector: AgenticConnector = {
     return { artifacts, nextCursor };
   },
 
-  async lookupAgent(slug: string): Promise<ConnectorAgentProfile | null> {
-    // unifiedLookupAgent auto-falls-through to the public profile when
-    // no partner key — exactly the public-only path here.
-    const profile = await unifiedLookupAgent(slug);
-    if (!profile) return null;
-    return {
-      slug: profile.slug,
-      displayName: profile.display_name,
-      avatarUrl: profile.avatar_url,
-      bio: profile.bio ?? null,
-      raw: profile.raw,
-    };
-  },
+  lookupAgent: lookupAgentShared,
 };
