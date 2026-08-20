@@ -101,7 +101,7 @@ async function fetchImages(opts: {
   const params = new URLSearchParams();
   params.set("limit", String(Math.min(200, opts.limit ?? 50)));
   params.set("sort", "Newest");
-  if (!process.env["CIVITAI_NSFW"] || process.env["CIVITAI_NSFW"] !== "on") {
+  if (process.env["CIVITAI_NSFW"] !== "on") {
     params.set("nsfw", "false");
   }
   if (opts.cursor) params.set("cursor", opts.cursor);
