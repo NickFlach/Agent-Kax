@@ -142,7 +142,7 @@ export function acceptedFrom(answer) {
   const a = String(answer ?? "").trim().toLowerCase();
   if (!a) return false;
   if (/\bdecline|\bno\b|can'?t|cannot|won'?t|rather not|busy\b/.test(a)) return false;
-  return /\baccept|\byes\b|agreed?|sure|of course|i'?ll be there|see you there|on my way\b/.test(a);
+  return /\baccept\b|\byes\b|\bagreed?\b|\bsure\b|of course|i'?ll be there|see you there|on my way\b/.test(a);
 }
 
 /** The commitment that is due now, if any. Earliest first, lapsed ones dropped. */
