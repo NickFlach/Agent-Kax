@@ -116,7 +116,7 @@ describe("acceptedFrom — silence is not a yes", () => {
   });
 
   it("treats anything unclear as a decline, because standing somebody up is worse", () => {
-    for (const a of ["DECLINE", "no", "I can't", "rather not", "hmm", "", null, "maybe later"]) {
+    for (const a of ["DECLINE", "no", "I can't", "rather not", "hmm", "", null, "maybe later", "disagree", "unsure"]) {
       expect(acceptedFrom(a)).toBe(false);
     }
   });
