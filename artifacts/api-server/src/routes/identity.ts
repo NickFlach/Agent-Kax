@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import { usersTable, userBotsTable } from "@workspace/db/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
-import {
+import { verifyTokenForRefresh,
   getPublicJwks,
   issueToken,
   issuingEnabled,
@@ -386,9 +386,11 @@ router.post("/auth/token/exchange", async (req, res) => {
  * its current (unexpired) token and receive a fresh one with the same claims.
  *
  * Bounds and checks:
- *  - The incoming token must VERIFY (signature, issuer, exp) — an expired or
- *    forged token cannot refresh. No session cookie needed: the token IS the
- *    credential.
+ *  - The incoming token must VERIFY (signature, issuer) — a forged token
+ *    cannot refresh. `exp` is tolerated up to REFRESH_GRACE_SEC (#395), so a
+ *    network outage longer than the TTL no longer strands unattended agents;
+ *    beyond the grace the human must re-authenticate. No session cookie
+ *    needed: the token IS the credential.
  *  - The `oat` (original-auth-time) claim is carried through every refresh;
  *    once the lineage is older than MAX_TOKEN_LIFETIME_SEC (default 30 days)
  *    refreshing refuses and the human must re-authenticate. A stolen token
@@ -410,10 +412,19 @@ router.post("/auth/token/refresh", async (req, res) => {
     return;
   }
 
-  const v = await verifyToken(token);
+  // The refresh door tolerates exp by REFRESH_GRACE_SEC (#395): a network
+  // outage longer than the TTL used to kill unattended agents permanently —
+  // every check besides exp (signature, issuer, lineage, standing,
+  // revocation) still runs below, so a revoked or disabled lineage dies
+  // mid-grace exactly as it would mid-TTL. Everywhere ELSE stays hard-exp:
+  // an expired token cannot act, only ask to be renewed.
+  const v = await verifyTokenForRefresh(token);
   if (!v.ok) {
     res.status(401).json({ error: `token did not verify: ${v.error} — re-authenticate on KAX to mint a new one` });
     return;
+  }
+  if (v.expiredBySec > 0) {
+    req.log?.info?.({ sub: v.claims.sub, expiredBySec: v.expiredBySec }, "refresh within grace window");
   }
   const claims = v.claims;
   const now = Math.floor(Date.now() / 1000);

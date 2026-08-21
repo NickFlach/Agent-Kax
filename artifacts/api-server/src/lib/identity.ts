@@ -253,6 +253,78 @@ export interface VerifyFailure {
  * Fails closed if no keys are configured. This is the same logic the remote
  * verifiers (observatory, radio) run against the fetched JWKS.
  */
+/**
+ * How long past `exp` a token may still REFRESH (never: be used).
+ *
+ * The incident (Agent-Kax#395): a 38-minute network outage outlived the
+ * 15-minute TTL, so at reconnect every refresh was a deterministic 401 and
+ * three unattended residents died needing a human to mint new tokens. The
+ * client had already done everything right — refresh-on-timer, immediate
+ * retry of transport failures, token persisted across restarts — the wall
+ * was the hard `exp` on refresh. Effective unattended life was
+ * min(30 days, longest network blip + 15 min).
+ *
+ * The security cost of the grace is bounded and chosen: a stolen token gains
+ * at most this window beyond its TTL, refresh still runs signature, issuer,
+ * lineage (`oat` cap), account standing, and bot revocation — so revocation
+ * kills a lineage mid-grace exactly as it does mid-TTL. Every OTHER
+ * verification path keeps hard `exp`: an expired token cannot act, only ask
+ * to be renewed.
+ */
+export const REFRESH_GRACE_SEC = (() => {
+  const raw = Number(process.env["KAX_REFRESH_GRACE_SEC"]);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 60 * 60;
+})();
+
+export interface RefreshVerifyResult extends VerifyResult {
+  /** Seconds past exp the token was presented; 0 when still live. */
+  expiredBySec: number;
+}
+
+/**
+ * `verifyToken` for the refresh door only: identical checks, with `exp`
+ * tolerated up to REFRESH_GRACE_SEC. Implemented via jose's clockTolerance,
+ * which widens exp and nbf symmetrically — the nbf side is harmless here
+ * (nbf = iat on every token we mint; tolerating "slightly before minted"
+ * grants nothing), and the alternative of shifting currentDate backwards
+ * would make freshly-minted tokens fail their own nbf.
+ */
+export async function verifyTokenForRefresh(
+  token: string,
+): Promise<RefreshVerifyResult | VerifyFailure> {
+  const { verifiers } = await loadKeys();
+  if (verifiers.size === 0) return { ok: false, error: "no verification keys configured" };
+  try {
+    const { payload } = await jwtVerify(
+      token,
+      async (header) => {
+        const kid = header.kid;
+        if (!kid || !verifiers.has(kid)) throw new Error("unknown or missing kid");
+        return verifiers.get(kid)!;
+      },
+      {
+        issuer: ISSUER,
+        algorithms: [IDENTITY_ALG],
+        clockTolerance: 5 + REFRESH_GRACE_SEC,
+        requiredClaims: ["exp", "iat", "sub", "kind"],
+      },
+    );
+    const kind = (payload as IdentityClaims).kind;
+    if (kind !== "user" && kind !== "agent" && kind !== "service") {
+      return { ok: false, error: "invalid principal kind" };
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const exp = payload.exp as number;
+    return {
+      ok: true,
+      claims: payload as IdentityClaims,
+      expiredBySec: Math.max(0, now - exp),
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function verifyToken(token: string): Promise<VerifyResult | VerifyFailure> {
   const { verifiers } = await loadKeys();
   if (verifiers.size === 0) return { ok: false, error: "no verification keys configured" };

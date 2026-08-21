@@ -8,6 +8,8 @@ import {
   verifyToken,
   getPublicJwks,
   issuingEnabled,
+  verifyTokenForRefresh,
+  REFRESH_GRACE_SEC,
   _resetKeyCache,
   ISSUER,
   IDENTITY_ALG,
@@ -149,5 +151,84 @@ describe("identity token layer", () => {
     expect(res.ok).toBe(true);
     const jwks = await getPublicJwks();
     expect(jwks.keys.length).toBe(2); // new signer + retired public key
+  });
+});
+
+describe("#395 — the refresh grace window", () => {
+  // A 38-minute network outage outlived the 15-minute TTL and permanently
+  // killed three unattended residents: at reconnect every refresh was a
+  // deterministic 401, and only a human could mint replacements. The grace
+  // lets the REFRESH door tolerate exp; nothing else does.
+  let jwk: JWK;
+  beforeEach(async () => {
+    jwk = await freshEd25519PrivateJwk();
+    process.env.KAX_IDENTITY_PRIVATE_JWK = JSON.stringify(jwk);
+    _resetKeyCache();
+  });
+  afterEach(() => {
+    delete process.env.KAX_IDENTITY_PRIVATE_JWK;
+    _resetKeyCache();
+  });
+
+  async function expiredToken(expiredBySec: number): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    // Minted in the past so that exp = now - expiredBySec.
+    return issueToken({
+      kind: "agent",
+      subject: "user-395",
+      botId: "00000000-0000-4000-8000-000000000395",
+      ttlSeconds: 900,
+      now: now - 900 - expiredBySec,
+    });
+  }
+
+  it("the ordinary verifier still refuses an expired token — expiry means you cannot ACT", async () => {
+    const t = await expiredToken(10 * 60);
+    const v = await verifyToken(t);
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.error).toMatch(/exp/);
+  });
+
+  it("the refresh verifier accepts the same token inside the grace, and says by how much", async () => {
+    const t = await expiredToken(10 * 60); // the outage scenario: well past TTL
+    const v = await verifyTokenForRefresh(t);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.expiredBySec).toBeGreaterThanOrEqual(10 * 60 - 6);
+  });
+
+  it("beyond the grace the refresh verifier refuses too — the human boundary holds", async () => {
+    const t = await expiredToken(REFRESH_GRACE_SEC + 120);
+    const v = await verifyTokenForRefresh(t);
+    expect(v.ok).toBe(false);
+  });
+
+  it("a live token reports expiredBySec 0 and still refreshes (no overcorrection)", async () => {
+    const t = await issueToken({ kind: "agent", subject: "user-395", botId: "00000000-0000-4000-8000-000000000395", ttlSeconds: 900 });
+    const v = await verifyTokenForRefresh(t);
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.expiredBySec).toBe(0);
+  });
+
+  it("a freshly-minted token is not tripped by the widened nbf tolerance", async () => {
+    // The rejected design (shifting currentDate backwards) would have failed
+    // exactly this case; clockTolerance must not.
+    const t = await issueToken({ kind: "user", subject: "user-fresh", ttlSeconds: 900 });
+    const v = await verifyTokenForRefresh(t);
+    expect(v.ok).toBe(true);
+  });
+
+  it("grace does not launder a forged signature", async () => {
+    const otherJwk = await freshEd25519PrivateJwk();
+    const otherKey = await importJWK(otherJwk, IDENTITY_ALG);
+    const now = Math.floor(Date.now() / 1000);
+    const forged = await new SignJWT({ kind: "agent", oat: now })
+      .setProtectedHeader({ alg: IDENTITY_ALG, kid: "forged-kid", typ: "JWT" })
+      .setIssuer(ISSUER)
+      .setSubject("user-395")
+      .setIssuedAt(now)
+      .setExpirationTime(now + 900)
+      .sign(otherKey);
+    const v = await verifyTokenForRefresh(forged);
+    expect(v.ok).toBe(false);
   });
 });
