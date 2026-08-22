@@ -139,6 +139,13 @@ export async function deliverPendingTowerEvents(now: Date = new Date(), fetchFn:
           "x-tower-signature": signBody(floor.webhookSecret, body),
         },
         body,
+        // redirect:"manual" is the SSRF guard's other half. assertPublicHost
+        // vetted THIS url's host, but a followed 3xx would carry our egress to
+        // wherever the receiver points — a public host answering
+        // `302 → http://169.254.169.254/` walks straight past the check. A
+        // webhook receiver has no legitimate reason to redirect, so any 3xx is
+        // a delivery failure (the status branch below rejects it).
+        redirect: "manual",
         signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),
       });
       if (res.status >= 200 && res.status < 300) {

@@ -95,6 +95,19 @@ describe("public-unicast address test", () => {
   });
 });
 
+describe("delivery refuses redirects (the SSRF second half)", () => {
+  it("passes redirect:manual so a 3xx cannot carry egress to internal space", async () => {
+    // The delivery module imports the db package (throws without DATABASE_URL),
+    // so assert the option on the source rather than executing the sweeper.
+    const fs = require("node:fs");
+    const src = fs.readFileSync(new URL("./tower-webhooks.ts", import.meta.url), "utf8") as string;
+    expect(src).toContain('redirect: "manual"');
+    // And the success gate is a 2xx range, so a manual-redirect's 3xx/opaque
+    // response is treated as a failure, never a delivery.
+    expect(src).toMatch(/res\.status >= 200 && res\.status < 300/);
+  });
+});
+
 describe("backoff", () => {
   it("doubles from one minute and caps at an hour", () => {
     expect(backoffMs(0)).toBe(60_000);

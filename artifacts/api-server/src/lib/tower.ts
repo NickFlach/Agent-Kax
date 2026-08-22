@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import {
   towerFloorsTable,
   towerLeasesTable,
+  towerFloorEventsTable,
   type TowerFloor,
   type TowerLease,
 } from "@workspace/db/schema";
@@ -175,6 +176,18 @@ export async function grantTowerLease(input: {
           updatedAt: new Date(),
         })
         .where(eq(towerFloorsTable.floorNo, floorNo));
+      // Retire the PREVIOUS tenancy's still-pending events here, not just its
+      // webhook config. Clearing the URL alone left a race: a departed
+      // tenant's queued chat.said rows stayed `pending`, and if the new
+      // tenant registered a receiver before the next 30s sweep, those old
+      // lines delivered to the NEW receiver signed with the NEW secret —
+      // a cross-tenant leak of speaker principals and text. Grant is the
+      // right boundary: end preserved the departed tenant's delivery window,
+      // grant closes it for good.
+      await tx
+        .update(towerFloorEventsTable)
+        .set({ state: "failed", lastError: "tenancy ended before delivery" })
+        .where(and(eq(towerFloorEventsTable.floorNo, floorNo), eq(towerFloorEventsTable.state, "pending")));
       // The decision row commits WITH the lease or not at all (ADR-0003:
       // an action and its record must not be able to disagree).
       await recordDecision(tx, {
@@ -212,10 +225,6 @@ export async function darkenTowerFloor(floorNo: number, reason: string, actor: s
   const f = await floorRow(floorNo);
   if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
   if (f.status !== "leased") throw new TowerFloorUnavailable(`floor ${floorNo} is ${f.status}; only a leased floor can go dark`);
-  // The dark event is enqueued BEFORE the flip: the sweeper HOLDS deliveries
-  // to dark floors, so this row waits and is the first thing the tenant
-  // receives when the floor is relit — an honest record of the gap.
-  void enqueueTowerEvent(floorNo, "lease.dark", { floorNo, reason: reason.slice(0, 300) });
   await db.transaction(async (tx) => {
     await tx
       .update(towerFloorsTable)
@@ -228,9 +237,19 @@ export async function darkenTowerFloor(floorNo: number, reason: string, actor: s
       capability: "tower.floor.dark",
       resource: `tower:floor:${floorNo}`,
       decision: "allow",
-      reasonCode: reason.slice(0, 60),
+      // authority_decisions.reason_code is varchar(48): a longer slice threw
+      // 22001 INSIDE this transaction and rolled the darken back entirely —
+      // the floor stayed lit and the operator got a 500. The full reason is
+      // kept uncapped on tower_floors.darkReason above. The dark EVENT is
+      // enqueued only AFTER this commits, so a rollback can no longer orphan
+      // a lease.dark for a floor that stayed leased.
+      reasonCode: reason.slice(0, 48),
     });
   });
+  // The sweeper HOLDS deliveries to dark floors, so this row waits and is the
+  // first thing the tenant receives when the floor is relit — an honest
+  // record of the gap. After the commit, so it never outlives a rollback.
+  void enqueueTowerEvent(floorNo, "lease.dark", { floorNo, reason: reason.slice(0, 300) });
 }
 
 export async function undarkenTowerFloor(floorNo: number, actor: string): Promise<void> {
