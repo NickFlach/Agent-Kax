@@ -193,12 +193,34 @@ async function verifyLedgerChainAtBoot(): Promise<void> {
 // the Replit runner waits for port 8080 to open. Pre-#40 these ran
 // after listen(); #40 (auto-migrate) accidentally awaited them too,
 // which is what bricked the publish.
+/**
+ * A step that HANGS is worse than one that throws: the catch below cannot see
+ * it, and every step after it silently never runs. That is not hypothetical —
+ * on the egress-restricted Replit deployment a stalled outbound call in one
+ * warm-up step kept the constellation bridge (then the last step) from ever
+ * starting, with nothing in any log. The watchdog turns a hang into a named
+ * failure and lets the rest of the chain proceed; the stalled promise is
+ * abandoned, which the per-step isolation already tolerates.
+ */
+const STARTUP_STEP_TIMEOUT_MS = 90_000;
+
 async function runStartupStep(
   name: string,
   fn: () => unknown | Promise<unknown>,
 ): Promise<void> {
   try {
-    await fn();
+    let watchdog: NodeJS.Timeout | undefined;
+    const timedOut = new Promise((_resolve, reject) => {
+      watchdog = setTimeout(
+        () => reject(new Error(`step still running after ${STARTUP_STEP_TIMEOUT_MS}ms — abandoned`)),
+        STARTUP_STEP_TIMEOUT_MS,
+      );
+    });
+    try {
+      await Promise.race([fn(), timedOut]);
+    } finally {
+      clearTimeout(watchdog);
+    }
     logger.info({ step: name }, "startup step completed");
   } catch (err) {
     // Per-step isolation: a partner-API hiccup in backfill or replay must
@@ -223,6 +245,11 @@ async function warmUpInBackground(): Promise<void> {
     const { reportSchemaAtBoot } = await import("./lib/schemaSelfCheck");
     await reportSchemaAtBoot();
   });
+  // The bridge depends on nothing below — only its env and the schema above —
+  // and everything below it can stall on external services. It spent its life
+  // as the LAST step and paid for it (see the watchdog note); it goes early
+  // so a slow partner API can never again keep the constellation dark.
+  await runStartupStep("startConstellationBridge", startConstellationBridge);
   // Stand the residents back up. After the schema is known good, because it
   // reads a table, and before serving, so the city is populated by the time
   // the first visitor arrives rather than filling in around them.
@@ -254,7 +281,6 @@ async function warmUpInBackground(): Promise<void> {
     "startCommerceFulfillmentStatusSync",
     startCommerceFulfillmentStatusSync,
   );
-  await runStartupStep("startConstellationBridge", startConstellationBridge);
   // Stripe: create the stripe-replit-sync schema, register the managed
   // webhook, and backfill existing Stripe data. Non-fatal like every other
   // step — a connector hiccup must not take the rest of KAX down; checkout
