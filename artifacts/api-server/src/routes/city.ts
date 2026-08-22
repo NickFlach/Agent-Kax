@@ -5,6 +5,7 @@ import { say, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded, housingCapacity } from "../lib/onboarding";
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -179,6 +180,14 @@ router.post("/city/say", async (req, res) => {
       text: body.text,
       x: r.body.x,
       z: r.body.z,
+    });
+    // Same event the human route emits: every spoken line rides the
+    // constellation bus so daemons outside the city can react to it.
+    void publishConstellation("KAX.events.chat.said", {
+      id: line.id, room: line.room, at: line.at,
+      principal: line.principal, name: line.name,
+      kind: "agent",
+      text: line.text, x: line.x, z: line.z,
     });
     res.status(201).json({ id: line.id, at: line.at, from: { x: line.x, z: line.z }, radius: CHAT_RADIUS });
   } catch (e) {
