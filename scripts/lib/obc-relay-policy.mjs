@@ -18,39 +18,59 @@
  *      the telegraph desk.
  *
  * Grammar:
- *   obc: <text>        → speak in OpenBotCity (zone chat)
- *   obc post: <text>   → post to the OpenBotCity feed
+ *   obc: <text>            → speak in OpenBotCity (zone chat)
+ *   obc post: <text>       → post to the OpenBotCity feed
+ *   obc dm <name>: <text>  → DM a KNOWN OpenBotCity agent by name
+ *
+ * DMs resolve through an address book the caller supplies — never a live
+ * lookup. OBC has no public agent directory, and guessing an id from a name
+ * would mean a typo sends a private message to whoever the guess lands on.
+ * A name not in the book refuses; the book only grows by a human adding a
+ * verified id.
  */
 
-/** OBC's own caps: speak tops out at 500 chars, feed posts are safe ≤650. */
+/** OBC's own caps: speak 500, feed posts safe ≤650, DMs 2000. */
 export const SPEAK_MAX = 500;
 export const POST_MAX = 650;
+export const DM_MAX = 2000;
 
-const GRAMMAR = /^\s*obc\s*(post)?\s*:\s*(.+)$/is;
+const GRAMMAR = /^\s*obc(?:\s+(post)|\s+dm\s+([a-z0-9_-]{1,40}))?\s*:\s*(.+)$/is;
 
 /**
  * Decide what an event asks for.
  *
  * @param evt   { kind, name, principal, text, room } from KAX.events.chat.said
- * @param opts  { allow: string[] } — when non-empty, the speaker's principal
- *              or name must be listed; an empty list means "any human".
- * @returns null (not a relay) or { action: "speak"|"post", message }
+ * @param opts  { allow: string[], book: Record<lowercase name, bot id> } —
+ *              a non-empty allow list restricts who may trigger; the book is
+ *              the only way a DM target resolves.
+ * @returns null (not a relay, or refused) or
+ *          { action: "speak"|"post", message } or
+ *          { action: "dm", to, toName, message }
  */
 export function decideRelay(evt, opts = {}) {
   const allow = opts.allow ?? [];
+  const book = opts.book ?? {};
   if (!evt || typeof evt.text !== "string") return null;
   if (evt.kind !== "human") return null;
   if (allow.length > 0 && !allow.includes(evt.principal) && !allow.includes(evt.name)) return null;
 
   const m = GRAMMAR.exec(evt.text);
   if (!m) return null;
-  const body = m[2].trim();
+  const body = m[3].trim();
   if (!body) return null;
 
-  const action = m[1] ? "post" : "speak";
   // Attribution travels with the words: the OBC account is the mouthpiece,
-  // not the author, and the far room deserves to know which room spoke.
+  // not the author, and the far end deserves to know which room spoke.
   const prefix = `⇄ from KAX City (${evt.name}, ${evt.room}): `;
+
+  if (m[2]) {
+    const toName = m[2].toLowerCase();
+    const to = book[toName];
+    if (!to) return null; // not in the book — refuse rather than guess
+    return { action: "dm", to, toName, message: fitTo(prefix + body, DM_MAX) };
+  }
+
+  const action = m[1] ? "post" : "speak";
   const max = action === "post" ? POST_MAX : SPEAK_MAX;
   return { action, message: fitTo(prefix + body, max) };
 }
