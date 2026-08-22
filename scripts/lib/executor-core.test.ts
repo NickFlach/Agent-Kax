@@ -19,6 +19,7 @@ import crypto from "node:crypto";
 import {
   parseWorkAsk,
   fileFor,
+  isContainedRelPath,
   scopeCheck,
   branchName,
   budgetGate,
@@ -75,6 +76,32 @@ describe("fileFor (single-file scope, v0.1)", () => {
   });
   it("an empty task names nothing", () => {
     expect(fileFor("  ")).toBeNull();
+  });
+  it("REFUSES a captured traversal path instead of defaulting to the README", () => {
+    // When the named path the regex captures CONTAINS a `..` segment, it is a
+    // real escape attempt — refused (null), never retargeted at the README.
+    expect(fileFor("fix the typo in a/../../../../Users/nickf/.kannaka/anthropic-new.key.json")).toBeNull();
+    expect(fileFor("edit config/../../secret.json")).toBeNull();
+    // A leading-`..` phrase whose clean TAIL is captured resolves harmlessly
+    // INSIDE the clone (the executor joins the captured relative path), so the
+    // `..` never takes effect — that is safe, not a refusal.
+    expect(fileFor("update ../../../etc/passwd.txt")).toBe("etc/passwd.txt");
+  });
+});
+
+describe("isContainedRelPath (the path-traversal gate)", () => {
+  it("accepts ordinary repo-relative paths", () => {
+    expect(isContainedRelPath("README.md")).toBe(true);
+    expect(isContainedRelPath("docs/a/b.ts")).toBe(true);
+    expect(isContainedRelPath("a.dot.name.json")).toBe(true);
+  });
+  it("rejects traversal, absolute, and drive-qualified paths", () => {
+    expect(isContainedRelPath("../secret")).toBe(false);
+    expect(isContainedRelPath("a/../../b")).toBe(false);
+    expect(isContainedRelPath("/etc/passwd")).toBe(false);
+    expect(isContainedRelPath("C:/Users/nickf/x")).toBe(false);
+    expect(isContainedRelPath("a\\..\\..\\b")).toBe(false); // backslash traversal
+    expect(isContainedRelPath("")).toBe(false);
   });
 });
 

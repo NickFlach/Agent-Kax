@@ -82,15 +82,36 @@ export function parseWorkAsk({ text, from, youName, now = Date.now() } = {}) {
 /**
  * Which file does a v0.1 task touch? Single-file edits only, deliberately:
  * the edit is produced by the agent's one-shot mind, and one named file is
- * the scope where that is honest. A path spoken in the task wins; the
- * README is the default because the demo task is documentation. Returns
- * null only for an empty task.
+ * the scope where that is honest. A path spoken in the task wins; the README
+ * is the default because the demo task is documentation.
+ *
+ * SECURITY: the returned path is a REPO-RELATIVE path that the executor joins
+ * onto the clone dir and both READS and WRITES. A spoken sentence is
+ * attacker-controlled, so a path that escapes the clone would read a host
+ * file (into a prompt on the bus) and overwrite it. `isContainedRelPath`
+ * rejects anything absolute, drive-qualified, or containing a `..` segment;
+ * a candidate that fails it is ignored (not defaulted-around — a named path
+ * that is hostile is a refusal, so the executor declines rather than silently
+ * editing the README instead). Returns null for an empty task OR a task whose
+ * only named path is an escape attempt.
  */
+export function isContainedRelPath(p) {
+  const s = String(p ?? "").replace(/\\/g, "/");
+  if (!s || s.startsWith("/") || /^[a-zA-Z]:/.test(s)) return false; // absolute / drive
+  if (s.split("/").some((seg) => seg === ".." )) return false; // traversal
+  if (/\0/.test(s)) return false;
+  return true;
+}
+
 export function fileFor(task) {
   const t = String(task ?? "");
   if (!t.trim()) return null;
-  const named = /\b([\w][\w/.-]*\.(?:md|txt|json|yml|yaml|js|mjs|ts|tsx|rs|py|toml))\b/i.exec(t);
-  if (named) return named[1];
+  const named = /\b([\w][\w./-]*\.(?:md|txt|json|yml|yaml|js|mjs|ts|tsx|rs|py|toml))\b/i.exec(t);
+  if (named) {
+    // A named path that escapes the clone is hostile, not a typo — refuse the
+    // whole task rather than quietly retargeting it at the README.
+    return isContainedRelPath(named[1]) ? named[1] : null;
+  }
   if (/\breadme\b/i.test(t)) return "README.md";
   return "README.md";
 }
