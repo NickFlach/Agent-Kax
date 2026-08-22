@@ -22,7 +22,7 @@
 
 import { connect, type NatsConnection, type Subscription } from "nats";
 import { db } from "@workspace/db";
-import { constellationAgentsTable, constellationArtifactsTable, constellationExemplarsTable, constellationDreamsTable } from "@workspace/db/schema";
+import { constellationAgentsTable, constellationArtifactsTable, constellationExemplarsTable, constellationDreamsTable, radioNowPlayingTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -216,6 +216,21 @@ async function mirrorDreamEnd(opts: {
     .onConflictDoNothing();
 }
 
+async function mirrorNowPlaying(opts: {
+  title: string | null;
+  artist: string | null;
+  kind: string | null;
+  url: string | null;
+}): Promise<void> {
+  await db
+    .insert(radioNowPlayingTable)
+    .values({ id: 1, title: opts.title, artist: opts.artist, kind: opts.kind, url: opts.url, startedAt: new Date(), updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: radioNowPlayingTable.id,
+      set: { title: opts.title, artist: opts.artist, kind: opts.kind, url: opts.url, startedAt: new Date(), updatedAt: sql`now()` },
+    });
+}
+
 async function handleMessage(subject: string, data: Uint8Array): Promise<void> {
   const env = parseJson(data);
   if (!env) return;
@@ -296,6 +311,18 @@ async function handleMessage(subject: string, data: Uint8Array): Promise<void> {
     return;
   }
 
+  // radio.now_playing — the current track, mirrored so the Listening Room's
+  // marquee (#408) reads live state without joining NATS itself.
+  if (subject === "radio.now_playing") {
+    await mirrorNowPlaying({
+      title: typeof env["title"] === "string" ? (env["title"] as string) : null,
+      artist: typeof env["artist"] === "string" ? (env["artist"] as string) : null,
+      kind: typeof env["kind"] === "string" ? (env["kind"] as string) : null,
+      url: typeof env["url"] === "string" ? (env["url"] as string) : typeof env["public_url"] === "string" ? (env["public_url"] as string) : null,
+    });
+    return;
+  }
+
   // queen.event.dream.end — a mind just consolidated. The Observatory's
   // events (#407): stored for the room to ripple on, deduped on the bus id.
   if (subject === "queen.event.dream.end") {
@@ -342,6 +369,7 @@ async function subscribeAll(conn: NatsConnection): Promise<void> {
     "KANNAKA.events.>",
     "KANNAKA.exemplar.>",
     "queen.event.dream.end",
+    "radio.now_playing",
     "RADIO.events.>",
     "OBSERVATORY.events.>",
   ];
