@@ -16,9 +16,9 @@ import {
   partnerApiKey,
   getSyncState,
   listPartnerEventsSince,
-  recordEventCursor,
   PartnerApiError,
 } from "../lib/partnerClient";
+import { ReplayCursor } from "../lib/replayCursor";
 import { fetchPublicGallery } from "../lib/publicClient";
 import { dispatchPartnerEvent } from "../lib/eventDispatcher";
 import { publish as publishConstellation } from "../lib/constellationBridge";
@@ -351,7 +351,16 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
   let handled = 0;
   let deduped = 0;
   let unhandled = 0;
+  let deferredCount = 0;
   const errors: Array<{ event_uuid: string; error: string }> = [];
+
+  // The SAME cursor discipline the startup replay uses (#418): a deferred
+  // event freezes the persisted cursor so it is re-offered, while the fetch
+  // position keeps moving. This loop is exactly the catch-up-a-new-handler
+  // case — where a cursor-less type is most likely to hit a deferral — so it
+  // must not be the copy that skips them. Per-type, so it pins onto
+  // eventCursors[type] instead of only the shared lastEventUuid.
+  const rc = new ReplayCursor(sinceUuid, eventType);
 
   // Loop up to 10 pages to stay safely under the daily budget; OBC's
   // /events/recent has a 7-day retention window so this is enough to
@@ -359,10 +368,10 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
   for (let page = 0; page < 10; page++) {
     let pageData;
     try {
-      pageData = await listPartnerEventsSince(sinceUuid, eventType);
+      pageData = await listPartnerEventsSince(rc.fetchFrom(), eventType);
     } catch (err) {
       if (err instanceof PartnerApiError) {
-        res.status(502).json({ error: err.message, totalSeen, handled, deduped, unhandled, errors });
+        res.status(502).json({ error: err.message, totalSeen, handled, deduped, unhandled, deferred: deferredCount, errors });
         return;
       }
       throw err;
@@ -371,25 +380,32 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
 
     for (const ev of pageData.events) {
       totalSeen++;
+      let result;
       try {
-        const result = await dispatchPartnerEvent({
+        result = await dispatchPartnerEvent({
           eventType: ev.event_type,
           eventUuid: ev.event_uuid,
           data: ev.data,
           source: "replay",
           log: req.log,
         });
+      } catch (err) {
+        errors.push({ event_uuid: ev.event_uuid, error: String(err) });
+        await rc.onFailed(ev.event_uuid);
+        continue;
+      }
+      if (result.status === "deferred") {
+        deferredCount++;
+        await rc.onDeferred();
+      } else {
+        await rc.onProcessed(ev.event_uuid);
         if (result.status === "handled") handled++;
         else if (result.status === "deduped") deduped++;
         else unhandled++;
-      } catch (err) {
-        errors.push({ event_uuid: ev.event_uuid, error: String(err) });
       }
     }
-    const lastUuid = pageData.events[pageData.events.length - 1]?.event_uuid;
-    if (lastUuid) await recordEventCursor(lastUuid);
     if (!pageData.next_cursor) break;
-    sinceUuid = pageData.next_cursor;
+    await rc.onPageBoundary(pageData.next_cursor);
   }
 
   res.json({
@@ -398,6 +414,7 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
     handled,
     deduped,
     unhandled,
+    deferred: deferredCount,
     errors: errors.slice(0, 10),
     errorCount: errors.length,
   });

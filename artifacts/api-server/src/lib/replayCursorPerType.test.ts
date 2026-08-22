@@ -77,14 +77,14 @@ describe("per-type replay cursor (#67)", () => {
   });
 
   describe("the replay loop", () => {
-    it("declares the cursor inside the per-type loop", () => {
+    it("constructs the cursor per type, inside the loop", () => {
       const loopAt = BODY.indexOf("for (const eventType of eventTypes)");
-      const declAt = BODY.indexOf("let cursor");
+      const declAt = BODY.indexOf("new ReplayCursor(");
       expect(loopAt).toBeGreaterThanOrEqual(0);
       expect(declAt).toBeGreaterThanOrEqual(0);
       expect(
         declAt > loopAt,
-        "the cursor must be per type — declared outside the loop it carries one " +
+        "the cursor must be per type — one shared across types carries one " +
         "type's position into the next, which is the whole bug",
       ).toBe(true);
     });
@@ -100,11 +100,12 @@ describe("per-type replay cursor (#67)", () => {
     });
 
     it("persists progress against the type it belongs to", () => {
-      const calls = BODY.split("\n").filter((l) => l.includes("recordEventCursor("));
-      expect(calls.length).toBeGreaterThanOrEqual(3);
-      for (const c of calls) {
-        expect(c, `cursor persisted without its type: ${c.trim()}`).toContain("eventType");
-      }
+      // Persistence now lives in ReplayCursor, which is always constructed with
+      // the eventType — so every advance it makes is type-scoped. The loop
+      // hands it the type once and holds no raw recordEventCursor of its own.
+      expect(BODY).toContain("new ReplayCursor(savedCursors[eventType] ?? legacyCursor, eventType)");
+      expect(BODY).not.toContain("recordEventCursor(");
+      // The writer itself binds the jsonb path per type (verified below).
     });
 
     it("no longer reports a single conflated final cursor", () => {
@@ -113,30 +114,24 @@ describe("per-type replay cursor (#67)", () => {
     });
   });
 
-  describe("the deferral hold survives page boundaries and failures (#418)", () => {
-    it("does not persist next_cursor once an event of this type has deferred", () => {
-      // The per-event hold was only half the fix: the end-of-page advance ran
-      // unconditionally, so any FULL page containing a deferral still wrote
-      // next_cursor and the deferred event was skipped permanently.
-      const pageAdvance = BODY.indexOf("if (!page.next_cursor) break;");
-      expect(pageAdvance).toBeGreaterThanOrEqual(0);
-      const hold = BODY.indexOf("if (deferred) break;", pageAdvance);
-      const advance = BODY.indexOf("cursor = page.next_cursor;", pageAdvance);
-      expect(hold, "end-of-page advance no longer honours the deferral hold").toBeGreaterThanOrEqual(0);
-      expect(advance).toBeGreaterThanOrEqual(0);
-      expect(hold, "the hold must run before next_cursor is persisted").toBeLessThan(advance);
+  describe("the cursor is owned by one writer, not scattered guards (#418)", () => {
+    // The first #418 fix used site-local `deferred` guards, and the sibling
+    // admin replay loop forgot one entirely — the review's finding. The
+    // deferral behaviour is now proven directly in replayCursor.test.ts; here
+    // we only pin that BOTH loops route every advance through ReplayCursor and
+    // hold no raw recordEventCursor of their own, so a new persist site cannot
+    // silently reintroduce the skip.
+    it("the startup loop drives ReplayCursor and keeps no raw cursor write", () => {
+      expect(BODY).toContain("new ReplayCursor(");
+      expect(BODY).toContain("rc.onDeferred()");
+      expect(BODY).toContain("rc.onPageBoundary(");
+      expect(BODY).not.toContain("recordEventCursor(");
     });
 
-    it("does not persist a failed event's uuid once an event of this type has deferred", () => {
-      // Same loss through the error path: skip-the-bad-event advanced the
-      // cursor even when an earlier event of the type was being held.
-      const failAt = BODY.indexOf("Replay handler failed");
-      expect(failAt).toBeGreaterThanOrEqual(0);
-      const guard = BODY.indexOf("if (!deferred)", failAt);
-      const persist = BODY.indexOf("recordEventCursor(cursor, eventType).catch", failAt);
-      expect(guard, "catch path persists the cursor with no deferral guard").toBeGreaterThanOrEqual(0);
-      expect(persist).toBeGreaterThanOrEqual(0);
-      expect(guard, "the guard must wrap the persist").toBeLessThan(persist);
+    it("the sibling admin replay loop uses the same owner, not a bare lastUuid write", () => {
+      const ADMIN = fs.readFileSync(path.join(__dirname, "..", "routes", "admin.ts"), "utf8");
+      expect(ADMIN).toContain("new ReplayCursor(");
+      expect(ADMIN).not.toContain("recordEventCursor(lastUuid)");
     });
   });
 

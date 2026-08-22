@@ -9,11 +9,11 @@ import {
   listPartnerArtifacts,
   listPartnerEventsSince,
   recordPollSuccess,
-  recordEventCursor,
   getSyncState,
   partnerApiAvailable,
   type PartnerArtifact,
 } from "./partnerClient";
+import { ReplayCursor } from "./replayCursor";
 import { logger } from "./logger";
 import { createRateLimiter } from "./rateLimit";
 import { maybeRespondToArtwork } from "./kannakaArtworkResponse";
@@ -331,88 +331,63 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
     // Per type, not shared. One cursor across all types meant the second type
     // started from wherever the first type's stream ended — and since the
     // cursor is persisted per event, that skip was durable. (#67)
-    let cursor: string | null = savedCursors[eventType] ?? legacyCursor;
-    // Once an event of this type defers, the cursor stops advancing for the
-    // rest of this run so the deferred event is re-offered next time (#103).
-    let deferred = false;
+    //
+    // The ReplayCursor owns every advance and holds the #103/#418 invariant:
+    // once an event of this type defers, the persisted cursor freezes so the
+    // deferred event is re-offered, while the fetch position keeps moving so
+    // later pages are still tried.
+    const rc = new ReplayCursor(savedCursors[eventType] ?? legacyCursor, eventType);
     try {
       for (let pageIdx = 0; pageIdx < maxPagesPerType; pageIdx++) {
-        const page = await listPartnerEventsSince(cursor, eventType);
+        const page = await listPartnerEventsSince(rc.fetchFrom(), eventType);
         if (page.events.length === 0) break;
         totalSeen += page.events.length;
 
-        let consecutiveFailures = 0;
         for (const ev of page.events) {
+          let result;
           try {
-            const result = await dispatchPartnerEvent({
+            result = await dispatchPartnerEvent({
               eventType: ev.event_type,
               eventUuid: ev.event_uuid,
               data: ev.data,
               log: logger,
               source: "replay",
             });
-            // Hold the cursor at the FIRST deferred event of this run.
-            //
-            // Leaving a deferred event out of processed_events is only half of
-            // what makes it retryable — the replay cursor is the other half.
-            // Advancing past it would mean the next replay starts after it and
-            // it is never re-offered, so the deferral would achieve nothing.
-            //
-            // Later events in the page are still dispatched (they may be
-            // perfectly applicable); they are simply re-delivered next run and
-            // deduped by processed_events, which is cheap. (#103)
-            if (result.status === "deferred") {
-              deferred = true;
-              logger.info(
-                { eventType, eventUuid: ev.event_uuid, reason: result.reason },
-                "holding replay cursor at deferred event",
-              );
-            } else if (!deferred) {
-              cursor = ev.event_uuid;
-              await recordEventCursor(cursor, eventType);
-            }
-            if (result.status === "handled" || result.status === "unhandled") processed++;
-            consecutiveFailures = 0;
           } catch (err) {
-            // Single-event failure during replay shouldn't kill the
-            // entire startup replay — previously a `return` here
-            // abandoned every remaining event type, which silently
-            // dropped data for hours until the next restart. Skip the
-            // bad event, advance the cursor so we don't reprocess it,
-            // and continue. Only bail (break to outer loop) after 5
-            // consecutive failures in this type — that's a real
-            // upstream problem, not a one-off bad event.
+            // A single handler failure during replay must not kill the whole
+            // startup replay (a `return` here once dropped data for hours).
+            // Skip the event and continue, but bail this type after 5
+            // consecutive failures — a real upstream problem, not a one-off.
+            // The cursor is only advanced past the failure when nothing is
+            // being held (onFailed), so a failure behind a deferral cannot
+            // skip the deferred event.
             logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed — skipping event");
-            // Skip-the-bad-event must not also skip the hold: once an earlier
-            // event of this type deferred, persisting this failure's uuid
-            // would jump the saved cursor past the deferred event (#418).
-            if (!deferred) {
-              cursor = ev.event_uuid;
-              await recordEventCursor(cursor, eventType).catch(() => {});
+            if ((await rc.onFailed(ev.event_uuid)) >= 5) {
+              logger.warn({ eventType }, "5 consecutive replay failures — skipping rest of this event type");
+              throw err;
             }
-            consecutiveFailures++;
-            if (consecutiveFailures >= 5) {
-              logger.warn({ eventType, consecutiveFailures }, "5 consecutive replay failures — skipping rest of this event type");
-              throw err; // breaks to outer catch, continues to next type
-            }
+            continue;
+          }
+          // Dispatch succeeded — cursor persistence beyond this point is NOT a
+          // handler failure, so its errors propagate to the OUTER handler
+          // (skip the type this run, re-seed next boot) rather than inflating
+          // the failure counter.
+          if (result.status === "deferred") {
+            logger.info({ eventType, eventUuid: ev.event_uuid, reason: result.reason }, "holding replay cursor at deferred event");
+            await rc.onDeferred();
+          } else {
+            await rc.onProcessed(ev.event_uuid);
+            if (result.status === "handled" || result.status === "unhandled") processed++;
           }
         }
 
         if (!page.next_cursor) break;
-        // The end-of-page advance must honour the hold too. This write used to
-        // run unconditionally, so any FULL page containing a deferral still
-        // persisted next_cursor and the deferred event was skipped for good —
-        // the exact loss the per-event hold above exists to prevent (#418).
-        // Stop paging instead: everything past this page is still in the
-        // partner stream and is re-offered next run from the held cursor.
-        if (deferred) break;
-        cursor = page.next_cursor;
-        await recordEventCursor(cursor, eventType);
+        await rc.onPageBoundary(page.next_cursor);
       }
     } catch (err) {
       logger.warn({ err, eventType }, "Skipping event type during startup replay");
     }
-    finalCursors[eventType] = cursor;
+    finalCursors[eventType] = rc.position();
   }
 
   // Per type, not one value: a single "finalCursor" was exactly the conflation
