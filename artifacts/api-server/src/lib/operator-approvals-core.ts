@@ -30,6 +30,28 @@ export interface ApprovalHandler {
 const handlers = new Map<string, ApprovalHandler>();
 
 /**
+ * Kinds whose decision MOVES MONEY or airs public content, so a missing
+ * handler must never be treated as "nothing to do" (that would record a
+ * refund/go-live that never happened). For these, runHandler keeps the row
+ * unexecuted and retrying until a handler is present, and `assertRequiredHandlers`
+ * fails boot loudly if one is missing. `radio_ad` joins this set when its
+ * handler ships.
+ */
+const HANDLER_REQUIRED_KINDS = new Set<string>([]);
+
+export function isHandlerRequiredKind(kind: string): boolean {
+  return HANDLER_REQUIRED_KINDS.has(kind);
+}
+
+/** Throw at boot if any money kind lacks a handler — fail loud, not silent. */
+export function assertRequiredHandlers(): void {
+  const missing = [...HANDLER_REQUIRED_KINDS].filter((k) => !handlers.has(k));
+  if (missing.length) {
+    throw new Error(`operator-approvals: money kinds missing a handler at boot: ${missing.join(", ")}`);
+  }
+}
+
+/**
  * Register the handler for a kind. Called once at module load by each feature
  * that raises approvals (tower tenancy, radio ads, …). A kind with no handler
  * is still a valid inbox item — approving it just records the decision and

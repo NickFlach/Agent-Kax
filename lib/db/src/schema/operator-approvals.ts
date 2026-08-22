@@ -1,4 +1,4 @@
-import { pgTable, bigserial, text, jsonb, timestamp, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, bigserial, text, jsonb, boolean, integer, timestamp, index, uniqueIndex, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /**
@@ -32,12 +32,24 @@ export const operatorApprovalsTable = pgTable(
     decisionNote: text("decision_note"),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at"),
+    // The decision's side-effect (the kind's handler) is a distributed action
+    // that can fail after the decision stands. `executed` says whether it ran;
+    // a decided row with executed=false is a re-drivable debt (an unaired ad,
+    // or an unissued refund). The sweeper works the queue by next_execute_at.
+    executed: boolean("executed").notNull().default(false),
+    executionError: text("execution_error"),
+    executionAttempts: integer("execution_attempts").notNull().default(0),
+    // next_execute_at = backoff schedule; lease_until = a runner holds it now.
+    // Distinct so manual retry never collides with an in-flight attempt.
+    nextExecuteAt: timestamp("next_execute_at"),
+    leaseUntil: timestamp("lease_until"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => [
     index("operator_approvals_status_idx").on(t.status, t.createdAt),
     index("operator_approvals_kind_idx").on(t.kind),
+    index("operator_approvals_execute_due_idx").on(t.nextExecuteAt).where(sql`status IN ('approved', 'rejected') AND executed = false`),
     // One live pending row per dedupe_key (partial + NULL-distinct).
     uniqueIndex("operator_approvals_pending_dedupe").on(t.dedupeKey).where(sql`status = 'pending' AND dedupe_key IS NOT NULL`),
     check("operator_approvals_status_known", sql`${t.status} IN ('pending', 'approved', 'rejected')`),

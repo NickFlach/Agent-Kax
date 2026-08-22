@@ -2,11 +2,14 @@ import { Router, type IRouter } from "express";
 import { requireAdmin } from "../middlewares/requireAuth";
 import { principalForUser } from "../lib/actor";
 import {
+  AlreadyExecuted,
   ApprovalAlreadyDecided,
   ApprovalNotFound,
   BadDecision,
+  ExecutionInFlight,
   decideApproval,
   listApprovals,
+  reExecuteApproval,
 } from "../lib/operator-approvals";
 
 const router: IRouter = Router();
@@ -24,8 +27,8 @@ const router: IRouter = Router();
 
 router.get("/admin/approvals", requireAdmin, async (req, res) => {
   const raw = String(req.query.status ?? "pending");
-  const status = (["pending", "approved", "rejected", "all"].includes(raw) ? raw : "pending") as
-    "pending" | "approved" | "rejected" | "all";
+  const status = (["pending", "approved", "rejected", "all", "needs_action"].includes(raw) ? raw : "pending") as
+    "pending" | "approved" | "rejected" | "all" | "needs_action";
   const approvals = await listApprovals(status);
   res.json({ ok: true, status, approvals });
 });
@@ -48,6 +51,28 @@ router.post("/admin/approvals/:id/decision", requireAdmin, async (req, res) => {
     if (e instanceof ApprovalNotFound) return res.status(404).json({ ok: false, code: e.code, error: e.message });
     if (e instanceof ApprovalAlreadyDecided) return res.status(409).json({ ok: false, code: e.code, status: e.status, error: e.message });
     if (e instanceof BadDecision) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+    throw e;
+  }
+});
+
+/**
+ * Re-drive a decided-but-unexecuted approval — the operator's manual override
+ * for the auto-sweeper (e.g. force a stuck refund now instead of waiting for
+ * the backoff). Safe to click twice: the claim lets only one runner proceed.
+ */
+router.post("/admin/approvals/:id/re-execute", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: "id must be a positive integer" });
+  }
+  try {
+    const result = await reExecuteApproval(id);
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e instanceof ApprovalNotFound) return res.status(404).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof ApprovalAlreadyDecided) return res.status(409).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof AlreadyExecuted) return res.status(409).json({ ok: false, code: e.code, error: e.message });
+    if (e instanceof ExecutionInFlight) return res.status(409).json({ ok: false, code: e.code, error: e.message });
     throw e;
   }
 });

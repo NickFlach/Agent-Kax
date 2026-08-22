@@ -27,6 +27,8 @@ interface Approval {
   body: string | null;
   requestedBy: string | null;
   createdAt: string;
+  executed?: boolean;
+  executionError?: string | null;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -35,19 +37,33 @@ const KIND_LABEL: Record<string, string> = {
   analytics_signup: "Analytics signup",
 };
 
-async function fetchPending(): Promise<Approval[]> {
-  const r = await fetch(`${API}/api/admin/approvals?status=pending`, { credentials: "include" });
+async function fetchApprovals(status: string): Promise<Approval[]> {
+  const r = await fetch(`${API}/api/admin/approvals?status=${status}`, { credentials: "include" });
   if (r.status === 401 || r.status === 403) return []; // not an admin — nothing to show
   if (!r.ok) throw new Error(`approvals ${r.status}`);
   const body = (await r.json()) as { approvals?: Approval[] };
   return body.approvals ?? [];
 }
 
+/** Decided rows whose side-effect (grant / air / refund) has not run yet — a
+ *  precise server query, so an old stuck item isn't missed behind the capped
+ *  "all" page. The auto-sweeper retries these; this surfaces them with a
+ *  manual re-drive. */
+async function fetchNeedsAction(): Promise<Approval[]> {
+  return fetchApprovals("needs_action");
+}
+
 export function ApprovalsPanel() {
   const qc = useQueryClient();
   const { data: approvals = [], isLoading } = useQuery({
     queryKey: ["operator-approvals", "pending"],
-    queryFn: fetchPending,
+    queryFn: () => fetchApprovals("pending"),
+    refetchInterval: 60_000,
+  });
+
+  const { data: needsAction = [] } = useQuery({
+    queryKey: ["operator-approvals", "needs-action"],
+    queryFn: fetchNeedsAction,
     refetchInterval: 60_000,
   });
 
@@ -60,6 +76,15 @@ export function ApprovalsPanel() {
         body: JSON.stringify({ decision: v.decision }),
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `decision ${r.status}`);
+      return r.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["operator-approvals"] }),
+  });
+
+  const retry = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`${API}/api/admin/approvals/${id}/re-execute`, { method: "POST", credentials: "include" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `re-execute ${r.status}`);
       return r.json();
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["operator-approvals"] }),
@@ -99,6 +124,23 @@ export function ApprovalsPanel() {
           ))
         )}
         {decide.isError && <p className="text-xs text-destructive">{(decide.error as Error).message}</p>}
+
+        {needsAction.length > 0 && (
+          <div className="mt-4 border-t border-border pt-3 space-y-2" data-testid="approvals-needs-action">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-destructive">Action didn't complete — retrying</p>
+            {needsAction.map((a) => (
+              <div key={a.id} className="border border-destructive/40 rounded-none p-2" data-testid={`needs-action-${a.id}`}>
+                <p className="text-xs font-medium text-foreground">{a.status === "rejected" ? "Refund/cleanup" : "Go-live"} pending: {a.title}</p>
+                {a.executionError && <p className="text-[10px] text-destructive mt-1 truncate">{a.executionError}</p>}
+                <Button size="sm" variant="outline" className="mt-2" disabled={retry.isPending} onClick={() => retry.mutate(a.id)} data-testid={`button-retry-${a.id}`}>
+                  Retry now
+                </Button>
+              </div>
+            ))}
+            <p className="text-[9px] text-muted-foreground">These retry automatically; "Retry now" forces it immediately.</p>
+          </div>
+        )}
+        {retry.isError && <p className="text-xs text-destructive">{(retry.error as Error).message}</p>}
       </CardContent>
     </Card>
   );
