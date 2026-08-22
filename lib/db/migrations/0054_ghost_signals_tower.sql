@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS tower_leases (
 );
 CREATE INDEX IF NOT EXISTS tower_leases_floor_idx ON tower_leases (floor_no);
 CREATE INDEX IF NOT EXISTS tower_leases_state_idx ON tower_leases (state);
+-- The invariant the whole module assumes, enforced where invariants belong:
+-- at most ONE active lease per floor, whatever two concurrent grants believe.
+CREATE UNIQUE INDEX IF NOT EXISTS tower_leases_one_active_per_floor
+  ON tower_leases (floor_no) WHERE state = 'active';
 
 -- The building opens with every floor vacant, on purpose — same as the
 -- residences: tenants arrive into their own idea of a room.

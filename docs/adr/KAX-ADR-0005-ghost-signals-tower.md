@@ -188,7 +188,7 @@ must come to them: a signed outbound webhook feed per floor (visitor entered
 the room, a chat line addressed the floor, a sale settled, lease state changed)
 with delivery state tracked — the durable-outbox discipline the settlement path
 already uses, not fire-and-forget. Inbound, the floor's room renders from a
-mirror table the tenant updates through a scoped write (`POST /tower/:n/panel`),
+mirror table the tenant updates through a scoped write (`POST /tower/storey/:n/panel` — the storey segment keeps the naming rule visible in the URL space),
 the same bridge-subscription → mirror-table → `GET /city/<room>` pattern the
 Observatory (0051) and Listening Room (0052) established — the tenant is just a
 different kind of upstream.

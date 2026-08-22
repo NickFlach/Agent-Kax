@@ -108,11 +108,11 @@ const PANEL_LIMITS = {
   statValue: 60,
 } as const;
 
-/** Control characters and ANSI escapes have no business on a wall. */
+/** Control chars, ANSI escapes, and bidi/zero-width spoofing marks have no business on a wall. */
 function cleanText(s: unknown, max: number): string | null {
   if (typeof s !== "string") return null;
   // eslint-disable-next-line no-control-regex
-  const cleaned = s.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  const cleaned = s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
   if (!cleaned || cleaned.length > max) return null;
   return cleaned;
 }

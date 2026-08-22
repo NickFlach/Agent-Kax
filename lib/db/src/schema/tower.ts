@@ -86,6 +86,10 @@ export const towerLeasesTable = pgTable(
   (t) => [
     index("tower_leases_floor_idx").on(t.floorNo),
     index("tower_leases_state_idx").on(t.state),
+    // At most one ACTIVE lease per floor — a partial unique index, because
+    // the vacancy check in application code runs at READ COMMITTED and two
+    // concurrent grants would both pass it.
+    uniqueIndex("tower_leases_one_active_per_floor").on(t.floorNo).where(sql`${t.state} = 'active'`),
     check("tower_leases_state_known", sql`${t.state} IN ('active', 'ended')`),
     check("tower_leases_rent_positive", sql`${t.rentMinor} > 0`),
   ],

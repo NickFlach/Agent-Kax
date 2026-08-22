@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { resolveActor, ActorError } from "../lib/actor";
+import { resolveActor, ActorError, principalForAgent } from "../lib/actor";
 import { requireAdmin, requireAdminOrServiceToken } from "../middlewares/requireAuth";
 import { creditsToMinor } from "../lib/ledger-core";
 import { parseTowerRoom } from "../lib/rooms";
@@ -98,7 +98,8 @@ router.post("/tower/storey/:n/panel", async (req, res) => {
   const n = storeyNo(req.params.n);
   if (n === null) return res.status(400).json({ ok: false, error: "storey must be an integer" });
   try {
-    const panel = await writeTowerPanel(n, `kax:agent:${actor.agent.obcBotId}`, req.body?.panel ?? req.body);
+    // The ADR-0001 one-derivation rule: never build the principal by hand.
+    const panel = await writeTowerPanel(n, principalForAgent(actor.agent), req.body?.panel ?? req.body);
     return res.json({ ok: true, floorNo: n, panel });
   } catch (e) {
     if (towerError(res, e)) return;

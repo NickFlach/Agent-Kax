@@ -7,7 +7,7 @@ import {
   type TowerLease,
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT, minorToCreditsString } from "./ledger-core";
-import { LedgerInsufficientFunds, postTransaction } from "./ledger";
+import { LedgerIdempotencyConflict, LedgerInsufficientFunds, postTransaction } from "./ledger";
 import {
   isLeasableTowerFloor,
   leaseTxId,
@@ -16,7 +16,7 @@ import {
   validatePanel,
   type TowerPanel,
 } from "./tower-core";
-import { isKnownRoom, towerRoom } from "./rooms";
+import { isKnownRoom, parseUnitRoom, towerRoom } from "./rooms";
 
 /**
  * Ghost Signals Tower, operating (KAX-ADR-0005).
@@ -49,7 +49,12 @@ export class BadPanel extends Error {
   readonly code = "bad_panel";
 }
 
-const PRINCIPAL_RE = /^kax:agent:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Lowercase ONLY — no `i` flag. A grant stores whatever the operator typed,
+// and the panel writer compares it against the principal derived from the DB
+// (lowercase), so an uppercase grant would lock a legitimate tenant out of
+// their own wall AND bill a lookalike ledger account. grantTowerLease
+// normalizes before this test, so mixed-case input still lands correctly.
+const PRINCIPAL_RE = /^kax:agent:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 async function floorRow(floorNo: number): Promise<TowerFloor | undefined> {
   const [row] = await db.select().from(towerFloorsTable).where(eq(towerFloorsTable.floorNo, floorNo)).limit(1);
@@ -124,7 +129,8 @@ export async function grantTowerLease(input: {
 }): Promise<{ floorNo: number; leaseId: number }> {
   const { floorNo } = input;
   if (!isLeasableTowerFloor(floorNo)) throw new TowerFloorNotFound(`floor ${floorNo} is not a leasable storey (2-11)`);
-  if (!PRINCIPAL_RE.test(input.tenantPrincipal)) {
+  const tenantPrincipal = String(input.tenantPrincipal ?? "").trim().toLowerCase();
+  if (!PRINCIPAL_RE.test(tenantPrincipal)) {
     throw new TowerFloorUnavailable(`tenantPrincipal must be kax:agent:<bot uuid>, got "${input.tenantPrincipal}"`);
   }
   if (typeof input.rentMinor !== "bigint" || input.rentMinor <= 0n) {
@@ -134,29 +140,43 @@ export async function grantTowerLease(input: {
   if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
   if (f.status !== "vacant") throw new TowerFloorUnavailable(`floor ${floorNo} is ${f.status}, not vacant`);
 
-  return await db.transaction(async (tx) => {
-    const [lease] = await tx
-      .insert(towerLeasesTable)
-      .values({
-        floorNo,
-        tenantPrincipal: input.tenantPrincipal,
-        rentMinor: input.rentMinor,
-      })
-      .returning();
-    await tx
-      .update(towerFloorsTable)
-      .set({
-        status: "leased",
-        slug: input.slug.slice(0, 60),
-        label: input.label.slice(0, 80),
-        repoUrl: input.repoUrl.slice(0, 300),
-        tenantPrincipal: input.tenantPrincipal,
-        darkReason: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(towerFloorsTable.floorNo, floorNo));
-    return { floorNo, leaseId: lease!.id };
-  });
+  try {
+    return await db.transaction(async (tx) => {
+      const [lease] = await tx
+        .insert(towerLeasesTable)
+        .values({
+          floorNo,
+          tenantPrincipal,
+          rentMinor: input.rentMinor,
+        })
+        .returning();
+      await tx
+        .update(towerFloorsTable)
+        .set({
+          status: "leased",
+          slug: input.slug.slice(0, 60),
+          label: input.label.slice(0, 80),
+          repoUrl: input.repoUrl.slice(0, 300),
+          tenantPrincipal,
+          darkReason: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(towerFloorsTable.floorNo, floorNo));
+      return { floorNo, leaseId: lease!.id };
+    });
+  } catch (e) {
+    // The unique indexes are the invariants speaking: one floor per tenant
+    // (tower_floors_tenant_unique) and one active lease per floor
+    // (tower_leases_one_active_per_floor). Surface them as the refusals they
+    // are, not as a 500 on an operator surface.
+    const code = (e as { code?: string })?.code;
+    if (code === "23505") {
+      throw new TowerFloorUnavailable(
+        `${tenantPrincipal} already holds a floor, or floor ${floorNo} already has an active lease — one each`,
+      );
+    }
+    throw e;
+  }
 }
 
 /** Dim a floor: door stays, service refused. A switch, never a delete. */
@@ -228,8 +248,13 @@ export async function writeTowerPanel(
   }
   const v = validatePanel(rawPanel);
   if (!v.ok) throw new BadPanel(v.error);
-  if (v.panel.ctaRoomId && !isKnownRoom(v.panel.ctaRoomId)) {
-    throw new BadPanel(`ctaRoomId "${v.panel.ctaRoomId}" is not a room in this city`);
+  if (v.panel.ctaRoomId) {
+    // A directory room only: private flats are real, addressable and
+    // unlisted (rooms.ts), and a business's wall must not advertise the way
+    // to somebody's home.
+    if (!isKnownRoom(v.panel.ctaRoomId) || parseUnitRoom(v.panel.ctaRoomId) !== null) {
+      throw new BadPanel(`ctaRoomId "${v.panel.ctaRoomId}" is not a public room in this city`);
+    }
   }
   await db
     .update(towerFloorsTable)
@@ -280,6 +305,17 @@ export async function billTowerPeriod(now: Date = new Date()): Promise<BillRepor
     } catch (e) {
       if (e instanceof LedgerInsufficientFunds) {
         report.skipped.push({ floorNo: lease.floorNo, reason: "insufficient_funds" });
+        continue;
+      }
+      // The txId is floor-scoped: one rent per floor per period, whoever the
+      // tenant is. A floor re-leased mid-month (even to the same tenant, whose
+      // new startedAt changes the prorated amount) replays the txId with
+      // DIFFERENT postings, which the ledger correctly refuses. That refusal
+      // is this floor's fact, not the run's: swallow it into the report, or
+      // one re-leased floor stops every floor after it from being billed for
+      // the rest of the month (review finding 1).
+      if (e instanceof LedgerIdempotencyConflict) {
+        report.skipped.push({ floorNo: lease.floorNo, reason: "period_already_billed" });
         continue;
       }
       throw e;
