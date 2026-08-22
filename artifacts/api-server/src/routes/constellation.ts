@@ -16,7 +16,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { constellationAgentsTable, constellationArtifactsTable } from "@workspace/db/schema";
 import { desc, sql, count, gte, eq } from "drizzle-orm";
-import { isConnected } from "../lib/constellationBridge";
+import { diagnostics, isConnected } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -36,6 +36,7 @@ router.get("/constellation/status", async (_req, res) => {
     bridge: {
       connected: isConnected(),
       natsUrlConfigured: !!process.env["KAX_NATS_URL"],
+      ...diagnostics(),
     },
     counts: {
       agents: agentCount?.n ?? 0,

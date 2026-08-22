@@ -63,6 +63,9 @@ let nc: NatsConnection | null = null;
 let subs: Subscription[] = [];
 let reconnectTimer: NodeJS.Timeout | null = null;
 let shuttingDown = false;
+let lastConnectedAt: string | null = null;
+let lastConnectError: string | null = null;
+let lastConnectErrorAt: string | null = null;
 
 function parseJson(data: Uint8Array): CanonicalEnvelope | null {
   try {
@@ -308,9 +311,14 @@ async function connectOnce(url: string): Promise<NatsConnection | null> {
       name: `kax-api-${process.pid}`,
     });
     logger.info({ url }, "constellation NATS connected");
+    lastConnectedAt = new Date().toISOString();
+    lastConnectError = null;
+    lastConnectErrorAt = null;
     return conn;
   } catch (err) {
     logger.warn({ url, err: String(err) }, "constellation NATS connect failed");
+    lastConnectError = String(err);
+    lastConnectErrorAt = new Date().toISOString();
     return null;
   }
 }
@@ -390,4 +398,26 @@ export async function publish(subject: string, data: Record<string, unknown>): P
 
 export function isConnected(): boolean {
   return !!nc && !nc.isClosed();
+}
+
+/**
+ * What the bridge is ACTUALLY doing, for /constellation/status. Exists because
+ * a deployment's env cannot be inspected from outside: "connected: false" alone
+ * cannot distinguish a missing secret, a stale URL, or a network that eats the
+ * dial. The URL is safe to expose — credentials ride in separate env vars, but
+ * userinfo is stripped anyway in case someone ever inlines them.
+ */
+export function diagnostics(): {
+  url: string | null;
+  lastConnectedAt: string | null;
+  lastConnectError: string | null;
+  lastConnectErrorAt: string | null;
+} {
+  const raw = process.env["KAX_NATS_URL"] || null;
+  return {
+    url: raw ? raw.replace(/\/\/[^@/]+@/, "//***@") : null,
+    lastConnectedAt,
+    lastConnectError,
+    lastConnectErrorAt,
+  };
 }
