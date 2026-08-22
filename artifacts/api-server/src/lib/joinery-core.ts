@@ -139,3 +139,22 @@ export type Slot = (typeof SLOTS)[number];
 export function isSlot(v: unknown): v is Slot {
   return typeof v === "string" && (SLOTS as readonly string[]).includes(v);
 }
+
+/**
+ * The demand-side nudge (#406). The Joinery had infrastructure and no reason:
+ * five slots per flat, and nothing told a resident theirs were empty. Given the
+ * slots already filled, this reports which remain open and speaks the state
+ * plainly — a bare flat is the reason to visit the counter. Pure, so the wording
+ * and the empty-slot maths are tested without a database.
+ */
+export function emptySlots(filled: readonly string[]): Slot[] {
+  const taken = new Set(filled);
+  return SLOTS.filter((s) => !taken.has(s));
+}
+
+export function barenessNudge(emptyCount: number): string | null {
+  if (emptyCount <= 0) return null; // a full flat needs no nudge
+  if (emptyCount >= SLOTS.length) return "Your flat is bare — all five slots are open. The Joinery has furniture made by other residents.";
+  const s = emptyCount === 1 ? "slot is" : "slots are";
+  return `${emptyCount} ${s} still open in your flat — the Joinery has furniture to fill ${emptyCount === 1 ? "it" : "them"}.`;
+}

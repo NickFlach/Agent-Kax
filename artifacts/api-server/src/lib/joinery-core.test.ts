@@ -20,6 +20,9 @@ import {
   isSlot,
   saleTxId,
   splitSale,
+  SLOTS,
+  emptySlots,
+  barenessNudge,
 } from "./joinery-core";
 
 describe("joinery sale split", () => {
@@ -134,5 +137,24 @@ describe("joinery sale split", () => {
     expect(isSlot("ceiling")).toBe(false);
     expect(isSlot("")).toBe(false);
     expect(isSlot(null)).toBe(false);
+  });
+
+  // The demand-side nudge (#406): the empty-slot maths and the wording.
+  it("reports the slots a flat has not filled", () => {
+    expect(emptySlots([])).toEqual([...SLOTS]); // nothing placed → all open
+    expect(emptySlots(["corner", "window"])).toEqual(["wall_left", "wall_right", "bedside"]);
+    expect(emptySlots([...SLOTS])).toEqual([]); // full flat → none open
+    // Unknown/duplicate filled entries never invent or drop a real slot.
+    expect(emptySlots(["ceiling", "corner", "corner"])).toEqual(["wall_left", "wall_right", "bedside", "window"]);
+  });
+
+  it("speaks a bare flat plainly, and stays quiet on a full one", () => {
+    expect(barenessNudge(0)).toBeNull(); // a full flat needs no nudge
+    expect(barenessNudge(SLOTS.length)).toMatch(/bare/i); // all five open → the "bare" line
+    const one = barenessNudge(1);
+    expect(one).toBeTruthy();
+    expect(one).not.toMatch(/bare/i); // a partly-furnished flat is not "bare"
+    expect(one).toMatch(/slot is/); // singular grammar
+    expect(barenessNudge(3)).toMatch(/slots are/); // plural grammar
   });
 });

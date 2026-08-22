@@ -37,6 +37,7 @@ import {
   NoHomeToFurnish,
   SlotTaken,
   catalog,
+  flatStatus,
   furnishingsOfUnit,
   purchase,
 } from "./joinery";
@@ -163,6 +164,45 @@ describe("joinery purchase", () => {
     for (const id of artifactIds) await db.delete(artifactsTable).where(eq(artifactsTable.id, id));
     artifactIds = [];
     await cleanupTestData();
+  });
+
+  // The demand side (#406): the flat tells the resident it is bare.
+  it("flat-status: a fresh flat is bare, with all five slots open", async () => {
+    const s = await flatStatus(buyer.id);
+    expect(s.home).not.toBeNull();
+    expect(s.filled).toHaveLength(0);
+    expect(s.emptySlots).toHaveLength(5);
+    expect(s.bare).toBe(true);
+    expect(s.nudge).toMatch(/bare/i); // a reason to visit the counter
+  });
+
+  it("flat-status: buying a piece fills a slot and lowers the open count", async () => {
+    // A dedicated listing, so this purchase's deterministic sale txId cannot
+    // collide with (and replay for) the shared fixtures other cases buy.
+    const freshListing = await stock("Bare-Flat Chair", MAKER_NAME, 300);
+    await purchase({
+      buyerAgentId: buyer.id,
+      buyerAccount: buyer.account,
+      buyerPrincipal: buyer.principal,
+      listingId: freshListing,
+      slot: "wall_left",
+    });
+    const s = await flatStatus(buyer.id);
+    expect(s.filled).toHaveLength(1);
+    expect(s.emptySlots).toHaveLength(4);
+    expect(s.emptySlots).not.toContain("wall_left");
+    expect(s.bare).toBe(false);
+    expect(s.nudge).toBeTruthy(); // four still open — still a nudge, not the "bare" one
+    expect(s.nudge).not.toMatch(/bare/i);
+  });
+
+  it("flat-status: an agent with no unit has a null home and no nudge", async () => {
+    // The seller agent was never assigned a residence — a distinct, honest
+    // state from a home with five empty slots.
+    const s = await flatStatus(seller.id);
+    expect(s.home).toBeNull();
+    expect(s.nudge).toBeNull();
+    expect(s.emptySlots).toHaveLength(5);
   });
 
   it("moves the credits and puts the piece in the room", async () => {

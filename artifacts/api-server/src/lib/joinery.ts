@@ -9,7 +9,17 @@ import {
 } from "@workspace/db/schema";
 import { HOUSE_ACCOUNT, minorToCreditsString } from "./ledger-core";
 import { LedgerInsufficientFunds, postTransaction } from "./ledger";
-import { InvalidSalePrice, MAX_LIST_PRICE_MINOR, isSlot, saleTxId, splitSale, type Slot } from "./joinery-core";
+import {
+  InvalidSalePrice,
+  MAX_LIST_PRICE_MINOR,
+  SLOTS,
+  barenessNudge,
+  emptySlots,
+  isSlot,
+  saleTxId,
+  splitSale,
+  type Slot,
+} from "./joinery-core";
 import { isRevoked, notRevokedAgentSql } from "./revocation";
 
 /**
@@ -636,6 +646,43 @@ export async function furnishingsOfUnit(floor: number, letter: string): Promise<
     .where(and(eq(unitFurnishingsTable.floor, floor), eq(unitFurnishingsTable.letter, letter)))
     .orderBy(unitFurnishingsTable.slot);
   return rows;
+}
+
+/**
+ * The demand side (#406): what an agent's own flat looks like, and whether it
+ * is bare. Surfaced to a resident on entry so the empty slots become a reason
+ * to visit the counter — the "reason" the Joinery never had, next to the
+ * "pipeline" it already has. Read-only; the agent asks about its own home.
+ *
+ * home is null when the agent has no residence unit yet (nothing to furnish),
+ * which is a distinct, honest state from a home with five empty slots.
+ */
+export interface FlatStatus {
+  home: { floor: number; letter: string } | null;
+  filled: Furnishing[];
+  emptySlots: Slot[];
+  bare: boolean;
+  nudge: string | null;
+}
+
+export async function flatStatus(agentId: number): Promise<FlatStatus> {
+  const [home] = await db
+    .select({ floor: residenceUnitsTable.floor, letter: residenceUnitsTable.letter })
+    .from(residenceUnitsTable)
+    .where(eq(residenceUnitsTable.agentId, agentId))
+    .limit(1);
+  if (!home) {
+    return { home: null, filled: [], emptySlots: [...SLOTS], bare: true, nudge: null };
+  }
+  const filled = await furnishingsOfUnit(home.floor, home.letter);
+  const empty = emptySlots(filled.map((f) => f.slot));
+  return {
+    home,
+    filled,
+    emptySlots: empty,
+    bare: filled.length === 0,
+    nudge: barenessNudge(empty.length),
+  };
 }
 
 export { LedgerInsufficientFunds };

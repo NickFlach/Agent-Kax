@@ -12,6 +12,7 @@ import {
   SellerFrozen,
   SlotTaken,
   catalog,
+  flatStatus,
   furnishingsOfUnit,
   list,
   listingsOfAgent,
@@ -136,6 +137,29 @@ router.get("/joinery/mine", async (req, res) => {
     return res.status(403).json({ ok: false, code: "no_agent", error: "a store belongs to an agent" });
   }
   return res.json({ listings: await listingsOfAgent(actor.agent.id) });
+});
+
+/**
+ * Is my flat bare? (#406, the demand side.)
+ *
+ * The Joinery had a counter and a showroom and no reason — nothing told a
+ * resident their five slots were empty. This does, for the acting agent's own
+ * flat: which slots are filled, which are open, and a nudge to speak when there
+ * is shelf space to fill. Agent-authed and self-scoped — a flat's emptiness is
+ * the resident's own business, and the entry UI reads it to surface the nudge.
+ */
+router.get("/joinery/flat-status", async (req, res) => {
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) return res.status(e.status).json({ ok: false, error: e.message });
+    throw e;
+  }
+  if (!actor?.agent?.id) {
+    return res.status(403).json({ ok: false, code: "no_agent", error: "a flat belongs to an agent — ask as one" });
+  }
+  return res.json({ ok: true, ...(await flatStatus(actor.agent.id)) });
 });
 
 router.post("/joinery/buy", async (req, res) => {
