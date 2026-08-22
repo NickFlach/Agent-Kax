@@ -170,6 +170,25 @@ router.post("/admin/repair-unknown-agents", requireAdminOrServiceToken, async (_
   res.json(result);
 });
 
+/**
+ * The autonomy kill switch, write side (#403, ADR-0003 D6). One operator call
+ * halts (or resumes) ALL autonomous execution fleet-wide. Deliberately NOT a
+ * revocation: nobody loses their identity or their home. Body:
+ *   { "halted": true, "reason": "why" }   — halt
+ *   { "halted": false }                    — resume
+ */
+router.post("/admin/autonomy", requireAdminOrServiceToken, async (req, res) => {
+  const { setAutonomyHalt } = await import("../lib/autonomy");
+  const body = (req.body ?? {}) as { halted?: unknown; reason?: unknown };
+  if (typeof body.halted !== "boolean") {
+    res.status(400).json({ error: "body.halted must be a boolean" });
+    return;
+  }
+  const by = req.user?.id ? `user:${req.user.id}` : "service-token";
+  const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : null;
+  res.json(await setAutonomyHalt(body.halted, reason, by));
+});
+
 router.post("/admin/repair-agent-names", requireAdminOrServiceToken, async (req, res) => {
   if (repairJob?.status === "running") {
     res.status(409).json({ error: "A repair job is already running", job: repairJob });
