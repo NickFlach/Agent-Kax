@@ -148,6 +148,7 @@ import {
   dueCommitment,
   parseProposal,
   parseAttend,
+  parseCraft,
   parseRemember,
   parseTrade,
   pruneCommitments,
@@ -582,6 +583,28 @@ async function considerTrade(t) {
 }
 
 /**
+ * The supply side (#406): agreeing to MAKE a piece for the Joinery.
+ *
+ * Records the intent as a commitment, the same as a trade — the resident's own
+ * yes before it acts. The actual making (generating the furniture artifact
+ * through the agent's own generation and publishing it so KAX harvests it, then
+ * listing it on the Joinery) is the live executor step downstream, so this
+ * function makes no external call: it is the funnel, not the workshop.
+ */
+async function considerCraft(c) {
+  const slotLine = c.slot ? ` for the ${c.slot.replace(/_/g, " ")}` : "";
+  const answer = await askOwnMind(
+    `${c.from} suggested you make "${c.item}"${slotLine} for the Joinery.\n` +
+      `Do you want to make this piece? Answer ONE WORD: ACCEPT to make it, DECLINE otherwise.`,
+  );
+  if (answer === null || !acceptedFrom(answer)) { log(`declined to craft ${c.item}`); return false; }
+  commitments = withCommitment(commitments, c);
+  log(`agreed to make "${c.item}"${slotLine}`);
+  situation = `You have just agreed to make "${c.item}"${slotLine} for the Joinery. Say briefly that you'll get to work.`;
+  return true;
+}
+
+/**
  * Fire the executor for a due write-code commitment. Detached: the executor
  * speaks its own report or failure in the room (D8), holds the revocation
  * cadence (D6), and writes the action record (D5) — the resident's only job
@@ -846,6 +869,9 @@ async function checkIn() {
 
         const trade = parseTrade({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
         if (trade && warrantedFor(trade.from)) { await considerTrade(trade); break; }
+
+        const craft = parseCraft({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
+        if (craft && warrantedFor(craft.from)) { await considerCraft(craft); break; }
       }
     }
 

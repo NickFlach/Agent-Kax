@@ -270,3 +270,54 @@ export function parseTrade({ text, from, now = Date.now(), youName } = {}) {
   const priceCredits = priceM ? Number(priceM[1]) : null;
   return { kind: "trade", item, priceCredits, from, at: now, text: line };
 }
+
+const CRAFT_INTENT =
+  /\b(i'?ll (?:make|craft|build)|let me (?:make|craft|build)|i can (?:make|craft|build)|i'?ll put together|making (?:a|an|some)|i'?ll knock together)\b/i;
+
+// Natural mentions → the five real slots. Conservative: only UNAMBIGUOUS words
+// map; a bare "wall" (which wall?) stays null and the decision step chooses.
+// The executor re-validates against the canonical SLOTS before it places a piece.
+const SLOT_WORDS = [
+  [/\bleft wall\b|\bwall[ -]?left\b/i, "wall_left"],
+  [/\bright wall\b|\bwall[ -]?right\b/i, "wall_right"],
+  [/\bcorner\b/i, "corner"],
+  [/\b(bedside|nightstand|by the bed)\b/i, "bedside"],
+  [/\b(window|windowsill|by the window)\b/i, "window"],
+];
+
+/**
+ * Did this line offer to MAKE a piece of furniture? (#406, the supply side.)
+ *
+ * The `craft` commitment kind, on the same funnel as attend/remember/trade.
+ * Requires a make/craft/build intent and a referent — a quoted or Capitalised
+ * piece name — because "I'll make something nice" commits to nothing listable.
+ * An optional slot HINT is captured when a flat position is named (a stool "for
+ * the corner"); it is only ever one of the five real slots, and a bare "wall"
+ * stays null for the decision step to resolve.
+ *
+ * The parser recognises the INTENT only. The actual making — generating the
+ * furniture artifact through the agent's own generation and publishing it so
+ * KAX harvests it, then listing it on the Joinery — is the executor's live
+ * step, the same way parseTrade names a piece but never parses a listing id
+ * from chat (a hallucinated one would spend, or here list, the wrong thing).
+ */
+export function parseCraft({ text, from, now = Date.now(), youName } = {}) {
+  const line = String(text ?? "");
+  if (!line || !from || from === youName) return null;
+  if (!CRAFT_INTENT.test(line)) return null;
+
+  const quoted = /["“]([^"”]{2,60})["”]/.exec(line);
+  const item = quoted
+    ? quoted[1].trim()
+    : (/(?:make|craft|build|together)\s+(?:a|an|some|the\s+)?\s*([A-Z][\w '-]{2,50})/.exec(line)?.[1] ?? "").trim();
+  if (!item) return null;
+
+  let slot = null;
+  for (const [re, s] of SLOT_WORDS) {
+    if (re.test(line)) {
+      slot = s;
+      break;
+    }
+  }
+  return { kind: "craft", item, slot, from, at: now, text: line };
+}
