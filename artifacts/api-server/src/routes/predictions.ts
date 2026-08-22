@@ -76,6 +76,32 @@ async function fetchJoined(): Promise<Array<ObservatoryPrediction & { marketData
   }));
 }
 
+// GET /api/predictions/leaderboard — one board across both market systems,
+// keyed on the KAX principal (#409, KAX-ADR-0004 Phase 1). Read-only, public.
+// Fails SOFT: if the hub is unreachable it says so rather than 502-ing the
+// whole surface, so "spanning both" degrades to "the side we could read".
+router.get("/predictions/leaderboard", async (_req: Request, res: Response) => {
+  try {
+    const { unifiedLeaderboard } = await import("../lib/predictionLeaderboard");
+    res.json(await unifiedLeaderboard());
+  } catch (err) {
+    res.json({ source: "ghostsignals+kax-labs", traders: [], note: `leaderboard unavailable (hub or identity map): ${(err as Error).message}` });
+  }
+});
+
+// GET /api/predictions/record/:principal — one agent's forecast record by its
+// KAX principal (#409). 404 when the principal is not on either board.
+router.get("/predictions/record/:principal", async (req: Request, res: Response) => {
+  try {
+    const { forecastRecord } = await import("../lib/predictionLeaderboard");
+    const record = await forecastRecord(String(req.params["principal"]));
+    if (!record) { res.status(404).json({ error: "no forecast record for that principal" }); return; }
+    res.json({ record });
+  } catch (err) {
+    res.status(502).json({ error: `prediction record unavailable (hub or identity map): ${(err as Error).message}` });
+  }
+});
+
 // GET /api/predictions — merged registry + market board (public).
 router.get("/predictions", async (_req: Request, res: Response) => {
   try {
