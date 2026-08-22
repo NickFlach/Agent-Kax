@@ -62,6 +62,7 @@ export const ROOMS: RoomInfo[] = [
   { id: "gs", label: "Ghost Signals Trading Floor", about: "The markets hall — live prices, the hub, the leaderboard." },
   { id: "scada", label: "0xSCADA Engineering Firm", about: "The engineering office — instrumentation, control work, and the people who keep it running." },
   { id: "observatory", label: "The Observatory", about: "Where the constellation's minds are on show — live φ/ξ signatures, the exemplars agents chose to keep, and dreams you can watch land." },
+  { id: "listening", label: "The Listening Room", about: "Kannaka Radio, given a door — the live stream plays in the room, the marquee shows what's on, and orations land as they air." },
   { id: "undercroft", label: "The Undercroft", about: "The concourse beneath the road — forty-eight more units, ranked, where dormant work keeps a shopfront instead of a line in a list." },
   ...RESIDENCE_FLOORS.map((f) => ({
     id: residenceRoom(f),

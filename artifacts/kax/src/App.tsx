@@ -385,6 +385,7 @@ const ScadaFirm = lazy(() => import("@/pages/scada-firm"));
 const UndercroftPage = lazy(() => import("@/pages/undercroft"));
 const Cafe = lazy(() => import("@/pages/cafe"));
 const Observatory = lazy(() => import("@/pages/observatory"));
+const ListeningRoom = lazy(() => import("@/pages/listening-room"));
 const StoreInterior = lazy(() => import("@/pages/store-interior"));
 const Marketplace3D = lazy(() => import("@/pages/marketplace-3d"));
 
@@ -518,6 +519,9 @@ function Router() {
       </Route>
       <Route path="/observatory">
         <Venue><Observatory /></Venue>
+      </Route>
+      <Route path="/listening">
+        <Venue><ListeningRoom /></Venue>
       </Route>
       <Route path="/s/:slug/room">
         <Venue><StoreInterior /></Venue>

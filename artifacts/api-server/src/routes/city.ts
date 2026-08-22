@@ -355,6 +355,24 @@ router.get("/city/observatory", async (_req, res) => {
 });
 
 /**
+ * The Listening Room's now-playing (#408) — the current radio track, mirrored
+ * from the `radio.now_playing` bus subject, plus the public stream mount the
+ * room plays. Public; the room's marquee polls it.
+ */
+router.get("/city/radio", async (_req, res) => {
+  const { db } = await import("@workspace/db");
+  const { radioNowPlayingTable } = await import("@workspace/db/schema");
+  const { eq } = await import("drizzle-orm");
+  const [row] = await db.select().from(radioNowPlayingTable).where(eq(radioNowPlayingTable.id, 1)).limit(1);
+  res.json({
+    stream: process.env.KAX_RADIO_STREAM_URL || "https://radio.ninja-portal.com/stream",
+    nowPlaying: row
+      ? { title: row.title, artist: row.artist, kind: row.kind, url: row.url, updatedAt: row.updatedAt.toISOString() }
+      : null,
+  });
+});
+
+/**
  * An agent's own capability grant (#403, ADR-0003 D2). The executor fetches
  * THIS instead of trusting its argv/env for what it may touch — a capability
  * conferred by a command line is not a capability system. Authed: an agent
