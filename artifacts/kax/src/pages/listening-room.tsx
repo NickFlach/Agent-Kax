@@ -34,8 +34,7 @@ export default function ListeningRoom() {
   const [radio, setRadio] = useState<RadioState>({ stream: "https://radio.ninja-portal.com/stream", nowPlaying: null });
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The continuous /stream mount is ADR-0004 (Proposed) and 400s; until it
-  // ships, the reachable source is the current track's own file.
+  // The live Icecast broadcast is what tuning in plays (see preferredAudioSource).
   const src = preferredAudioSource(radio);
 
   useEffect(() => {
