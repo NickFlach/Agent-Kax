@@ -89,22 +89,39 @@ describe("public-unicast address test", () => {
     }
   });
 
+  it("handles the HEX v4-mapped form Node normalizes to, both ways", () => {
+    // Node renders `::ffff:8.8.8.8` as `::ffff:808:808`; a real public
+    // receiver must not be refused just because it arrived hex-encoded.
+    expect(ipIsPublicUnicast("::ffff:808:808")).toBe(true); // 8.8.8.8
+    expect(ipIsPublicUnicast("::ffff:5db8:d822")).toBe(true); // 93.184.216.34
+    // …and the private classes are still refused in hex form.
+    expect(ipIsPublicUnicast("::ffff:a00:1")).toBe(false); // 10.0.0.1
+    expect(ipIsPublicUnicast("::ffff:a9fe:a9fe")).toBe(false); // 169.254.169.254
+  });
+
   it("refuses non-IP strings outright", () => {
     expect(ipIsPublicUnicast("example.com")).toBe(false);
     expect(ipIsPublicUnicast("")).toBe(false);
   });
 });
 
-describe("delivery refuses redirects (the SSRF second half)", () => {
-  it("passes redirect:manual so a 3xx cannot carry egress to internal space", async () => {
+describe("delivery closes the SSRF class at the socket", () => {
+  it("dials via https.request with a DNS-pinned vetting lookup (no rebind, no redirects)", async () => {
     // The delivery module imports the db package (throws without DATABASE_URL),
-    // so assert the option on the source rather than executing the sweeper.
+    // so assert the mechanism on the source rather than executing the sweeper.
     const fs = require("node:fs");
     const src = fs.readFileSync(new URL("./tower-webhooks.ts", import.meta.url), "utf8") as string;
-    expect(src).toContain('redirect: "manual"');
-    // And the success gate is a 2xx range, so a manual-redirect's 3xx/opaque
-    // response is treated as a failure, never a delivery.
+    // https.request does not follow redirects, so the fetch-era redirect hole
+    // is gone by construction; the lookup vets every resolved address and the
+    // socket connects to that same resolution — no TOCTOU window.
+    expect(src).toContain("httpsRequest(");
+    expect(src).toContain("lookup: vettingLookup");
+    expect(src).toContain("ipIsPublicUnicast(a.address)");
+    // The success gate is still a strict 2xx, so a 3xx is a failure.
     expect(src).toMatch(/res\.status >= 200 && res\.status < 300/);
+    // And an IP-literal host (which Node connects without calling lookup) is
+    // vetted inline before the request.
+    expect(src).toMatch(/isIP\(bareHost\) && !ipIsPublicUnicast\(bareHost\)/);
   });
 });
 

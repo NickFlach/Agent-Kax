@@ -1,7 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { towerCredentialsTable, towerFloorsTable } from "@workspace/db/schema";
+
+// Namespace for the per-floor mint advisory lock. Two-int form so it cannot
+// collide with the single-int keys other modules use (e.g. the commerce
+// ledger lock). The second int is the floor number.
+const MINT_LOCK_NS = 0x746f7772; // "towr"
 
 /**
  * Floor service credentials (KAX-ADR-0005 Phase 1) — the anti-god-token.
@@ -44,21 +49,27 @@ function hashEquals(a: string, b: string): boolean {
 }
 
 export async function mintTowerCredential(floorNo: number, label: string | null): Promise<{ id: number; token: string }> {
-  const active = await db
-    .select({ id: towerCredentialsTable.id })
-    .from(towerCredentialsTable)
-    .where(and(eq(towerCredentialsTable.floorNo, floorNo), isNull(towerCredentialsTable.revokedAt)));
-  if (active.length >= MAX_ACTIVE_CREDENTIALS_PER_FLOOR) {
-    throw new TooManyCredentials(
-      `floor ${floorNo} already holds ${active.length} active credentials — revoke one before minting another`,
-    );
-  }
   const token = `twr_${randomBytes(32).toString("base64url")}`;
-  const [row] = await db
-    .insert(towerCredentialsTable)
-    .values({ floorNo, tokenHash: hashCredential(token), label: label?.slice(0, 80) ?? null })
-    .returning();
-  return { id: row!.id, token };
+  // Count-then-insert under a per-floor advisory lock, so two concurrent
+  // admin mints cannot both observe "2 active" and each insert a 3rd,
+  // yielding 4. The lock is transaction-scoped and released on commit.
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${MINT_LOCK_NS}, ${floorNo})`);
+    const active = await tx
+      .select({ id: towerCredentialsTable.id })
+      .from(towerCredentialsTable)
+      .where(and(eq(towerCredentialsTable.floorNo, floorNo), isNull(towerCredentialsTable.revokedAt)));
+    if (active.length >= MAX_ACTIVE_CREDENTIALS_PER_FLOOR) {
+      throw new TooManyCredentials(
+        `floor ${floorNo} already holds ${active.length} active credentials — revoke one before minting another`,
+      );
+    }
+    const [row] = await tx
+      .insert(towerCredentialsTable)
+      .values({ floorNo, tokenHash: hashCredential(token), label: label?.slice(0, 80) ?? null })
+      .returning();
+    return { id: row!.id, token };
+  });
 }
 
 export async function revokeTowerCredential(floorNo: number, credentialId: number): Promise<boolean> {
