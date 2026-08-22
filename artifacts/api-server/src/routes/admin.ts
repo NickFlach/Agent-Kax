@@ -171,6 +171,45 @@ router.post("/admin/repair-unknown-agents", requireAdminOrServiceToken, async (_
 });
 
 /**
+ * Feed a merged-PR outcome to the tier enforcement wrapper (#403, D4/D5) and
+ * evaluate the subject's tier. This is the merge-event ingress — a GitHub
+ * webhook (pull_request.closed, merged) or an operator/poll posts here. The
+ * caller supplies the observable facts; byKind and overlap are derived
+ * SERVER-SIDE from the principal grammar, never trusted from the caller.
+ * Body: { subject, prNumber, repo, mergedBy, reviewedBy?, ciGreen,
+ *         ciCoveredChangedPaths, withinScope, revertedBy?, reverterAllowlist?,
+ *         revertedPaths? }
+ */
+router.post("/admin/tier/merge", requireAdminOrServiceToken, async (req, res) => {
+  const { recordMergeEvidence, evaluateAndApplyTier } = await import("../lib/tierEnforcement");
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : undefined);
+  const numv = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const subject = str(b.subject);
+  const prNumber = numv(b.prNumber);
+  const repo = str(b.repo);
+  const mergedBy = str(b.mergedBy);
+  if (!subject || prNumber === undefined || !repo || !mergedBy ||
+      bool(b.ciGreen) === undefined || bool(b.ciCoveredChangedPaths) === undefined || bool(b.withinScope) === undefined) {
+    res.status(400).json({ error: "subject, prNumber, repo, mergedBy, ciGreen, ciCoveredChangedPaths, withinScope are required" });
+    return;
+  }
+  await recordMergeEvidence({
+    subject, prNumber, repo, mergedBy,
+    reviewedBy: str(b.reviewedBy) ?? null,
+    ciGreen: b.ciGreen as boolean,
+    ciCoveredChangedPaths: b.ciCoveredChangedPaths as boolean,
+    withinScope: b.withinScope as boolean,
+    revertedBy: str(b.revertedBy) ?? null,
+    reverterAllowlist: Array.isArray(b.reverterAllowlist) ? (b.reverterAllowlist as string[]) : [],
+    revertedPaths: Array.isArray(b.revertedPaths) ? (b.revertedPaths as string[]) : [],
+  });
+  const result = await evaluateAndApplyTier(subject);
+  res.json(result);
+});
+
+/**
  * Set or narrow an agent's capability grant (#403, ADR-0003 D2). Operator
  * path: the grant is the authority record, and conferring it here (not via an
  * executor's argv) is the point. Body: { principal, kind, repos?,
