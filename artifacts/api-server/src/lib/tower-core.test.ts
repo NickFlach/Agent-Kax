@@ -1,0 +1,138 @@
+/**
+ * tower-core.test.ts — rent that cannot double-bill, and a wall that cannot
+ * run script.
+ *
+ * The two invariants worth a test file: the billing txId is deterministic per
+ * (floor, period) so the scheduler's discipline is the ledger's idempotency,
+ * not a cron's carefulness; and the panel is a typed schema whose every
+ * escape hatch (markup, control chars, off-allowlist hosts, lookalike
+ * domains, non-https) is closed at validation, because whatever passes here
+ * ends up in front of a visitor's browser wearing the city's origin.
+ */
+
+import { describe, expect, it } from "vitest";
+import { TOWER_FLOOR_NOS, parseTowerRoom, towerRoom } from "./rooms";
+import {
+  InvalidRent,
+  isLeasableTowerFloor,
+  leaseTxId,
+  periodKeyUTC,
+  rentDueForPeriod,
+  validatePanel,
+} from "./tower-core";
+
+describe("storeys and rooms", () => {
+  it("mirrors the residences' floor count: ten leasable storeys, 2-11", () => {
+    expect(TOWER_FLOOR_NOS).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    for (const f of TOWER_FLOOR_NOS) expect(isLeasableTowerFloor(f)).toBe(true);
+    // The ground floor is the trading-floor lobby, not a leasable row; there
+    // is no penthouse to argue about.
+    expect(isLeasableTowerFloor(1)).toBe(false);
+    expect(isLeasableTowerFloor(12)).toBe(false);
+  });
+
+  it("room ids round-trip through the one definition", () => {
+    expect(towerRoom(7)).toBe("tower:7");
+    expect(parseTowerRoom("tower:7")).toEqual({ floorNo: 7 });
+    expect(parseTowerRoom("tower:11")).toEqual({ floorNo: 11 });
+    expect(parseTowerRoom("tower:1")).toBeNull();
+    expect(parseTowerRoom("tower:12")).toBeNull();
+    expect(parseTowerRoom("tower:7:A")).toBeNull();
+    expect(parseTowerRoom("residences:7")).toBeNull();
+  });
+});
+
+describe("rent", () => {
+  it("txId is deterministic per floor and period", () => {
+    expect(leaseTxId(4, "2026-09")).toBe("lease:tower:4:2026-09");
+    expect(leaseTxId(4, "2026-09")).toBe(leaseTxId(4, "2026-09"));
+    expect(leaseTxId(5, "2026-09")).not.toBe(leaseTxId(4, "2026-09"));
+  });
+
+  it("period keys are UTC calendar months", () => {
+    expect(periodKeyUTC(new Date(Date.UTC(2026, 8, 1)))).toBe("2026-09");
+    // 23:30 on Aug 31 in UTC is still August, whatever the local clock says.
+    expect(periodKeyUTC(new Date(Date.UTC(2026, 7, 31, 23, 30)))).toBe("2026-08");
+  });
+
+  it("a lease from an earlier period owes full rent", () => {
+    const rent = 25_000_000n; // 25 credits
+    const started = new Date(Date.UTC(2026, 7, 10));
+    const now = new Date(Date.UTC(2026, 8, 3));
+    expect(rentDueForPeriod(rent, started, now)).toBe(rent);
+  });
+
+  it("a mid-period start prorates by day, start day counted, never zero", () => {
+    const rent = 31_000_000n; // 31 credits over a 31-day month = 1cr/day
+    // Started Aug 22 → 10 days remain of 31 (22nd counted).
+    const started = new Date(Date.UTC(2026, 7, 22, 15, 0));
+    const due = rentDueForPeriod(rent, started, new Date(Date.UTC(2026, 7, 25)));
+    expect(due).toBe(10_000_000n);
+    // Started on the month's last day: one day's share, rounded up, not zero.
+    const lastDay = new Date(Date.UTC(2026, 7, 31, 12, 0));
+    const lastDue = rentDueForPeriod(25_000_000n, lastDay, new Date(Date.UTC(2026, 7, 31, 13, 0)));
+    expect(lastDue).toBe((25_000_000n + 30n) / 31n);
+    expect(lastDue > 0n).toBe(true);
+  });
+
+  it("proration never exceeds a full period's rent", () => {
+    const rent = 999_999n; // awkward: not divisible by anything friendly
+    for (let day = 1; day <= 28; day++) {
+      const started = new Date(Date.UTC(2026, 1, day)); // Feb 2026: 28 days
+      const due = rentDueForPeriod(rent, started, new Date(Date.UTC(2026, 1, 28)));
+      expect(due <= rent).toBe(true);
+      expect(due > 0n).toBe(true);
+    }
+    // A first-of-month start is a full month, exactly.
+    expect(rentDueForPeriod(rent, new Date(Date.UTC(2026, 1, 1)), new Date(Date.UTC(2026, 1, 2)))).toBe(rent);
+  });
+
+  it("refuses a free or negative lease", () => {
+    const now = new Date(Date.UTC(2026, 8, 1));
+    expect(() => rentDueForPeriod(0n, now, now)).toThrow(InvalidRent);
+    expect(() => rentDueForPeriod(-5n, now, now)).toThrow(InvalidRent);
+  });
+});
+
+describe("the panel — a typed wall, not a document", () => {
+  it("accepts a bounded, well-formed panel", () => {
+    const r = validatePanel({
+      headline: "Waveline Recruiting",
+      lines: ["Agents placed: 14", "Open roles: 3"],
+      stats: [{ label: "placements", value: "14" }],
+      assetUrl: "https://cdn.ninja-portal.com/logo.png",
+      ctaRoomId: "gs",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.panel.headline).toBe("Waveline Recruiting");
+  });
+
+  it("refuses unknown fields — no smuggling a document past the schema", () => {
+    const r = validatePanel({ headline: "x", html: "<script>alert(1)</script>" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("strips control characters and refuses empties and oversizes", () => {
+    const ok = validatePanel({ headline: "clean \u0000\u001b[31mtext" });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.panel.headline).toBe("clean [31mtext");
+    const bidi = validatePanel({ headline: "pay\u202egnp.exe" });
+    if (bidi.ok) expect(bidi.panel.headline).toBe("paygnp.exe");
+    expect(validatePanel({ headline: "\u0000\u0001" }).ok).toBe(false);
+    expect(validatePanel({ headline: "x".repeat(121) }).ok).toBe(false);
+    expect(validatePanel({ lines: new Array(7).fill("x") }).ok).toBe(false);
+    expect(validatePanel({}).ok).toBe(false);
+  });
+
+  it("asset hosts: allowlist on a dot boundary, https only", () => {
+    expect(validatePanel({ assetUrl: "https://x.supabase.co/a.png" }).ok).toBe(true);
+    // Lookalikes fail both ways around.
+    expect(validatePanel({ assetUrl: "https://evil-supabase.co/a.png" }).ok).toBe(false);
+    expect(validatePanel({ assetUrl: "https://supabase.co.attacker.example/a.png" }).ok).toBe(false);
+    // The bare suffix host itself is not an allowlisted origin.
+    expect(validatePanel({ assetUrl: "https://supabase.co/a.png" }).ok).toBe(false);
+    expect(validatePanel({ assetUrl: "http://x.supabase.co/a.png" }).ok).toBe(false);
+    expect(validatePanel({ assetUrl: "javascript:alert(1)" }).ok).toBe(false);
+    expect(validatePanel({ assetUrl: "not a url" }).ok).toBe(false);
+  });
+});

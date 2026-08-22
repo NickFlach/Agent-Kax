@@ -22,6 +22,7 @@ export * from "./tier-enforcement";
 export * from "./observatory";
 export * from "./radio";
 export * from "./artifact-consent";
+export * from "./tower";
 export * from "./furnishings";
 export * from "./purchasing";
 export * from "./commerce";

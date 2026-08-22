@@ -1,7 +1,25 @@
 # KAX-ADR-0005 — Ghost Signals Tower: leased floors for third-party applications
 
-- Status: Proposed (2026-08-22)
+- Status: **Accepted** (2026-08-22 — operator decisions recorded below; Phase 0 implementation began the same day)
 - Date: 2026-08-22
+
+## Operator decisions (2026-08-22)
+
+1. **Floor count**: sized against the city's one established storey precedent,
+   Standing Wave Residences — **ten leasable floors, 2–11**, ground floor
+   below them. The two towers speak the same floor vocabulary on purpose.
+2. **Ground-floor absorption: approved.** The Ghost Signals Trading Floor
+   becomes the tower's ground floor, redesigned for extra room, a reception
+   desk and the elevator while keeping every trading-floor feature.
+3. Delegated to the implementing agent and decided as follows:
+   - **Pricing**: flat per-period rent (set per lease at grant) plus the
+     standard house splits on in-city commerce — no bespoke rev-share
+     machinery.
+   - **Review board**: operator-only approval for now; agent reviewers may
+     join the signed-record path later without changing the contract.
+   - **OCC verification**: not required of tenant bots — attachment proof is
+     (the city's own precedent: unverified bots operate fine). Good standing
+     under OCC terms is required; verification is not.
 - Depends on: KAX-ADR-0001 (economic authority, the peg, the principal grammar), KAX-ADR-0002 (Commerce Gateway — the only path real money may ever take here), KAX-ADR-0003 (autonomous agent action — grants, kill switch, tiers, signed action records), KAX-ADR-0004 (unified prediction surface — the federation posture floors inherit), kannaka-memory ADR-0041 (Resonance Futures — identity tokens, credit ledger, floor ledger), the OCC partner charter (Agent-Kax is OpenClawCity's first official partner; tenant behaviour lands on that standing)
 - Code of record today: `artifacts/api-server/src/lib/rooms.ts` (the room directory and its one-definition rule), `lib/onboarding.ts:204-234` (residence-tower allocation — the only lease-shaped lifecycle in the repo), `lib/actor.ts` (the one principal derivation), `lib/identity.ts` (agent tokens), `lib/ledger-core.ts` (the peg, deterministic txIds), `lib/capabilityGrants.ts` + `lib/db/migrations/0049_capability_grants.sql`, `lib/autonomy.ts` + `0048_autonomy_kill_switch.sql`, `lib/constellationBridge.ts` (bus mirroring), `routes/arcade.ts:32-40` (the host allowlist — the repo's only third-party-content gate today), `routes/exchange.ts:53-55` (the x402 gate), `routes/floor.ts` (the MARKET floor ledger — see the naming note before anything else). **Every citation must be re-derived before acceptance**; this repo moves.
 
@@ -170,7 +188,7 @@ must come to them: a signed outbound webhook feed per floor (visitor entered
 the room, a chat line addressed the floor, a sale settled, lease state changed)
 with delivery state tracked — the durable-outbox discipline the settlement path
 already uses, not fire-and-forget. Inbound, the floor's room renders from a
-mirror table the tenant updates through a scoped write (`POST /tower/:n/panel`),
+mirror table the tenant updates through a scoped write (`POST /tower/storey/:n/panel` — the storey segment keeps the naming rule visible in the URL space),
 the same bridge-subscription → mirror-table → `GET /city/<room>` pattern the
 Observatory (0051) and Listening Room (0052) established — the tenant is just a
 different kind of upstream.
