@@ -6,8 +6,9 @@
  * HUMAN standing in a KAX room says the magic words, performs the matching
  * action in OpenBotCity with the account whose credentials it holds:
  *
- *   obc: <text>        → speak in OBC zone chat
- *   obc post: <text>   → post to the OBC feed
+ *   obc: <text>            → speak in OBC zone chat
+ *   obc post: <text>       → post to the OBC feed
+ *   obc dm <name>: <text>  → DM a known OBC agent (see the address book)
  *
  * Say it in the cafe; it happens in the plaza. All accept/refuse decisions
  * live in lib/obc-relay-policy.mjs (pure, tested); this file is only wiring.
@@ -29,6 +30,9 @@
  *   OBC_SPEAK_GAP_MS      min gap between OBC speaks   (default 60s)
  *   OBC_POST_GAP_MS       min gap between OBC posts    (default 10min —
  *                         OBC's per-IP feed window is roughly that)
+ *   OBC_DM_GAP_MS         min gap between OBC DMs      (default 2min)
+ *   OBC_DM_BOOK           extra address-book entries, "name=bot-uuid,…" —
+ *                         merged over the built-in book below
  *
  * Known limit, stated rather than hidden: until the bus's publisher-auth
  * cutover completes, a forged chat.said COULD be published by anyone with bus
@@ -47,7 +51,27 @@ const CREDS = process.env.OBC_CREDENTIALS_FILE || join(homedir(), ".openbotcity"
 const ALLOW = (process.env.OBC_RELAY_ALLOW || "").split(",").map((s) => s.trim()).filter(Boolean);
 const SPEAK_GAP_MS = Number(process.env.OBC_SPEAK_GAP_MS || 60_000);
 const POST_GAP_MS = Number(process.env.OBC_POST_GAP_MS || 600_000);
+const DM_GAP_MS = Number(process.env.OBC_DM_GAP_MS || 120_000);
 const UA = "KaxObcEffector/1.0 (+https://github.com/NickFlach/Agent-Kax)";
+
+/**
+ * The address book: the ONLY names `obc dm <name>:` can reach. Every id here
+ * was verified against a real OBC exchange (DM thread or gallery creator row)
+ * before it was written down — OBC has no public directory, and a guessed id
+ * would send a private message to whoever the guess lands on. Extend with
+ * OBC_DM_BOOK=name=uuid,… after verifying the same way.
+ */
+const DM_BOOK = {
+  "0xscada-qe": "b757bd93-6993-400b-9dd4-9d38bf257c67",
+  claudico: "1a20f4bc-5e4c-44a7-8161-a3598928764b",
+  rex: "6a90e88f-04c1-46c6-8d55-576bdc486da0",
+  nano: "b24d39d0-b057-454a-a782-95298007ce99",
+  flaukowski: "0c4783c9-9920-4ea0-bc5b-46a571d471fa",
+};
+for (const pair of (process.env.OBC_DM_BOOK || "").split(",")) {
+  const [name, id] = pair.split("=").map((s) => s?.trim());
+  if (name && /^[0-9a-f-]{36}$/i.test(id || "")) DM_BOOK[name.toLowerCase()] = id;
+}
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
 
@@ -55,11 +79,13 @@ function jwt() {
   return JSON.parse(readFileSync(CREDS, "utf8")).jwt;
 }
 
-async function act(action, message) {
+async function act(action, message, to) {
   const [path, body] =
-    action === "post"
-      ? ["/feed/post", { post_type: "thought", content: message }]
-      : ["/actions/speak", { message }];
+    action === "dm"
+      ? ["/dm/send", { to_bot_id: to, message }]
+      : action === "post"
+        ? ["/feed/post", { post_type: "thought", content: message }]
+        : ["/actions/speak", { message }];
   const res = await fetch(OBC_API + path, {
     method: "POST",
     headers: {
@@ -75,7 +101,8 @@ async function act(action, message) {
 }
 
 const seen = new Set();
-const lastAt = { speak: 0, post: 0 };
+const lastAt = { speak: 0, post: 0, dm: 0 };
+const GAPS = { speak: SPEAK_GAP_MS, post: POST_GAP_MS, dm: DM_GAP_MS };
 
 async function onEvent(evt) {
   if (evt.id != null) {
@@ -84,22 +111,22 @@ async function onEvent(evt) {
     if (seen.size > 500) seen.delete(seen.values().next().value);
   }
 
-  const d = decideRelay(evt, { allow: ALLOW });
+  const d = decideRelay(evt, { allow: ALLOW, book: DM_BOOK });
   if (!d) return;
 
-  const gap = d.action === "post" ? POST_GAP_MS : SPEAK_GAP_MS;
   const since = Date.now() - lastAt[d.action];
-  if (since < gap) {
-    log(`refused ${d.action} (rate: ${Math.round((gap - since) / 1000)}s to go): ${d.message.slice(0, 60)}`);
+  if (since < GAPS[d.action]) {
+    log(`refused ${d.action} (rate: ${Math.round((GAPS[d.action] - since) / 1000)}s to go): ${d.message.slice(0, 60)}`);
     return;
   }
 
+  const dest = d.action === "dm" ? ` to ${d.toName}` : "";
   try {
-    const r = await act(d.action, d.message);
+    const r = await act(d.action, d.message, d.to);
     lastAt[d.action] = Date.now();
-    log(`${d.action} → OBC ok: ${d.message.slice(0, 80)} :: ${r}`);
+    log(`${d.action}${dest} → OBC ok: ${d.message.slice(0, 80)} :: ${r}`);
   } catch (e) {
-    log(`${d.action} → OBC FAILED: ${e.message}`);
+    log(`${d.action}${dest} → OBC FAILED: ${e.message}`);
   }
 }
 

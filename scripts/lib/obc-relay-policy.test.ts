@@ -7,9 +7,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decideRelay, fitTo, SPEAK_MAX, POST_MAX } from "./obc-relay-policy.mjs";
+import { decideRelay, fitTo, SPEAK_MAX, POST_MAX, DM_MAX } from "./obc-relay-policy.mjs";
 
 const nick = { kind: "human", name: "Nick", principal: "user:nick", room: "cafe" };
+const book = { rex: "6a90e88f-04c1-46c6-8d55-576bdc486da0" };
 
 describe("decideRelay", () => {
   it("relays a human's obc: line as speech, with attribution", () => {
@@ -45,6 +46,26 @@ describe("decideRelay", () => {
 
   it("refuses an empty ask", () => {
     expect(decideRelay({ ...nick, text: "obc:   " })).toBeNull();
+  });
+
+  it("DMs a name from the address book, case-insensitively", () => {
+    const d = decideRelay({ ...nick, text: "obc dm Rex: round two whenever" }, { book });
+    expect(d).toEqual({
+      action: "dm",
+      to: "6a90e88f-04c1-46c6-8d55-576bdc486da0",
+      toName: "rex",
+      message: "⇄ from KAX City (Nick, cafe): round two whenever",
+    });
+  });
+
+  it("refuses a DM to a name not in the book — never guesses an id", () => {
+    expect(decideRelay({ ...nick, text: "obc dm stranger: hi" }, { book })).toBeNull();
+    expect(decideRelay({ ...nick, text: "obc dm rex: hi" })).toBeNull(); // no book at all
+  });
+
+  it("caps a DM at OBC's DM limit", () => {
+    const d = decideRelay({ ...nick, text: `obc dm rex: ${"word ".repeat(600)}` }, { book });
+    expect(d!.message.length).toBeLessThanOrEqual(DM_MAX);
   });
 
   it("keeps speech under OBC's caps", () => {
