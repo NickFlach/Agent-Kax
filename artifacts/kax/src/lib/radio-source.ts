@@ -1,22 +1,18 @@
 /**
- * Which URL the Listening Room should actually try to play.
+ * Which URL the Listening Room should play.
  *
- * The room was built against a single continuous Icecast mount at
- * `radio.ninja-portal.com/stream` — but that is kannaka-radio's ADR-0004
- * (Stream-Native Broadcast), whose status is **Proposed**, not deployed. The
- * shipped default therefore 400s, which is why "tune in" did nothing. Today's
- * radio serves each track as its own file and pushes now-playing metadata; the
- * current track's `url` IS reachable.
+ * The room plays the continuous Icecast broadcast at
+ * `radio.ninja-portal.com/stream` (or wherever `KAX_RADIO_STREAM_URL` points).
+ * That mount is LIVE — it answers a GET with `200 audio/mpeg` and streams. (An
+ * earlier read of it as "down" came from probing with HTTP HEAD, which Icecast
+ * answers 400 by convention while serving GET fine; the browser's `<audio>`
+ * does a GET.) So the stream is authoritative: it is what a listener tunes into,
+ * and `nowPlaying.url` is only the current track's file, kept for the marquee.
  *
- * So: if an operator has pointed `KAX_RADIO_STREAM_URL` at a real mount, the
- * stream differs from the dead default and we use it (the design, once it
- * ships). Otherwise we fall back to the current track's own file, so the button
- * makes sound instead of hitting a 400. When neither is available there is
- * nothing to play, and the caller says so rather than spinning.
+ * The stream is preferred whenever present. The per-track file is a pure
+ * fallback for the degenerate case where no stream URL is configured at all, so
+ * the button still has something to try rather than nothing.
  */
-
-/** The shipped default that is not actually served (ADR-0004 is Proposed). */
-export const UNDEPLOYED_STREAM_DEFAULT = "https://radio.ninja-portal.com/stream";
 
 export interface RadioSourceInput {
   stream: string;
@@ -25,9 +21,7 @@ export interface RadioSourceInput {
 
 export function preferredAudioSource(r: RadioSourceInput): string | null {
   const stream = (r.stream ?? "").trim();
-  // A stream that is not the known-dead default has been configured on purpose.
-  if (stream && stream !== UNDEPLOYED_STREAM_DEFAULT) return stream;
+  if (stream) return stream; // the live continuous broadcast — what "tune in" means
   const track = r.nowPlaying?.url?.trim();
-  if (track) return track;
-  return stream || null;
+  return track || null; // no stream configured: fall back to the current track's file
 }
