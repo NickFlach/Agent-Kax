@@ -383,8 +383,13 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
             // consecutive failures in this type — that's a real
             // upstream problem, not a one-off bad event.
             logger.error({ err, eventUuid: ev.event_uuid, eventType: ev.event_type }, "Replay handler failed — skipping event");
-            cursor = ev.event_uuid;
-            await recordEventCursor(cursor, eventType).catch(() => {});
+            // Skip-the-bad-event must not also skip the hold: once an earlier
+            // event of this type deferred, persisting this failure's uuid
+            // would jump the saved cursor past the deferred event (#418).
+            if (!deferred) {
+              cursor = ev.event_uuid;
+              await recordEventCursor(cursor, eventType).catch(() => {});
+            }
             consecutiveFailures++;
             if (consecutiveFailures >= 5) {
               logger.warn({ eventType, consecutiveFailures }, "5 consecutive replay failures — skipping rest of this event type");
@@ -394,6 +399,13 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
         }
 
         if (!page.next_cursor) break;
+        // The end-of-page advance must honour the hold too. This write used to
+        // run unconditionally, so any FULL page containing a deferral still
+        // persisted next_cursor and the deferred event was skipped for good —
+        // the exact loss the per-event hold above exists to prevent (#418).
+        // Stop paging instead: everything past this page is still in the
+        // partner stream and is re-offered next run from the held cursor.
+        if (deferred) break;
         cursor = page.next_cursor;
         await recordEventCursor(cursor, eventType);
       }

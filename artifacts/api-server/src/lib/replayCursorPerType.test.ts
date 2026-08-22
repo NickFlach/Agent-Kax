@@ -113,6 +113,33 @@ describe("per-type replay cursor (#67)", () => {
     });
   });
 
+  describe("the deferral hold survives page boundaries and failures (#418)", () => {
+    it("does not persist next_cursor once an event of this type has deferred", () => {
+      // The per-event hold was only half the fix: the end-of-page advance ran
+      // unconditionally, so any FULL page containing a deferral still wrote
+      // next_cursor and the deferred event was skipped permanently.
+      const pageAdvance = BODY.indexOf("if (!page.next_cursor) break;");
+      expect(pageAdvance).toBeGreaterThanOrEqual(0);
+      const hold = BODY.indexOf("if (deferred) break;", pageAdvance);
+      const advance = BODY.indexOf("cursor = page.next_cursor;", pageAdvance);
+      expect(hold, "end-of-page advance no longer honours the deferral hold").toBeGreaterThanOrEqual(0);
+      expect(advance).toBeGreaterThanOrEqual(0);
+      expect(hold, "the hold must run before next_cursor is persisted").toBeLessThan(advance);
+    });
+
+    it("does not persist a failed event's uuid once an event of this type has deferred", () => {
+      // Same loss through the error path: skip-the-bad-event advanced the
+      // cursor even when an earlier event of the type was being held.
+      const failAt = BODY.indexOf("Replay handler failed");
+      expect(failAt).toBeGreaterThanOrEqual(0);
+      const guard = BODY.indexOf("if (!deferred)", failAt);
+      const persist = BODY.indexOf("recordEventCursor(cursor, eventType).catch", failAt);
+      expect(guard, "catch path persists the cursor with no deferral guard").toBeGreaterThanOrEqual(0);
+      expect(persist).toBeGreaterThanOrEqual(0);
+      expect(guard, "the guard must wrap the persist").toBeLessThan(persist);
+    });
+  });
+
   describe("the writer", () => {
     const fn = CLIENT.slice(
       CLIENT.indexOf("export async function recordEventCursor"),
