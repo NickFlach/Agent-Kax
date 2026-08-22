@@ -236,9 +236,35 @@ export const VENUE_SHELLS = {
   // — and that squareness is itself asserted, so it cannot quietly stop being
   // true.
   undercroft: { size: [3, 2.8, 3], rotationY: Math.PI / 2, label: "The Undercroft" },
+  // The two constellation windows (#407, #408). They shipped as pages the
+  // directory board NAMED but the street had no door to — no shell here, no
+  // building in the scene. Added on the outer lane (x = ±17.6, the lane 0xSCADA
+  // proved clear of the storefront grid and the alleys), mounted like their
+  // side's neighbours: the Observatory on the left at +PI/2, the Listening Room
+  // on the right at -PI/2. Positions live below so the scene and the overlap
+  // test read the same coordinates.
+  observatory: { size: [8, 7, 8], rotationY: Math.PI / 2, label: "The Observatory" },
+  listening: { size: [8.5, 6.5, 7], rotationY: -Math.PI / 2, label: "The Listening Room" },
 } as const satisfies Record<string, { size: readonly [number, number, number]; rotationY: number; label: string }>;
 
 export type VenueKey = keyof typeof VENUE_SHELLS;
+
+/**
+ * Where the two constellation venues stand. On the OUTBOARD lane — far enough
+ * out (|x| ≈ 22) that their inner edge clears the plaza flanks entirely.
+ *
+ * The plaza flanks (Arcade/Bank at x = ±PLAZA_FLANK_X) walk UP the street when
+ * there are few storefronts — `plazaZFor` tracks the store count — so a venue
+ * that merely cleared them in Z at a full city would be inside the Bank at load
+ * time (n=0, plazaZ=-14.5) and in any sparse city. Clearing them in X instead
+ * is independent of the store count: the plaza never leaves x = ±12.5, so a
+ * venue whose inner edge is outboard of the flank's outer edge is safe at every
+ * n. `city-layout.test.ts` asserts both that X-clearance and non-overlap with
+ * the fixed neighbours, so a blind edit that drifts one in fails there rather
+ * than in a screenshot.
+ */
+export const OBSERVATORY_POS: readonly [number, number, number] = [-22, STREET_SHOP_Y, -8.5];
+export const LISTENING_POS: readonly [number, number, number] = [21.6, STREET_SHOP_Y, -18.5];
 
 /** The footprint of one venue, derived from its own geometry and rotation. */
 export function venueFootprint(key: VenueKey): Footprint {

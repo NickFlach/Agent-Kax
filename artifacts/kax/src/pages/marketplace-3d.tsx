@@ -32,7 +32,7 @@ import {
 import "./marketplace-3d.css";
 import { DISPLAY_FONT } from "@/lib/fonts";
 import { storefrontWindowCard } from "@/lib/storefront-window";
-import { streetDepthFor, monumentZFor, plazaZFor, PLAZA_FLANK_X, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS } from "@/lib/city-layout";
+import { streetDepthFor, monumentZFor, plazaZFor, PLAZA_FLANK_X, venueFootprint, layoutFor, MAX_STREET_STOREFRONTS, OBSERVATORY_POS, LISTENING_POS } from "@/lib/city-layout";
 import { streetMouthsFor, streetReturnSpawn } from "@/lib/undercroft";
 import { DirectoryBoard, useCityRooms, BOARD_FOOTPRINT } from "@/components/directory-board";
 
@@ -1103,6 +1103,101 @@ function ScadaVenue({ position, rotation, onEnter }: { position: [number, number
 }
 
 /**
+ * THE OBSERVATORY (#407) — a domed hall on the outer lane. Its door leads to
+ * `/observatory`, where the constellation's minds are on show. Shell size is
+ * declared once in `lib/city-layout.ts`; the collision footprint is DERIVED
+ * from it, and `city-layout.test.ts` asserts this exact `<boxGeometry>` and the
+ * mount rotation match that shell — so the door you see and the wall you hit
+ * cannot drift apart.
+ */
+function ObservatoryVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[8, 7, 8]} />
+        <meshStandardMaterial map={upperWindowsTexture({ wall: "stucco", variant: 1, floors: 2, cols: 4, litSeed: 47 })} roughness={0.9} />
+      </mesh>
+      {/* The dome — what says observatory from across the street. */}
+      <mesh position={[0, 7.1, 0]} castShadow>
+        <sphereGeometry args={[3, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#241a38" metalness={0.3} roughness={0.5} emissive="#6a4aa0" emissiveIntensity={0.18} />
+      </mesh>
+      {/* The dome slit, faintly lit, where the eye looks out. */}
+      <mesh position={[0, 7.9, 0.05]}>
+        <boxGeometry args={[0.35, 3, 0.12]} />
+        <meshStandardMaterial color="#bfa8ff" emissive="#bfa8ff" emissiveIntensity={0.5} />
+      </mesh>
+      {/* Door */}
+      <mesh position={[0, 1.2, 4.03]}>
+        <boxGeometry args={[1.5, 2.4, 0.1]} />
+        <meshStandardMaterial color="#2a2438" roughness={0.6} metalness={0.2} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 5.0, 4.05]} fontSize={0.4} color="#d8c8ff" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.08}>
+          OBSERVATORY
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 2.8, 5.0]} intensity={9} distance={9} color="#c8b0ff" />
+    </group>
+  );
+}
+
+/**
+ * THE LISTENING ROOM (#408) — Kannaka Radio, given a door on the street. Leads
+ * to `/listening`, where the live stream plays and orations land. Same shell
+ * discipline as every other venue: geometry here, footprint derived, both
+ * pinned by `city-layout.test.ts`.
+ */
+function ListeningRoomVenue({ position, rotation, onEnter }: { position: [number, number, number]; rotation: number; onEnter: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onEnter();
+  };
+  return (
+    <group
+      position={position}
+      rotation={[0, rotation, 0]}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      <mesh position={[0, 3.25, 0]} castShadow receiveShadow>
+        <boxGeometry args={[8.5, 6.5, 7]} />
+        <meshStandardMaterial map={upperWindowsTexture({ wall: "brick", variant: 3, floors: 2, cols: 4, litSeed: 53 })} roughness={0.88} />
+      </mesh>
+      {/* The marquee band, lit like a venue front. */}
+      <mesh position={[0, 5.1, 3.56]}>
+        <boxGeometry args={[6.6, 0.9, 0.14]} />
+        <meshStandardMaterial color="#241531" emissive="#ff6ab0" emissiveIntensity={0.5} roughness={0.5} />
+      </mesh>
+      {/* Door */}
+      <mesh position={[0, 1.2, 3.55]}>
+        <boxGeometry args={[1.6, 2.4, 0.1]} />
+        <meshStandardMaterial color="#2a1a34" roughness={0.6} metalness={0.2} />
+      </mesh>
+      <Suspense fallback={null}>
+        <Text position={[0, 5.1, 3.64]} fontSize={0.3} color="#ffd0ec" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.12}>
+          KANNAKA RADIO
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 2.6, 4.4]} intensity={10} distance={9} color="#ff9ad2" />
+    </group>
+  );
+}
+
+/**
  * A way down into the Undercroft — the ramp head, and the sign that says so.
  *
  * TWO OF THESE, in the service alleys at x = ±11, near each end of the strip.
@@ -1439,6 +1534,8 @@ export default function Marketplace3D() {
       { cx: 12.5, cz: 3, ...venueFootprint("residences") }, // Standing Wave Residences
       { cx: -12.5, cz: 3, ...venueFootprint("joinery") }, // The Joinery
       { cx: 17.6, cz: -8.5, ...venueFootprint("scada") }, // 0xSCADA Engineering Firm
+      { cx: OBSERVATORY_POS[0], cz: OBSERVATORY_POS[2], ...venueFootprint("observatory") }, // The Observatory (#407)
+      { cx: LISTENING_POS[0], cz: LISTENING_POS[2], ...venueFootprint("listening") }, // The Listening Room (#408)
       { cx: -17.6, cz: -18.4, hx: 3.9, hz: 3.3 }, // Flaukowski's No. 2, off the first cross street
       // The two ways down. Placed in the service alleys, where nothing else
       // is — see UndercroftMouth. No vertical band on either: they are
@@ -1912,6 +2009,11 @@ export default function Marketplace3D() {
         <ResidencesTower position={[12.5, 0.12, 3]} rotation={-Math.PI / 2} onEnter={() => navigate("/residences")} />
         <JoineryVenue position={[-12.5, 0.12, 3]} rotation={Math.PI / 2} onEnter={() => navigate("/furniture")} />
         <ScadaVenue position={[17.6, 0.12, -8.5]} rotation={-Math.PI / 2} onEnter={() => navigate("/scada")} />
+        {/* The two constellation windows (#407, #408), on the outer lane. Their
+            positions live in lib/city-layout.ts so the collision list and the
+            overlap test read the same coordinates the buildings stand at. */}
+        <ObservatoryVenue position={[OBSERVATORY_POS[0], OBSERVATORY_POS[1], OBSERVATORY_POS[2]]} rotation={Math.PI / 2} onEnter={() => navigate("/observatory")} />
+        <ListeningRoomVenue position={[LISTENING_POS[0], LISTENING_POS[1], LISTENING_POS[2]]} rotation={-Math.PI / 2} onEnter={() => navigate("/listening")} />
         {/* The two ways down. Facing the street from each alley — the west one
             first, which is the mount `city-layout.test.ts` reads the rotation
             of. Its shell is square in plan, so the mirrored east mount cannot
