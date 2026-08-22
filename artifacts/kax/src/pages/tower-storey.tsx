@@ -71,7 +71,7 @@ export default function TowerStorey() {
     return (
       <div className="h-screen w-full bg-[#0a0f0d] flex flex-col items-center justify-center gap-4">
         <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">The elevator does not stop there.</p>
-        <Link href="/gs" className="text-primary uppercase tracking-[0.3em] text-xs">← back to the trading floor</Link>
+        <Link href="/gs/floor" className="text-primary uppercase tracking-[0.3em] text-xs">← back to the trading floor</Link>
       </div>
     );
   }
@@ -79,7 +79,7 @@ export default function TowerStorey() {
   return (
     <div className="relative h-screen w-full bg-[#0a0f0d] overflow-hidden kax3d-font">
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none">
-        <Link href="/gs" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80" data-testid="link-back-lobby">
+        <Link href="/gs/floor" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80" data-testid="link-back-lobby">
           ← Lobby
         </Link>
         <span className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Ghost Signals Tower · floor {n}</span>
