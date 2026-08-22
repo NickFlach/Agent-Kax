@@ -18,6 +18,7 @@ export * from "./residences";
 export * from "./city";
 export * from "./autonomy";
 export * from "./capability-grants";
+export * from "./tier-enforcement";
 export * from "./furnishings";
 export * from "./purchasing";
 export * from "./commerce";
