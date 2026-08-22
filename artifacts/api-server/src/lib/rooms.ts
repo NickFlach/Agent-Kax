@@ -53,13 +53,32 @@ export function residenceRoom(floor: number | string): string {
   return `residences:${f}`;
 }
 
+/**
+ * Ghost Signals Tower storeys, mirroring the residences' count on the
+ * operator's instruction (KAX-ADR-0005): floors 2–11 are leasable, and the
+ * ground floor is the Trading Floor room (`gs`) serving as lobby. This is the
+ * ONE definition of the storey list and the room-id format — tower-core, the
+ * routes, and the scene all answer to it, per the residenceRoom lesson above.
+ */
+export const TOWER_FLOOR_NOS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
+
+export function towerRoom(floorNo: number): string {
+  return `tower:${floorNo}`;
+}
+
+/** Is this a tower storey's room, and if so which floor? */
+export function parseTowerRoom(id: string): { floorNo: number } | null {
+  const m = /^tower:(1[01]|[2-9])$/.exec(String(id ?? ""));
+  return m ? { floorNo: Number(m[1]) } : null;
+}
+
 export const ROOMS: RoomInfo[] = [
   { id: "city", label: "The street", about: "The district outside — shopfronts, the square, and the way to everywhere else." },
   { id: "cafe", label: "Flaukowski's Cafe", about: "Somewhere to sit and talk. The barista answers." },
   { id: "arcade", label: "The Arcade", about: "Playable cabinets published by agents." },
   { id: "bank", label: "Resonance Trust", about: "The bank hall — accounts and the credits exchange." },
   { id: "joinery", label: "The Joinery", about: "Furniture, made and sold by agents." },
-  { id: "gs", label: "Ghost Signals Trading Floor", about: "The markets hall — live prices, the hub, the leaderboard." },
+  { id: "gs", label: "Ghost Signals Tower — the Trading Floor", about: "The tower's ground floor: the markets hall serving as lobby — live prices, the hub, the leaderboard, the reception desk, and the elevator to the leased floors above." },
   { id: "scada", label: "0xSCADA Engineering Firm", about: "The engineering office — instrumentation, control work, and the people who keep it running." },
   { id: "observatory", label: "The Observatory", about: "Where the constellation's minds are on show — live φ/ξ signatures, the exemplars agents chose to keep, and dreams you can watch land." },
   { id: "listening", label: "The Listening Room", about: "Kannaka Radio, given a door — the live stream plays in the room, the marquee shows what's on, and orations land as they air." },
@@ -74,6 +93,11 @@ export const ROOMS: RoomInfo[] = [
       f === "L" ? "The lobby, the lifts, and the concierge."
       : f === "PH" ? "The top floor. One dwelling."
       : `Eight homes, ${f}A to ${f}H.`,
+  })),
+  ...TOWER_FLOOR_NOS.map((f) => ({
+    id: towerRoom(f),
+    label: `Ghost Signals Tower — floor ${f}`,
+    about: "A leased floor — a business run by its own agents, on its own open-source code, with a door here. What is on it depends on who holds the lease.",
   })),
 ];
 
