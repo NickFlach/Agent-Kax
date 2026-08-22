@@ -147,11 +147,14 @@ import {
   acceptedFrom,
   dueCommitment,
   parseProposal,
+  parseAttend,
+  parseRemember,
+  parseTrade,
   pruneCommitments,
   withCommitment,
 } from "./lib/commitments.mjs";
 import { parseWorkAsk, scopeCheck } from "./lib/executor-core.mjs";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join as pathJoin } from "node:path";
 
@@ -255,6 +258,18 @@ async function call(method, path, body) {
   } catch (e) {
     return { status: 0, json: null, text: String(e?.cause?.code ?? e?.message ?? e) };
   }
+}
+
+/** Thin read/write helpers over `call` for the commitment executors (#411). */
+async function kaxGet(path) {
+  const r = await call("GET", path);
+  if (r.status < 200 || r.status >= 300) throw new Error(`GET ${path} -> ${r.status}: ${(r.text || "").slice(0, 80)}`);
+  return r.json;
+}
+async function kaxPost(path, body) {
+  const r = await call("POST", path, body);
+  if (r.status < 200 || r.status >= 300) throw new Error(`POST ${path} -> ${r.status}: ${(r.text || "").slice(0, 80)}`);
+  return r.json;
 }
 
 /** When does this token die? Read from the JWT rather than assuming 15 minutes. */
@@ -517,6 +532,56 @@ async function considerWorkAsk(ask) {
 }
 
 /**
+ * attend — an event at a venue and time. No decision cost worth a recall: an
+ * explicit invitation to be somewhere at a stated hour is kept the same way a
+ * meeting is, so it is accepted directly (the room will see whether the agent
+ * shows). Kept for symmetry with the funnel; the executor is meet's.
+ */
+function considerAttend(a) {
+  commitments = withCommitment(commitments, a);
+  log(`agreed to attend ${a.from}'s event in ${a.room} at ${new Date(a.at).toTimeString().slice(0, 5)}`);
+  situation = `You have just agreed to attend ${a.from}'s event in the ${a.room}. Say so briefly.`;
+  return true;
+}
+
+/**
+ * remember — keep a line into the agent's OWN memory. Due immediately, so
+ * there is no "decide then keep later"; the agent's mind is asked whether the
+ * thing is worth holding (it can decline noise), and if so it commits and the
+ * keep-handler files it this same tick.
+ */
+async function considerRemember(r) {
+  const answer = await askOwnMind(
+    `${r.from} asked you to remember this: "${r.note}"
+` +
+      `Is it worth keeping in your own memory? Answer ONE WORD: ACCEPT to keep it, DECLINE if it is noise.`,
+  );
+  if (answer === null || !acceptedFrom(answer)) { log(`declined to remember from ${r.from}`); return false; }
+  commitments = withCommitment(commitments, r);
+  return true;
+}
+
+/**
+ * trade — buy a named piece. Money moves, so the agent's own mind confirms
+ * (and, once ADR-0001 policy is enforced on the joinery buy path, that bounds
+ * it too). Accepting commits; the keep-handler resolves the listing by name
+ * and settles through the ledger.
+ */
+async function considerTrade(t) {
+  const priceLine = t.priceCredits != null ? ` for ${t.priceCredits} credits` : "";
+  const answer = await askOwnMind(
+    `${t.from} offered to have you buy "${t.item}"${priceLine} through the Joinery.
+` +
+      `Do you want to make this purchase? Answer ONE WORD: ACCEPT to buy, DECLINE otherwise.`,
+  );
+  if (answer === null || !acceptedFrom(answer)) { log(`declined trade for ${t.item}`); return false; }
+  commitments = withCommitment(commitments, t);
+  log(`agreed to buy "${t.item}"${priceLine}`);
+  situation = `You have just agreed to buy "${t.item}"${priceLine}. Say briefly that you'll settle it.`;
+  return true;
+}
+
+/**
  * Fire the executor for a due write-code commitment. Detached: the executor
  * speaks its own report or failure in the room (D8), holds the revocation
  * cadence (D6), and writes the action record (D5) — the resident's only job
@@ -551,17 +616,80 @@ async function keepPromises(you) {
     launchExecutor(due);
     return;
   }
+  if (due.kind === "remember") { await keepRemember(due); return; }
+  if (due.kind === "trade") { await keepTrade(due); return; }
 
+  // meet AND attend both resolve to "be in the room at the time"; the only
+  // difference is what the agent says on arrival.
+  const reason = due.kind === "attend"
+    ? `for ${due.from}'s event`
+    : `to meet ${due.from}`;
   if (due.room === currentRoom) {
-    situation = `You are in the ${due.room} to meet ${due.from}, as you agreed. Say you are here.`;
+    situation = `You are in the ${due.room} ${reason}, as you agreed. Say you are here.`;
     owedReply = true;
     return;
   }
-  log(`keeping a promise — leaving ${currentRoom} for ${due.room}`);
+  log(`keeping a ${due.kind} promise — leaving ${currentRoom} for ${due.room}`);
   if (await enter(due.room)) {
     // Arriving somewhere and saying nothing is how a meeting is missed by both
     // parties standing in the same room.
-    situation = `You have just walked into the ${due.room} to meet ${due.from}, as you agreed. Say you have arrived.`;
+    situation = `You have just walked into the ${due.room} ${reason}, as you agreed. Say you have arrived.`;
+    owedReply = true;
+  }
+}
+
+/**
+ * remember — fold the noted line into the agent's OWN HRM, with city
+ * provenance. Delegated to the `kannaka` binary when one is configured
+ * (KANNAKA_BIN); the resident is the mouth, the memory lives where the HRM
+ * does. If no binary is reachable, say so rather than pretend it was kept.
+ */
+async function keepRemember(due) {
+  const bin = process.env.KANNAKA_BIN;
+  if (!bin) {
+    situation = `You agreed to remember something but have no way to reach your own memory from here. Say briefly that you'll hold it in mind but can't file it right now.`;
+    owedReply = true;
+    return;
+  }
+  try {
+    const note = `[from KAX City, ${due.from}] ${due.note}`;
+    execFileSync(bin, ["remember", note, "--importance", "0.7"], { encoding: "utf8", timeout: 60_000 });
+    log(`remembered for ${due.from}: ${due.note.slice(0, 60)}`);
+    situation = `You have just kept what ${due.from} asked you to remember. Say briefly that it's held.`;
+    owedReply = true;
+  } catch (e) {
+    log(`remember failed: ${e.message}`);
+    situation = `You tried to remember what ${due.from} asked but your memory was unreachable. Say so briefly.`;
+    owedReply = true;
+  }
+}
+
+/**
+ * trade — buy a named Joinery piece at the agreed price, both principals
+ * named, through the credit ledger. Resolves the listing by the item NAME
+ * against the catalog (never a chat-supplied id), then buys. A trade moves
+ * money, so this only runs after the agent's own mind confirmed in
+ * considerTrade. When the Joinery has no matching stock (its catalog is empty
+ * until #406 seeds it), it says so instead of buying the wrong thing.
+ */
+async function keepTrade(due) {
+  try {
+    const catalog = await kaxGet(`/joinery/catalog`);
+    const items = catalog?.items ?? [];
+    const want = due.item.toLowerCase();
+    const hit = items.find((it) => String(it.title ?? "").toLowerCase().includes(want));
+    if (!hit) {
+      situation = `You agreed to buy "${due.item}" but the Joinery has nothing matching it right now. Say so briefly.`;
+      owedReply = true;
+      return;
+    }
+    const r = await kaxPost(`/joinery/buy`, { listing_id: hit.id });
+    log(`bought ${hit.title} (${hit.id}) for ${due.from}`);
+    situation = `You have just bought "${hit.title}" through the Joinery${r?.txId ? ` (ledger tx ${r.txId})` : ""}. Say briefly that the trade settled.`;
+    owedReply = true;
+  } catch (e) {
+    log(`trade failed: ${e.message}`);
+    situation = `You tried to buy "${due.item}" but the trade did not go through: ${String(e.message).slice(0, 80)}. Say so briefly.`;
     owedReply = true;
   }
 }
@@ -703,6 +831,21 @@ async function checkIn() {
           await considerWorkAsk(workAsk);
           break; // one decision per tick here too
         }
+        // The rest of the verbs (#411), same warrant rule: a peer's ask counts
+        // only while a human is around. `warranted` is false for a peer line
+        // outside the human-grace window, true otherwise.
+        const warrantedFor = (from) =>
+          !peerNames.includes(from) ||
+          conversationIsWarranted({ lastHumanHeardAt, replyingToPeer: true });
+
+        const attend = parseAttend({ text: line.text, from: line.from, rooms: cityRooms, youName: you.name ?? AGENT_ID });
+        if (attend && warrantedFor(attend.from)) { considerAttend(attend); break; }
+
+        const remember = parseRemember({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
+        if (remember && warrantedFor(remember.from)) { await considerRemember(remember); break; }
+
+        const trade = parseTrade({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
+        if (trade && warrantedFor(trade.from)) { await considerTrade(trade); break; }
       }
     }
 
