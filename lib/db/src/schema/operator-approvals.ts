@@ -39,7 +39,10 @@ export const operatorApprovalsTable = pgTable(
     executed: boolean("executed").notNull().default(false),
     executionError: text("execution_error"),
     executionAttempts: integer("execution_attempts").notNull().default(0),
+    // next_execute_at = backoff schedule; lease_until = a runner holds it now.
+    // Distinct so manual retry never collides with an in-flight attempt.
     nextExecuteAt: timestamp("next_execute_at"),
+    leaseUntil: timestamp("lease_until"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

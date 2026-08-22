@@ -45,12 +45,12 @@ async function fetchApprovals(status: string): Promise<Approval[]> {
   return body.approvals ?? [];
 }
 
-/** Decided rows whose side-effect (grant / air / refund) has not run yet. The
- *  auto-sweeper retries these; this surfaces them so a stuck refund is visible,
- *  with a manual re-drive. */
+/** Decided rows whose side-effect (grant / air / refund) has not run yet — a
+ *  precise server query, so an old stuck item isn't missed behind the capped
+ *  "all" page. The auto-sweeper retries these; this surfaces them with a
+ *  manual re-drive. */
 async function fetchNeedsAction(): Promise<Approval[]> {
-  const all = await fetchApprovals("all");
-  return all.filter((a) => (a.status === "approved" || a.status === "rejected") && a.executed === false);
+  return fetchApprovals("needs_action");
 }
 
 export function ApprovalsPanel() {

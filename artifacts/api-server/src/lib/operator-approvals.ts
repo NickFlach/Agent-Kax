@@ -1,10 +1,12 @@
-import { and, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { operatorApprovalsTable, usersTable, type OperatorApproval } from "@workspace/db/schema";
 import { sendNotificationEmail } from "./notify";
 import { logger } from "./logger";
 import {
+  assertRequiredHandlers,
   getApprovalHandler,
+  isHandlerRequiredKind,
   isValidDecision,
   type ApprovalDecision,
   type ApprovalRow,
@@ -116,10 +118,21 @@ async function notifyOperators(kind: string, title: string): Promise<void> {
   }
 }
 
-export async function listApprovals(status: "pending" | "approved" | "rejected" | "all" = "pending", limit = 100): Promise<OperatorApproval[]> {
-  const q = db.select().from(operatorApprovalsTable).orderBy(desc(operatorApprovalsTable.id)).limit(Math.min(limit, 200));
-  if (status === "all") return await q;
-  return await q.where(eq(operatorApprovalsTable.status, status));
+export type ListStatus = "pending" | "approved" | "rejected" | "all" | "needs_action";
+
+export async function listApprovals(status: ListStatus = "pending", limit = 100): Promise<OperatorApproval[]> {
+  const base = db.select().from(operatorApprovalsTable).orderBy(desc(operatorApprovalsTable.id)).limit(Math.min(limit, 200));
+  // "needs_action" = decided but its side-effect hasn't run — the queue the
+  // dashboard surfaces for a stuck refund/go-live. A precise server query, not
+  // a client-side filter over a capped "all" page (which could miss an old one).
+  if (status === "needs_action") {
+    return await base.where(and(
+      inArray(operatorApprovalsTable.status, ["approved", "rejected"]),
+      eq(operatorApprovalsTable.executed, false),
+    ));
+  }
+  if (status === "all") return await base;
+  return await base.where(eq(operatorApprovalsTable.status, status));
 }
 
 export interface DecideResult {
@@ -152,7 +165,7 @@ export async function decideApproval(
   // reclaims. No decided row can strand.
   const [row] = await db
     .update(operatorApprovalsTable)
-    .set({ status: decision, decidedBy: decidedBy.slice(0, 200), decisionNote: note?.slice(0, 2000) ?? null, decidedAt: new Date(), nextExecuteAt: new Date(), updatedAt: new Date() })
+    .set({ status: decision, decidedBy: decidedBy.slice(0, 200), decisionNote: note?.slice(0, 2000) ?? null, decidedAt: new Date(), nextExecuteAt: new Date(), leaseUntil: null, updatedAt: new Date() })
     .where(and(eq(operatorApprovalsTable.id, id), eq(operatorApprovalsTable.status, "pending")))
     .returning();
 
@@ -180,29 +193,34 @@ function executeBackoffMs(attempts: number): number {
 }
 
 /** How long a claim holds a row before the sweeper may reclaim it — the bound
- *  on how long a crashed runner strands its row. */
+ *  on how long a crashed runner strands its row. Handlers MUST finish well
+ *  inside this (a Stripe call with a bounded client timeout does); a handler
+ *  slower than the lease would be reclaimed and double-run. */
 const EXECUTION_LEASE_MS = 5 * 60_000;
 
 /**
  * Atomically claim a decided-but-unexecuted row for a single runner, by
- * leasing next_execute_at forward. Only a row that is due — never attempted
- * (null), backoff elapsed, or a prior claim's lease expired (crashed runner)
- * — is claimable, and exactly one caller wins the conditional UPDATE. Returns
- * the claimed row or null (already executed, or held by another runner).
+ * setting lease_until forward. Claimable only when the row is DUE (backoff
+ * elapsed or never attempted) AND not currently leased (no live runner, or a
+ * prior lease expired = crashed runner). Exactly one caller wins the
+ * conditional UPDATE; a concurrent claimer re-evaluates against the committed
+ * lease and matches 0 rows. Returns the claimed row or null.
  */
 async function claimForExecution(id: number, now: Date = new Date()): Promise<OperatorApproval | null> {
   const [claimed] = await db
     .update(operatorApprovalsTable)
-    .set({ nextExecuteAt: new Date(now.getTime() + EXECUTION_LEASE_MS), updatedAt: now })
+    .set({ leaseUntil: new Date(now.getTime() + EXECUTION_LEASE_MS), updatedAt: now })
     .where(and(
       eq(operatorApprovalsTable.id, id),
       eq(operatorApprovalsTable.executed, false),
       inArray(operatorApprovalsTable.status, ["approved", "rejected"]),
       or(isNull(operatorApprovalsTable.nextExecuteAt), lte(operatorApprovalsTable.nextExecuteAt, now)),
+      or(isNull(operatorApprovalsTable.leaseUntil), lte(operatorApprovalsTable.leaseUntil, now)),
     ))
     .returning();
   return claimed ?? null;
 }
+
 
 /**
  * Run the kind's handler for a CLAIMED row and persist the outcome. The
@@ -220,9 +238,18 @@ async function runHandler(row: OperatorApproval): Promise<{ executed: boolean; e
   const handler = getApprovalHandler(row.kind);
   const fn = row.status === "approved" ? handler?.onApprove : handler?.onReject;
   if (!fn) {
+    // A money kind with no registered handler is NOT "done" — silently marking
+    // it executed would record a refund/go-live that never happened (a missed
+    // import or load-order bug becomes silent money loss). Keep it unexecuted
+    // and retrying so it stays visible until the handler is present. A
+    // non-money kind (or one whose handler legitimately omits this decision's
+    // side) genuinely has nothing to run.
+    if (isHandlerRequiredKind(row.kind)) {
+      return await recordFailure(row, `no handler registered for money kind "${row.kind}"`);
+    }
     await db
       .update(operatorApprovalsTable)
-      .set({ executed: true, executionError: null, nextExecuteAt: null, updatedAt: new Date() })
+      .set({ executed: true, executionError: null, nextExecuteAt: null, leaseUntil: null, updatedAt: new Date() })
       .where(eq(operatorApprovalsTable.id, row.id));
     return { executed: true, executionError: null };
   }
@@ -233,25 +260,31 @@ async function runHandler(row: OperatorApproval): Promise<{ executed: boolean; e
     await fn(approval);
     await db
       .update(operatorApprovalsTable)
-      .set({ executed: true, executionError: null, nextExecuteAt: null, updatedAt: new Date() })
+      .set({ executed: true, executionError: null, nextExecuteAt: null, leaseUntil: null, updatedAt: new Date() })
       .where(eq(operatorApprovalsTable.id, row.id));
     return { executed: true, executionError: null };
   } catch (e) {
     const msg = String((e as Error)?.message ?? e).slice(0, 500);
-    const attempts = row.executionAttempts + 1;
-    logger.error({ err: e, id: row.id, kind: row.kind, status: row.status, attempts }, "operator-approval handler failed (decision stands; will retry)");
-    await db
-      .update(operatorApprovalsTable)
-      .set({
-        executed: false,
-        executionError: msg,
-        executionAttempts: attempts,
-        nextExecuteAt: new Date(Date.now() + executeBackoffMs(attempts)),
-        updatedAt: new Date(),
-      })
-      .where(eq(operatorApprovalsTable.id, row.id));
-    return { executed: false, executionError: msg };
+    logger.error({ err: e, id: row.id, kind: row.kind, status: row.status }, "operator-approval handler failed (decision stands; will retry)");
+    return await recordFailure(row, msg);
   }
+}
+
+/** Requeue a failed/unrunnable row with a backoff and release its lease. */
+async function recordFailure(row: OperatorApproval, msg: string): Promise<{ executed: false; executionError: string }> {
+  const attempts = row.executionAttempts + 1;
+  await db
+    .update(operatorApprovalsTable)
+    .set({
+      executed: false,
+      executionError: msg.slice(0, 500),
+      executionAttempts: attempts,
+      nextExecuteAt: new Date(Date.now() + executeBackoffMs(attempts)),
+      leaseUntil: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(operatorApprovalsTable.id, row.id));
+  return { executed: false, executionError: msg.slice(0, 500) };
 }
 
 /**
@@ -262,31 +295,30 @@ async function runHandler(row: OperatorApproval): Promise<{ executed: boolean; e
  * idempotency covers the rest.
  */
 export async function reExecuteApproval(id: number): Promise<DecideResult> {
-  // Force due (bypass the backoff wait) if the row is genuinely waiting to
-  // retry — but only when it's NOT inside an active lease, so a manual click
-  // can't race a runner mid-attempt. "Waiting to retry" = executed=false,
-  // decided, next_execute_at in the future beyond a fresh lease would be...
-  // simplest: make it due, then go through the same claim path. If a runner
-  // holds an active lease, the claim below will lose and report in-flight.
+  const now = new Date();
+  // Force the backoff wait to end NOW, but only for a row that is NOT currently
+  // leased by a live runner (lease_until null or expired). Because lease_until
+  // is separate from next_execute_at, this cleanly distinguishes "waiting on a
+  // backoff" (force-drivable, any distance out) from "a runner has it right
+  // now" (must not be yanked) — closing both the double-run and the
+  // short-backoff no-op the single-field version had.
   await db
     .update(operatorApprovalsTable)
-    .set({ nextExecuteAt: new Date(), updatedAt: new Date() })
+    .set({ nextExecuteAt: now, updatedAt: now })
     .where(and(
       eq(operatorApprovalsTable.id, id),
       eq(operatorApprovalsTable.executed, false),
       inArray(operatorApprovalsTable.status, ["approved", "rejected"]),
-      // don't yank a lease that was set within the last few seconds by a live
-      // runner: only force-due a row whose next attempt is more than one poll
-      // interval out (a real backoff wait), never one just claimed.
-      gt(operatorApprovalsTable.nextExecuteAt, new Date(Date.now() + 65_000)),
+      or(isNull(operatorApprovalsTable.leaseUntil), lte(operatorApprovalsTable.leaseUntil, now)),
     ));
-  const claimed = await claimForExecution(id);
+  const claimed = await claimForExecution(id, now);
   if (!claimed) {
     const [existing] = await db.select().from(operatorApprovalsTable).where(eq(operatorApprovalsTable.id, id)).limit(1);
     if (!existing) throw new ApprovalNotFound(`approval ${id} not found`);
     if (existing.status === "pending") throw new ApprovalAlreadyDecided("pending");
     if (existing.executed) throw new AlreadyExecuted(`approval ${id} already executed`);
-    throw new ExecutionInFlight(`approval ${id} is being re-driven — try again shortly`);
+    // Not executed, not claimable → a live runner holds the lease right now.
+    throw new ExecutionInFlight(`approval ${id} is being run right now — it will finish or retry on its own`);
   }
   const out = await runHandler(claimed);
   return { id, decision: claimed.status as ApprovalDecision, executed: out.executed, executionError: out.executionError };
@@ -326,6 +358,9 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startApprovalExecutionSweeper(): void {
   if (sweepTimer) return;
+  // Fail loud at boot if a money kind lost its handler (missed import /
+  // load-order) — better a crash than silently marking refunds "done".
+  assertRequiredHandlers();
   sweepTimer = setInterval(() => {
     sweepUnexecutedApprovals().catch((e) => logger.warn({ err: e }, "approval execution sweep failed"));
   }, 60_000);

@@ -27,8 +27,8 @@ const router: IRouter = Router();
 
 router.get("/admin/approvals", requireAdmin, async (req, res) => {
   const raw = String(req.query.status ?? "pending");
-  const status = (["pending", "approved", "rejected", "all"].includes(raw) ? raw : "pending") as
-    "pending" | "approved" | "rejected" | "all";
+  const status = (["pending", "approved", "rejected", "all", "needs_action"].includes(raw) ? raw : "pending") as
+    "pending" | "approved" | "rejected" | "all" | "needs_action";
   const approvals = await listApprovals(status);
   res.json({ ok: true, status, approvals });
 });

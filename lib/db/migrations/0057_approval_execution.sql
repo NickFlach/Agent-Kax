@@ -7,7 +7,12 @@
 ALTER TABLE operator_approvals ADD COLUMN IF NOT EXISTS executed boolean NOT NULL DEFAULT false;
 ALTER TABLE operator_approvals ADD COLUMN IF NOT EXISTS execution_error text;
 ALTER TABLE operator_approvals ADD COLUMN IF NOT EXISTS execution_attempts integer NOT NULL DEFAULT 0;
+-- next_execute_at = the backoff SCHEDULE (when a retry becomes eligible).
+-- lease_until = a runner currently HOLDS this row (set on claim, cleared on
+-- completion). Kept distinct so a manual "retry now" can tell a genuine
+-- backoff-wait (force-drivable) from an in-flight attempt (must not be yanked).
 ALTER TABLE operator_approvals ADD COLUMN IF NOT EXISTS next_execute_at timestamp;
+ALTER TABLE operator_approvals ADD COLUMN IF NOT EXISTS lease_until timestamp;
 
 -- Pre-existing rows were decided under the old code with no handlers, so their
 -- action (if any) already ran inline or there was none — mark them executed so
