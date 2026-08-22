@@ -171,6 +171,40 @@ router.post("/admin/repair-unknown-agents", requireAdminOrServiceToken, async (_
 });
 
 /**
+ * Set or narrow an agent's capability grant (#403, ADR-0003 D2). Operator
+ * path: the grant is the authority record, and conferring it here (not via an
+ * executor's argv) is the point. Body: { principal, kind, repos?,
+ * pathAllowlist?, branchPrefix?, actionsPerWindow?, windowSeconds?, tier?,
+ * enabled? }. Tier is normally the enforcement wrapper's to move; accepted
+ * here for the initial seed / an operator override.
+ */
+router.post("/admin/grants", requireAdminOrServiceToken, async (req, res) => {
+  const { setGrant } = await import("../lib/capabilityGrants");
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof body.principal !== "string" || typeof body.kind !== "string") {
+    res.status(400).json({ error: "principal and kind are required strings" });
+    return;
+  }
+  const arr = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : undefined;
+  const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const by = req.user?.id ? `user:${req.user.id}` : "service-token";
+  const grant = await setGrant({
+    principal: body.principal,
+    kind: body.kind,
+    repos: arr(body.repos),
+    pathAllowlist: arr(body.pathAllowlist),
+    branchPrefix: typeof body.branchPrefix === "string" ? body.branchPrefix : undefined,
+    actionsPerWindow: num(body.actionsPerWindow),
+    windowSeconds: num(body.windowSeconds),
+    tier: num(body.tier),
+    enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+    updatedBy: by,
+  });
+  res.json({ grant });
+});
+
+/**
  * The autonomy kill switch, write side (#403, ADR-0003 D6). One operator call
  * halts (or resumes) ALL autonomous execution fleet-wide. Deliberately NOT a
  * revocation: nobody loses their identity or their home. Body:

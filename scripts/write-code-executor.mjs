@@ -231,6 +231,39 @@ async function askMind(agentId, prompt) {
   }
 }
 
+/**
+ * The agent's server-side capability grant (#403, D2). Shapes it into what
+ * executor-core's scopeCheck expects: { repos, branchPrefix, ... }. On any
+ * failure to read it, fall back to the env grant (local dev / offline) and say
+ * so in the log — never silently widen to "no restriction".
+ */
+async function fetchGrant(kind, agentId) {
+  const envGrant = {
+    repos: (process.env.EXECUTOR_REPOS || "").split(",").map((s) => s.trim()).filter(Boolean),
+    branchPrefix: process.env.EXECUTOR_BRANCH_PREFIX || `agent/${agentId.toLowerCase()}`,
+  };
+  const token = kaxToken();
+  if (!token) return envGrant;
+  try {
+    const res = await fetch(`${KAX_API}/city/grant?kind=${encodeURIComponent(kind)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) { log(`grant endpoint ${res.status} — using env grant`); return envGrant; }
+    const { grant } = await res.json();
+    if (!grant) return { repos: [], branchPrefix: envGrant.branchPrefix }; // no grant = no capability
+    return {
+      repos: grant.repos ?? [],
+      branchPrefix: grant.branchPrefix || envGrant.branchPrefix,
+      actionsPerWindow: grant.actionsPerWindow,
+      windowMs: grant.windowSeconds ? grant.windowSeconds * 1000 : undefined,
+      tier: grant.tier,
+    };
+  } catch (e) {
+    log(`grant endpoint unreachable (${e.message}) — using env grant`);
+    return envGrant;
+  }
+}
+
 // --------------------------------------------------------------------------
 // run — the stages, in order, with the cadence and the ceiling held.
 // --------------------------------------------------------------------------
@@ -248,10 +281,12 @@ async function run() {
     process.exit(2);
   }
 
-  const grant = {
-    repos: (process.env.EXECUTOR_REPOS || "").split(",").map((s) => s.trim()).filter(Boolean),
-    branchPrefix: process.env.EXECUTOR_BRANCH_PREFIX || `agent/${agentId.toLowerCase()}`,
-  };
+  // SCOPE comes from the SERVER-SIDE grant (#403, D2): a capability conferred
+  // by an executor's own argv/env is not a capability system. Fetch the
+  // agent's own grant (authed — the server derives the principal from the
+  // token, never from us). Env stays only as a local-dev / offline fallback
+  // when the grant endpoint is unavailable, and is announced in the log.
+  const grant = await fetchGrant("write-code", agentId);
 
   // SCOPE: refused out loud, before anything touches a disk or a lock.
   const scope = scopeCheck(commitment, grant);
@@ -295,7 +330,12 @@ async function run() {
     // BUDGET counts ATTEMPTS, not just successful pushes — a run that fails at
     // clone/edit/test still spends API + mind calls, so it must deplete the
     // window too. Record the attempt now (write-ahead of the whole action).
-    const gate = budgetGate(runs.filter((r) => r.phase === "attempt").map((r) => r.at), Date.now());
+    const gate = budgetGate(
+      runs.filter((r) => r.phase === "attempt").map((r) => r.at),
+      Date.now(),
+      // Budget from the grant (#403, D7) when it carries one; else the defaults.
+      { actionsPerWindow: grant.actionsPerWindow, windowMs: grant.windowMs },
+    );
     if (!gate.ok) { await speak(gate.say); releaseLock(); process.exit(1); }
     logRun({ phase: "attempt", commitmentId: commitment.id, principal });
 

@@ -8,6 +8,7 @@ import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import { historySince, record as recordChatHistory, RETENTION_STATEMENT } from "../lib/roomChatHistory";
 import { autonomyStatus } from "../lib/autonomy";
+import { getGrant } from "../lib/capabilityGrants";
 
 const router: IRouter = Router();
 
@@ -340,6 +341,22 @@ router.get("/city/room/:room/history", async (req, res) => {
  */
 router.get("/city/autonomy", async (_req, res) => {
   res.json(await autonomyStatus());
+});
+
+/**
+ * An agent's own capability grant (#403, ADR-0003 D2). The executor fetches
+ * THIS instead of trusting its argv/env for what it may touch — a capability
+ * conferred by a command line is not a capability system. Authed: an agent
+ * only ever reads its OWN grant (the principal comes from the token, never a
+ * query param). `?kind=write-code` selects the kind; missing/disabled = no
+ * grant (fail closed), reported as `{ grant: null }`.
+ */
+router.get("/city/grant", async (req, res) => {
+  const actor = await actorOr401(req, res);
+  if (!actor) return;
+  const kind = typeof req.query["kind"] === "string" ? req.query["kind"] : "write-code";
+  const grant = await getGrant(actor.principal, kind);
+  res.json({ principal: actor.principal, kind, grant });
 });
 
 export default router;
