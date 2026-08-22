@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import {
   towerFloorsTable,
   towerLeasesTable,
+  towerFloorEventsTable,
   type TowerFloor,
   type TowerLease,
 } from "@workspace/db/schema";
@@ -17,6 +18,9 @@ import {
   type TowerPanel,
 } from "./tower-core";
 import { isKnownRoom, parseUnitRoom, towerRoom } from "./rooms";
+import { recordDecision } from "./authority";
+import { enqueueTowerEvent, newWebhookSecret, validateWebhookUrl } from "./tower-webhooks";
+import { randomUUID } from "node:crypto";
 
 /**
  * Ghost Signals Tower, operating (KAX-ADR-0005).
@@ -126,6 +130,8 @@ export async function grantTowerLease(input: {
   label: string;
   repoUrl: string;
   rentMinor: bigint;
+  /** Who authorized this — the operator's principal (ADR-0003 Phase-1 debt paid). */
+  actor: string;
 }): Promise<{ floorNo: number; leaseId: number }> {
   const { floorNo } = input;
   if (!isLeasableTowerFloor(floorNo)) throw new TowerFloorNotFound(`floor ${floorNo} is not a leasable storey (2-11)`);
@@ -141,7 +147,7 @@ export async function grantTowerLease(input: {
   if (f.status !== "vacant") throw new TowerFloorUnavailable(`floor ${floorNo} is ${f.status}, not vacant`);
 
   try {
-    return await db.transaction(async (tx) => {
+    const out = await db.transaction(async (tx) => {
       const [lease] = await tx
         .insert(towerLeasesTable)
         .values({
@@ -159,11 +165,46 @@ export async function grantTowerLease(input: {
           repoUrl: input.repoUrl.slice(0, 300),
           tenantPrincipal,
           darkReason: null,
+          // A fresh tenancy starts with a bare wall and NO webhook: the
+          // previous tenant's receiver must never inherit the next tenant's
+          // events. (Lease END deliberately keeps the webhook, so the
+          // departing tenant still receives lease.ended — the handover
+          // boundary is the GRANT, where the new tenant appears.)
+          panel: null,
+          webhookUrl: null,
+          webhookSecret: null,
           updatedAt: new Date(),
         })
         .where(eq(towerFloorsTable.floorNo, floorNo));
+      // Retire the PREVIOUS tenancy's still-pending events here, not just its
+      // webhook config. Clearing the URL alone left a race: a departed
+      // tenant's queued chat.said rows stayed `pending`, and if the new
+      // tenant registered a receiver before the next 30s sweep, those old
+      // lines delivered to the NEW receiver signed with the NEW secret —
+      // a cross-tenant leak of speaker principals and text. Grant is the
+      // right boundary: end preserved the departed tenant's delivery window,
+      // grant closes it for good.
+      await tx
+        .update(towerFloorEventsTable)
+        .set({ state: "failed", lastError: "tenancy ended before delivery" })
+        .where(and(eq(towerFloorEventsTable.floorNo, floorNo), eq(towerFloorEventsTable.state, "pending")));
+      // The decision row commits WITH the lease or not at all (ADR-0003:
+      // an action and its record must not be able to disagree).
+      await recordDecision(tx, {
+        decisionId: `dec:tower:${randomUUID()}`,
+        actor: input.actor,
+        principal: tenantPrincipal,
+        capability: "tower.lease.grant",
+        resource: `tower:floor:${floorNo}`,
+        amountMinor: input.rentMinor,
+        decision: "allow",
+      });
       return { floorNo, leaseId: lease!.id };
     });
+    // No lease.granted event: a fresh tenancy has no webhook yet by
+    // construction (the grant just cleared it), so there is no receiver for
+    // the news — the grant response IS the notification.
+    return out;
   } catch (e) {
     // The unique indexes are the invariants speaking: one floor per tenant
     // (tower_floors_tenant_unique) and one active lease per floor
@@ -180,24 +221,56 @@ export async function grantTowerLease(input: {
 }
 
 /** Dim a floor: door stays, service refused. A switch, never a delete. */
-export async function darkenTowerFloor(floorNo: number, reason: string): Promise<void> {
+export async function darkenTowerFloor(floorNo: number, reason: string, actor: string): Promise<void> {
   const f = await floorRow(floorNo);
   if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
   if (f.status !== "leased") throw new TowerFloorUnavailable(`floor ${floorNo} is ${f.status}; only a leased floor can go dark`);
-  await db
-    .update(towerFloorsTable)
-    .set({ status: "dark", darkReason: reason.slice(0, 300), updatedAt: new Date() })
-    .where(eq(towerFloorsTable.floorNo, floorNo));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(towerFloorsTable)
+      .set({ status: "dark", darkReason: reason.slice(0, 300), updatedAt: new Date() })
+      .where(eq(towerFloorsTable.floorNo, floorNo));
+    await recordDecision(tx, {
+      decisionId: `dec:tower:${randomUUID()}`,
+      actor,
+      principal: f.tenantPrincipal ?? undefined,
+      capability: "tower.floor.dark",
+      resource: `tower:floor:${floorNo}`,
+      decision: "allow",
+      // authority_decisions.reason_code is varchar(48): a longer slice threw
+      // 22001 INSIDE this transaction and rolled the darken back entirely —
+      // the floor stayed lit and the operator got a 500. The full reason is
+      // kept uncapped on tower_floors.darkReason above. The dark EVENT is
+      // enqueued only AFTER this commits, so a rollback can no longer orphan
+      // a lease.dark for a floor that stayed leased.
+      reasonCode: reason.slice(0, 48),
+    });
+  });
+  // The sweeper HOLDS deliveries to dark floors, so this row waits and is the
+  // first thing the tenant receives when the floor is relit — an honest
+  // record of the gap. After the commit, so it never outlives a rollback.
+  void enqueueTowerEvent(floorNo, "lease.dark", { floorNo, reason: reason.slice(0, 300) });
 }
 
-export async function undarkenTowerFloor(floorNo: number): Promise<void> {
+export async function undarkenTowerFloor(floorNo: number, actor: string): Promise<void> {
   const f = await floorRow(floorNo);
   if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
   if (f.status !== "dark") throw new TowerFloorUnavailable(`floor ${floorNo} is ${f.status}, not dark`);
-  await db
-    .update(towerFloorsTable)
-    .set({ status: "leased", darkReason: null, updatedAt: new Date() })
-    .where(eq(towerFloorsTable.floorNo, floorNo));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(towerFloorsTable)
+      .set({ status: "leased", darkReason: null, updatedAt: new Date() })
+      .where(eq(towerFloorsTable.floorNo, floorNo));
+    await recordDecision(tx, {
+      decisionId: `dec:tower:${randomUUID()}`,
+      actor,
+      principal: f.tenantPrincipal ?? undefined,
+      capability: "tower.floor.undark",
+      resource: `tower:floor:${floorNo}`,
+      decision: "allow",
+    });
+  });
+  void enqueueTowerEvent(floorNo, "lease.undark", { floorNo });
 }
 
 /**
@@ -205,10 +278,16 @@ export async function undarkenTowerFloor(floorNo: number): Promise<void> {
  * In-flight ledger obligations are untouched — they are ordinary postings,
  * not floor state (ADR-0005 §5).
  */
-export async function endTowerLease(floorNo: number): Promise<void> {
+export async function endTowerLease(floorNo: number, actor: string): Promise<void> {
   const f = await floorRow(floorNo);
   if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
   if (f.status === "vacant") throw new TowerFloorUnavailable(`floor ${floorNo} is already vacant`);
+  // Enqueued first, so the departed tenant still hears the door close: the
+  // webhook config deliberately SURVIVES lease end (it belongs to the tenant
+  // who registered it) and is cleared at the next GRANT, where a new tenant
+  // appears — see grantTowerLease. The sweeper delivers to a vacant floor as
+  // long as its config remains.
+  void enqueueTowerEvent(floorNo, "lease.ended", { floorNo, tenantPrincipal: f.tenantPrincipal });
   await db.transaction(async (tx) => {
     await tx
       .update(towerLeasesTable)
@@ -227,7 +306,54 @@ export async function endTowerLease(floorNo: number): Promise<void> {
         updatedAt: new Date(),
       })
       .where(eq(towerFloorsTable.floorNo, floorNo));
+    await recordDecision(tx, {
+      decisionId: `dec:tower:${randomUUID()}`,
+      actor,
+      principal: f.tenantPrincipal ?? undefined,
+      capability: "tower.lease.end",
+      resource: `tower:floor:${floorNo}`,
+      decision: "allow",
+    });
   });
+}
+
+/**
+ * Register (or replace) the floor's webhook receiver. Tenant surface —
+ * callable with the agent token or the floor credential; the router resolves
+ * who is asking, this holds the floor's own gates. Returns the signing
+ * secret ONCE; we keep it stored because we sign with it.
+ */
+export async function setTowerWebhook(
+  floorNo: number,
+  callerPrincipal: string,
+  rawUrl: unknown,
+): Promise<{ url: string; secret: string }> {
+  const f = await floorRow(floorNo);
+  if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
+  if (f.status === "dark") throw new FloorIsDark(`floor ${floorNo} is dark: ${f.darkReason ?? "no reason recorded"}`);
+  if (f.status !== "leased" || f.tenantPrincipal !== callerPrincipal) {
+    throw new NotYourFloor(`floor ${floorNo} is not leased to ${callerPrincipal}`);
+  }
+  const v = validateWebhookUrl(rawUrl);
+  if (!v.ok) throw new BadPanel(v.error);
+  const secret = newWebhookSecret();
+  await db
+    .update(towerFloorsTable)
+    .set({ webhookUrl: v.url, webhookSecret: secret, updatedAt: new Date() })
+    .where(eq(towerFloorsTable.floorNo, floorNo));
+  return { url: v.url, secret };
+}
+
+export async function clearTowerWebhook(floorNo: number, callerPrincipal: string): Promise<void> {
+  const f = await floorRow(floorNo);
+  if (!f) throw new TowerFloorNotFound(`floor ${floorNo} is not in the registry`);
+  if (f.status !== "leased" || f.tenantPrincipal !== callerPrincipal) {
+    throw new NotYourFloor(`floor ${floorNo} is not leased to ${callerPrincipal}`);
+  }
+  await db
+    .update(towerFloorsTable)
+    .set({ webhookUrl: null, webhookSecret: null, updatedAt: new Date() })
+    .where(eq(towerFloorsTable.floorNo, floorNo));
 }
 
 /**
@@ -260,6 +386,7 @@ export async function writeTowerPanel(
     .update(towerFloorsTable)
     .set({ panel: v.panel, updatedAt: new Date() })
     .where(eq(towerFloorsTable.floorNo, floorNo));
+  void enqueueTowerEvent(floorNo, "panel.updated", { floorNo, headline: v.panel.headline ?? null });
   return v.panel;
 }
 

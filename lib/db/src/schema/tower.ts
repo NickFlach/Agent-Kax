@@ -44,6 +44,15 @@ export const towerFloorsTable = pgTable(
      * visitor's browser wearing the city's origin.
      */
     panel: jsonb("panel"),
+    /**
+     * Where the floor's events are delivered (Phase 1), and the HMAC secret
+     * the deliveries are signed with. The secret is generated server-side at
+     * registration and returned to the tenant ONCE — it stays stored because
+     * WE sign with it; the URL passes the egress guard before it is ever
+     * accepted, and again before every delivery.
+     */
+    webhookUrl: text("webhook_url"),
+    webhookSecret: text("webhook_secret"),
     /** Why the floor is dark, when it is. */
     darkReason: text("dark_reason"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -97,6 +106,63 @@ export const towerLeasesTable = pgTable(
 
 export type TowerLease = typeof towerLeasesTable.$inferSelect;
 export type InsertTowerLease = typeof towerLeasesTable.$inferInsert;
+
+/**
+ * A floor's service credential (Phase 1) — the anti-god-token. Stored as a
+ * sha256 HASH; the `twr_…` token is shown exactly once at mint. Pinned to
+ * its floor: whatever the request body claims, the credential can only act
+ * as the floor it belongs to, and a dark floor's credentials are refused at
+ * resolution time. Revocation is a timestamp, not a delete — the mint/revoke
+ * history is part of the lease's audit trail.
+ */
+export const towerCredentialsTable = pgTable(
+  "tower_credentials",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    floorNo: integer("floor_no").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    label: text("label"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("tower_credentials_hash_unique").on(t.tokenHash),
+    index("tower_credentials_floor_idx").on(t.floorNo),
+    check("tower_credentials_floor_range", sql`${t.floorNo} BETWEEN 2 AND 11`),
+  ],
+);
+
+export type TowerCredential = typeof towerCredentialsTable.$inferSelect;
+
+/**
+ * The floor event outbox (Phase 1). Durable-outbox discipline: an event is a
+ * row first, delivered by the sweeper with backoff, and its terminal state is
+ * recorded — never fire-and-forget, because a tenant's missed webhook is a
+ * dispute waiting to happen.
+ */
+export const towerFloorEventsTable = pgTable(
+  "tower_floor_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    floorNo: integer("floor_no").notNull(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").notNull(),
+    /** "pending" | "delivered" | "failed". */
+    state: text("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at"),
+  },
+  (t) => [
+    index("tower_floor_events_due_idx").on(t.state, t.nextAttemptAt),
+    index("tower_floor_events_floor_idx").on(t.floorNo),
+    check("tower_floor_events_state_known", sql`${t.state} IN ('pending', 'delivered', 'failed')`),
+  ],
+);
+
+export type TowerFloorEvent = typeof towerFloorEventsTable.$inferSelect;
 
 // The storey list (2–11) is deliberately NOT exported from here: the room
 // directory in api-server lib/rooms.ts is its one definition (`TOWER_FLOOR_NOS`

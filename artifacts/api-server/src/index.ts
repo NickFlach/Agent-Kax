@@ -5,6 +5,7 @@ import { ensureKannakaOwnerAndBackfill, claimLegacyOwnership, repairCreatorAttri
 import { replayMissedEventsOnStartup } from "./lib/harvesterJob";
 import { startAgentHarvestScheduler } from "./lib/scheduler";
 import { startHeatDecayScheduler } from "./lib/heatDecayJob";
+import { startTowerWebhookScheduler } from "./lib/tower-webhooks";
 import { startKannakaArtworkResponseScheduler } from "./lib/kannakaArtworkResponse";
 import { startCommerceFulfillmentWorker } from "./lib/commerceFulfillmentWorker";
 import { startCommerceFulfillmentStatusSync } from "./lib/commerceFulfillmentStatusSync";
@@ -266,6 +267,7 @@ async function warmUpInBackground(): Promise<void> {
   await runStartupStep("replayMissedEventsOnStartup", replayMissedEventsOnStartup);
   await runStartupStep("startAgentHarvestScheduler", startAgentHarvestScheduler);
   await runStartupStep("startHeatDecayScheduler", startHeatDecayScheduler);
+  await runStartupStep("startTowerWebhookScheduler", startTowerWebhookScheduler);
   await runStartupStep("startKannakaArtworkResponseScheduler", startKannakaArtworkResponseScheduler);
   // Opt-in, and off on every deployment that has not said otherwise: it logs
   // that it is inert and returns unless BOTH KAX_PRINTIFY_ENABLED and

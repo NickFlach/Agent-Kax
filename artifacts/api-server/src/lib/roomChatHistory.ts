@@ -1,3 +1,5 @@
+import { parseTowerRoom } from "./rooms";
+import { enqueueTowerEvent } from "./tower-webhooks";
 import { db } from "@workspace/db";
 import { cityRoomChatTable } from "@workspace/db/schema";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
@@ -67,6 +69,22 @@ export async function record(line: RecordLineInput): Promise<void> {
       x: line.x,
       z: line.z,
     });
+    // A line spoken on a leased tower floor rides the floor's webhook feed
+    // (KAX-ADR-0005 Phase 1). This chokepoint is where BOTH say routes
+    // converge, so the tenant hears every speaker or none. Best-effort like
+    // everything else in this function — and disclosed in-room: the storey
+    // scene's standing signage says speech may reach the tenant's systems,
+    // and it shipped BEFORE this feed did.
+    const tower = parseTowerRoom(line.room);
+    if (tower) {
+      void enqueueTowerEvent(tower.floorNo, "chat.said", {
+        room: line.room,
+        principal: line.principal,
+        name: line.name,
+        kind: line.kind,
+        text: line.text,
+      });
+    }
     await pruneRoom(line.room);
   } catch {
     // A durable-history hiccup is not worth interrupting a conversation for.
