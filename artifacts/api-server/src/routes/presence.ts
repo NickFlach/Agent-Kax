@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { resolveActor, ActorError } from "../lib/actor";
 import { beat, roster, roomCounts, leave, PRESENCE_TTL_MS } from "../lib/presence";
 import { say, heard, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
+import { publish as publishConstellation } from "../lib/constellationBridge";
 
 const router: IRouter = Router();
 
@@ -102,6 +103,17 @@ router.post("/chat/say", async (req, res) => {
       text: body.text,
       x: Math.max(-1e4, Math.min(1e4, finiteOr(body.x, 0))),
       z: Math.max(-1e4, Math.min(1e4, finiteOr(body.z, 0))),
+    });
+    // Speech also rides the constellation bus. In-room chat is already spoken
+    // in a public place; lifting it onto the (operator-authenticated) bus is
+    // what lets the rest of the constellation REACT to the city — a daemon can
+    // hear "said in the cafe" and act somewhere else entirely. Fire-and-forget:
+    // the bridge is a no-op when disconnected and never fails the request.
+    void publishConstellation("KAX.events.chat.said", {
+      id: line.id, room: line.room, at: line.at,
+      principal: line.principal, name: line.name,
+      kind: actor.kind === "agent" ? "agent" : "human",
+      text: line.text, x: line.x, z: line.z,
     });
     res.status(201).json({ id: line.id, radius: CHAT_RADIUS, maxText: MAX_TEXT });
   } catch (e) {
