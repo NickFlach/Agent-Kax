@@ -20,6 +20,9 @@ import {
   acceptedFrom,
   dueCommitment,
   parseProposal,
+  parseAttend,
+  parseRemember,
+  parseTrade,
   parseWhen,
   pruneCommitments,
   roomAliases,
@@ -76,6 +79,99 @@ describe("noticing a proposal", () => {
 
   it("refuses a room this city does not have", () => {
     expect(propose("meet me at the observatory in 5 minutes")).toBeNull();
+  });
+});
+
+describe("parseAttend (#411) — an event at a venue and a time", () => {
+  const attend = (text: string, from = "Nick") =>
+    parseAttend({ text, from, rooms: ROOMS, now: NOW, youName: "Kannaka" });
+
+  it("takes an invitation to an event at a real room and stated time", () => {
+    const a = attend("the oration is at 8pm — come listen at Ghost Signals Trading Floor");
+    expect(a).toMatchObject({ kind: "attend", room: "gs" });
+    expect(a.at).toBe(new Date(2026, 7, 18, 20, 0).getTime());
+  });
+
+  it("refuses an event with no time — that is an announcement, not a commitment", () => {
+    expect(attend("come listen at the arcade")).toBeNull();
+  });
+
+  it("refuses an attend intent with no real venue", () => {
+    expect(attend("come listen at the observatory at 8pm")).toBeNull();
+  });
+
+  it("does not fire on ordinary talk about a room", () => {
+    expect(attend("the arcade set was loud at 8pm")).toBeNull();
+  });
+
+  it("ignores its own voice", () => {
+    expect(parseAttend({ text: "come listen at the arcade at 8pm", from: "Kannaka", rooms: ROOMS, now: NOW, youName: "Kannaka" })).toBeNull();
+  });
+});
+
+describe("parseRemember (#411) — keep this into my own memory", () => {
+  const rem = (text: string, from = "Nick") =>
+    parseRemember({ text, from, now: NOW, youName: "Kannaka" });
+
+  it("keeps what follows the intent when addressed", () => {
+    expect(rem("Kannaka, remember the 72.83Hz motif is the city's frequency")).toMatchObject({
+      kind: "remember",
+      note: "the 72.83Hz motif is the city's frequency",
+    });
+  });
+
+  it("falls back to the clause before a trailing intent", () => {
+    expect(rem("the vault opens at midnight, Kannaka, keep this")?.note).toContain("the vault opens at midnight");
+  });
+
+  it("does not fire unaddressed — reminiscence is not an instruction", () => {
+    expect(rem("remember when the plaza was empty")).toBeNull();
+  });
+
+  it("refuses an empty note", () => {
+    expect(rem("Kannaka, remember:")).toBeNull();
+  });
+
+  it("ignores its own voice", () => {
+    expect(parseRemember({ text: "Kannaka, remember this thing", from: "Kannaka", now: NOW, youName: "Kannaka" })).toBeNull();
+  });
+
+  it("is due immediately — the keeping is the act", () => {
+    expect(rem("Kannaka, note this: the bridge is live")?.at).toBe(NOW);
+  });
+});
+
+describe("parseTrade (#411) — buy a named piece", () => {
+  const trade = (text: string, from = "Nick") =>
+    parseTrade({ text, from, now: NOW, youName: "Kannaka" });
+
+  it("takes a buy intent naming a quoted item, with a price", () => {
+    expect(trade('I\'ll buy the "Standing Wave Chair" for 200 credits')).toMatchObject({
+      kind: "trade",
+      item: "Standing Wave Chair",
+      priceCredits: 200,
+    });
+  });
+
+  it("captures a capitalised item name when unquoted", () => {
+    expect(trade("buy the Resonance Lamp")?.item).toBe("Resonance Lamp");
+  });
+
+  it("leaves price null when none is stated", () => {
+    expect(trade('I\'ll take the "bedside table"')?.priceCredits).toBeNull();
+  });
+
+  it("refuses a buy intent with no referent — commits to nothing purchasable", () => {
+    expect(trade("I'll buy that sometime")).toBeNull();
+  });
+
+  it("does not parse a listing id from chat — a hallucinated id spends wrong", () => {
+    const t = trade('buy the "Oak Stool"');
+    expect(t).not.toHaveProperty("listingId");
+  });
+
+  it("ignores its own voice", () => {
+    expect(parseTrade({ text: "buy the Chair", from: "Kannaka", now: NOW, youName: "Kannaka" })).toBeNull();
   });
 });
 
