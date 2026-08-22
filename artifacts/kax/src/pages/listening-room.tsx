@@ -80,6 +80,9 @@ export default function ListeningRoom() {
         ref={audioRef}
         src={src ?? undefined}
         preload="none"
+        onEnded={() => setPlaying(false)}
+        onPause={() => setPlaying(false)}
+        onPlaying={() => { setPlaying(true); setError(null); }}
         onError={() => { if (src) { setPlaying(false); setError("The stream is offline right now."); } }}
       />
 

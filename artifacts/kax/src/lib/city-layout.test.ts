@@ -28,6 +28,7 @@ import {
   MAX_STREET_STOREFRONTS,
   MONUMENT_Z_OFFSET,
   OBSERVATORY_POS,
+  PLAZA_FLANK_X,
   STREET_SHOP_Y,
   VENUE_SHELLS,
   footprintFor,
@@ -192,6 +193,20 @@ describe("venue footprints", () => {
       expect(overlaps(lis, nb), `Listening Room overlaps ${name}`).toBe(false);
     }
     expect(overlaps(obs, lis), "the two constellation venues overlap each other").toBe(false);
+  });
+
+  it("clears the moving plaza flanks in X, so it holds at every storefront count (#407, #408)", () => {
+    // The plaza (Arcade/Bank at ±PLAZA_FLANK_X) walks UP the street as the store
+    // count falls — plazaZFor tracks it — so it sweeps through every Z, incl.
+    // right past a fixed venue, and at n=0 sits at plazaZ=-14.5 on top of the
+    // outer lane. The only n-independent guard is X: the venue's inner edge must
+    // be outboard of the flank's outer edge. Bank and Arcade share the same
+    // rotated half-width, so one bound covers both flanks.
+    const flankOuterX = PLAZA_FLANK_X + venueFootprint("bank").hx;
+    const obsInnerX = Math.abs(OBSERVATORY_POS[0]) - venueFootprint("observatory").hx;
+    const lisInnerX = Math.abs(LISTENING_POS[0]) - venueFootprint("listening").hx;
+    expect(obsInnerX, "Observatory reaches into the plaza flank lane").toBeGreaterThanOrEqual(flankOuterX);
+    expect(lisInnerX, "Listening Room reaches into the plaza flank lane").toBeGreaterThanOrEqual(flankOuterX);
   });
 });
 
