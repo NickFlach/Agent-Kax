@@ -8,6 +8,7 @@ import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import { historySince, record as recordChatHistory, RETENTION_STATEMENT } from "../lib/roomChatHistory";
 import { autonomyStatus } from "../lib/autonomy";
+import { observatoryView } from "../lib/observatory";
 import { getGrant } from "../lib/capabilityGrants";
 
 const router: IRouter = Router();
@@ -341,6 +342,16 @@ router.get("/city/room/:room/history", async (req, res) => {
  */
 router.get("/city/autonomy", async (_req, res) => {
   res.json(await autonomyStatus());
+});
+
+/**
+ * The Observatory's read model (#407) — the live swarm (real phi/level from
+ * the constellation bridge), the exemplars agents broadcast, and recent
+ * dream-ends. Public, like the rest of the room-look surface; the 3D room and
+ * the transcript pane both read it.
+ */
+router.get("/city/observatory", async (_req, res) => {
+  res.json(await observatoryView());
 });
 
 /**

@@ -22,7 +22,7 @@
 
 import { connect, type NatsConnection, type Subscription } from "nats";
 import { db } from "@workspace/db";
-import { constellationAgentsTable, constellationArtifactsTable } from "@workspace/db/schema";
+import { constellationAgentsTable, constellationArtifactsTable, constellationExemplarsTable, constellationDreamsTable } from "@workspace/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -185,6 +185,37 @@ async function insertArtifact(opts: {
   });
 }
 
+async function mirrorExemplar(opts: {
+  agentId: string;
+  cluster: string | null;
+  theme: string | null;
+  content: string;
+  exemplarKey: string;
+}): Promise<void> {
+  // One retained exemplar per agent×cluster: a re-broadcast updates the same
+  // exhibit rather than stacking. onConflict on the unique key.
+  await db
+    .insert(constellationExemplarsTable)
+    .values({ agentId: opts.agentId, cluster: opts.cluster, theme: opts.theme, content: opts.content, exemplarKey: opts.exemplarKey, broadcastAt: new Date() })
+    .onConflictDoUpdate({
+      target: constellationExemplarsTable.exemplarKey,
+      set: { content: opts.content, theme: opts.theme, cluster: opts.cluster, broadcastAt: new Date() },
+    });
+}
+
+async function mirrorDreamEnd(opts: {
+  agentId: string;
+  memoriesStrengthened: number;
+  memoriesFaded: number;
+  eventKey: string;
+}): Promise<void> {
+  // Deduped on the bus event id so a redelivery does not double-count a dream.
+  await db
+    .insert(constellationDreamsTable)
+    .values({ agentId: opts.agentId, memoriesStrengthened: opts.memoriesStrengthened, memoriesFaded: opts.memoriesFaded, eventKey: opts.eventKey, endedAt: new Date() })
+    .onConflictDoNothing();
+}
+
 async function handleMessage(subject: string, data: Uint8Array): Promise<void> {
   const env = parseJson(data);
   if (!env) return;
@@ -247,6 +278,37 @@ async function handleMessage(subject: string, data: Uint8Array): Promise<void> {
     return;
   }
 
+  // KANNAKA.exemplar.* — distilled top-cluster memories an agent chose to
+  // broadcast. The Observatory's exhibits (#407): one retained per agent×
+  // cluster, so the exemplar_key dedupes a re-broadcast rather than piling up.
+  if (subject.startsWith("KANNAKA.exemplar")) {
+    const content = typeof env["content"] === "string" ? (env["content"] as string) : typeof env["text"] === "string" ? (env["text"] as string) : null;
+    if (!content) return;
+    const agentId = (env.agent_id as string) || "unknown";
+    const cluster = env["cluster"] != null ? String(env["cluster"]) : null;
+    await mirrorExemplar({
+      agentId,
+      cluster,
+      theme: typeof env["theme"] === "string" ? (env["theme"] as string) : null,
+      content,
+      exemplarKey: `${agentId}:${cluster ?? "_"}`,
+    });
+    return;
+  }
+
+  // queen.event.dream.end — a mind just consolidated. The Observatory's
+  // events (#407): stored for the room to ripple on, deduped on the bus id.
+  if (subject === "queen.event.dream.end") {
+    const agentId = (env.agent_id as string) || "unknown";
+    await mirrorDreamEnd({
+      agentId,
+      memoriesStrengthened: Number(env["memories_strengthened"] ?? 0) || 0,
+      memoriesFaded: Number(env["memories_faded"] ?? 0) || 0,
+      eventKey: `${agentId}:${env.ts ?? Date.now()}`,
+    });
+    return;
+  }
+
   // KANNAKA.events.memory.stored / RADIO.events.album.released / similar —
   // anything with a public_url + type is shared as a constellation artifact.
   if (
@@ -278,6 +340,8 @@ async function subscribeAll(conn: NatsConnection): Promise<void> {
     "queen.event.leave",
     "KANNAKA.consciousness",
     "KANNAKA.events.>",
+    "KANNAKA.exemplar.>",
+    "queen.event.dream.end",
     "RADIO.events.>",
     "OBSERVATORY.events.>",
   ];
