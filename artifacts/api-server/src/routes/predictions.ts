@@ -85,7 +85,7 @@ router.get("/predictions/leaderboard", async (_req: Request, res: Response) => {
     const { unifiedLeaderboard } = await import("../lib/predictionLeaderboard");
     res.json(await unifiedLeaderboard());
   } catch (err) {
-    res.json({ source: "ghostsignals+kax-labs", traders: [], note: `hub leaderboard unavailable: ${(err as Error).message}` });
+    res.json({ source: "ghostsignals+kax-labs", traders: [], note: `leaderboard unavailable (hub or identity map): ${(err as Error).message}` });
   }
 });
 
@@ -98,7 +98,7 @@ router.get("/predictions/record/:principal", async (req: Request, res: Response)
     if (!record) { res.status(404).json({ error: "no forecast record for that principal" }); return; }
     res.json({ record });
   } catch (err) {
-    res.status(502).json({ error: `hub unavailable: ${(err as Error).message}` });
+    res.status(502).json({ error: `prediction record unavailable (hub or identity map): ${(err as Error).message}` });
   }
 });
 

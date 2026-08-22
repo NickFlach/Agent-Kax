@@ -15,10 +15,15 @@ import { agentsTable } from "@workspace/db/schema";
  * stake crossing.
  *
  * The identity map is a v1 HEURISTIC (the ADR calls the map a standing
- * decision to be refined): a hub trader is matched to a KAX agent by its id
- * appearing in the agent's obc_bot_id, or by an exact display-name/slug match.
- * Unmatched traders are still shown, keyed by their hub id — an honest board
- * that does not silently drop the accounts it cannot yet map.
+ * decision to be refined), but it is deliberately CONSERVATIVE: a hub trader
+ * resolves only on an UNAMBIGUOUS, ANCHORED match — its id (dashes stripped,
+ * ≥8 hex) being a PREFIX of exactly one agent's bot uuid, or an exact
+ * display-name/slug match to exactly one agent. Anything ambiguous (a short
+ * id, an empty id, a name shared by two agents, a fragment that prefixes two
+ * bot ids) resolves to NULL, never to a guess. Mis-attributing one agent's
+ * forecast record to another's KAX identity would be worse than admitting we
+ * cannot map it yet, so the board stays honest: it shows the account, keyed by
+ * its hub id, with a null principal.
  */
 
 const RADIO_URL = (process.env["RADIO_URL"] || "https://radio.ninja-portal.com").replace(/\/$/, "");
@@ -57,27 +62,50 @@ export async function fetchHubLeaderboard(fetchImpl: typeof fetch = fetch): Prom
   return body.traders ?? [];
 }
 
+/** Strip dashes and lowercase — the canonical hex form of a uuid/id fragment. */
+function hex(s: string): string {
+  return s.replace(/-/g, "").toLowerCase();
+}
+
+/** The single principal a set resolves to, or null when empty OR ambiguous. */
+function only(set: Set<string> | undefined): string | null {
+  return set && set.size === 1 ? [...set][0]! : null;
+}
+
 /** Build the hub-id/name → kax:agent principal resolver from the agents table. */
 async function principalResolver(): Promise<(t: HubTrader) => string | null> {
   const agents = await db
     .select({ slug: agentsTable.slug, displayName: agentsTable.displayName, obcBotId: agentsTable.obcBotId })
     .from(agentsTable);
-  const byName = new Map<string, string>();
-  const byBot: Array<{ botId: string; principal: string }> = [];
+  // Name/slug keys map to a SET of principals so a shared display name (the
+  // column is not unique) resolves to null (ambiguous), never last-writer-wins.
+  const byName = new Map<string, Set<string>>();
+  const byBot: Array<{ botHex: string; principal: string }> = [];
+  const addName = (key: string, principal: string) => {
+    const k = key.trim().toLowerCase();
+    if (!k) return;
+    (byName.get(k) ?? byName.set(k, new Set()).get(k)!).add(principal);
+  };
   for (const a of agents) {
     if (!a.obcBotId) continue;
     const principal = `kax:agent:${a.obcBotId}`;
-    byName.set(a.displayName.toLowerCase(), principal);
-    byName.set(a.slug.toLowerCase(), principal);
-    byBot.push({ botId: a.obcBotId.toLowerCase(), principal });
+    addName(a.displayName, principal);
+    addName(a.slug, principal);
+    const bh = hex(a.obcBotId);
+    if (bh.length >= 8) byBot.push({ botHex: bh, principal });
   }
   return (t: HubTrader) => {
-    const id = t.id.toLowerCase();
-    // A hub id that is a bot-uuid fragment resolves when it appears in a bot id.
-    const hit = byBot.find((b) => b.botId.includes(id) || id.includes(b.botId.replace(/-/g, "").slice(0, 12)));
-    if (hit) return hit.principal;
-    const name = (t.display_name ?? "").toLowerCase();
-    return byName.get(name) ?? null;
+    // Untrusted JSON: id is typed string but may be missing/non-string.
+    const idHex = hex(String(t.id ?? ""));
+    // A hub id resolves by bot only when it is a long-enough ANCHORED prefix of
+    // exactly one bot uuid. ≥8 hex (a full GhostSignals short id); a prefix,
+    // not a substring; and unique — two agents prefixed by it is ambiguous → null.
+    if (idHex.length >= 8) {
+      const hits = new Set(byBot.filter((b) => b.botHex.startsWith(idHex)).map((b) => b.principal));
+      if (hits.size >= 1) return hits.size === 1 ? [...hits][0]! : null;
+      // 0 bot matches: fall through to the name map.
+    }
+    return only(byName.get(String(t.display_name ?? "").trim().toLowerCase()));
   };
 }
 

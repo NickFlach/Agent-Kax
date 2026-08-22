@@ -51,9 +51,57 @@ describe("unified prediction leaderboard (#409)", () => {
   });
 
   it("resolves by display name when the id is not a bot fragment", async () => {
-    await seedAgent(`lb-test-flau-${seq}`, "Flaukowski", "0c4783c9-9920-4ea0-bc5b-46a571d471fa");
-    const board = await unifiedLeaderboard(hubFetch([{ id: "2babfe41d757", display_name: "Flaukowski", capital: 100 }]));
+    // A run-unique name so a real seeded agent of the same name cannot make
+    // this ambiguous (the resolver returns null on a shared display name).
+    const name = `Flaukowski-${++uniq}`;
+    await seedAgent(`lb-test-flau-${seq}`, name, "0c4783c9-9920-4ea0-bc5b-46a571d471fa");
+    const board = await unifiedLeaderboard(hubFetch([{ id: "2babfe41d757", display_name: name, capital: 100 }]));
     expect(board.traders[0].kaxPrincipal).toBe("kax:agent:0c4783c9-9920-4ea0-bc5b-46a571d471fa");
+  });
+
+  it("REFUSES to guess: an empty or too-short hub id gets a null principal, never an arbitrary agent (finding 1)", async () => {
+    await seedAgent(`lb-test-guess-${seq}`, `Guessable-${++uniq}`, "aaaa1111-2222-4333-8444-555566667777");
+    const board = await unifiedLeaderboard(
+      hubFetch([
+        { id: "", display_name: "No Id At All", capital: 10 },
+        { id: "b7", display_name: "Two Hex", capital: 10 },
+      ]),
+    );
+    // Neither an empty id (which `includes("")` used to match to the first row)
+    // nor a 2-hex id may be stamped with a real agent's principal.
+    expect(board.traders.find((t) => t.hubId === "")?.kaxPrincipal).toBeNull();
+    expect(board.traders.find((t) => t.hubId === "b7")?.kaxPrincipal).toBeNull();
+  });
+
+  it("REFUSES to guess: a fragment that prefixes two bot ids is ambiguous → null (finding 1)", async () => {
+    // Two agents whose bot uuids share the queried 8-hex prefix.
+    await seedAgent(`lb-test-amb1-${seq}`, `Amb1-${++uniq}`, "deadbeef-0000-4000-8000-000000000001");
+    await seedAgent(`lb-test-amb2-${seq}`, `Amb2-${++uniq}`, "deadbeef-1111-4000-8000-000000000002");
+    const board = await unifiedLeaderboard(hubFetch([{ id: "deadbeef", display_name: "Ambiguous", capital: 10 }]));
+    expect(board.traders[0].kaxPrincipal).toBeNull();
+  });
+
+  it("REFUSES to guess: a display name shared by two agents is ambiguous → null (finding 2)", async () => {
+    const shared = `Twins-${++uniq}`;
+    await seedAgent(`lb-test-twin1-${seq}`, shared, "11111111-1111-4111-8111-111111111111");
+    await seedAgent(`lb-test-twin2-${seq}`, shared, "22222222-2222-4222-8222-222222222222");
+    // Hub id matches neither bot uuid → falls to the name map, which is ambiguous.
+    const board = await unifiedLeaderboard(hubFetch([{ id: "ffffffffdead", display_name: shared, capital: 10 }]));
+    expect(board.traders[0].kaxPrincipal).toBeNull();
+  });
+
+  it("survives a malformed hub row (missing/non-string id) without collapsing the board (finding 3)", async () => {
+    await seedAgent(`lb-test-mal-${seq}`, `Malformed-${++uniq}`, "0f05e10b-f8a1-46d6-b4a2-a7d4bae837f7");
+    const board = await unifiedLeaderboard(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hubFetch([{ display_name: "No Id Field" } as any, { id: "0f05e10b", display_name: "Ok", capital: 5 }]),
+    );
+    // Both rows are present; the good one still resolves — one bad row does not
+    // throw inside .map and nuke every row.
+    expect(board.traders.length).toBe(2);
+    expect(board.traders.find((t) => t.hubId === "0f05e10b")?.kaxPrincipal).toBe(
+      "kax:agent:0f05e10b-f8a1-46d6-b4a2-a7d4bae837f7",
+    );
   });
 
   it("retrieves one agent's forecast record by its KAX principal", async () => {
