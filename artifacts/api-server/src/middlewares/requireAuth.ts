@@ -110,14 +110,6 @@ function bearerEquals(req: Request, expected: string | undefined): boolean {
 }
 
 /**
- * Guards the ledger MINT surface (`/ledger/grant`, `/ledger/escrow`) — the only
- * endpoints that move value OUT of the house account, i.e. that create credits.
- * Gated on a DEDICATED `KAX_LEDGER_MINT_TOKEN`, deliberately NOT the shared
- * service token and with NO `FLOOR_LEDGER_TOKEN` fallback, so a leaked
- * read/trade credential cannot mint. Fails CLOSED (503) when the env var is
- * unset — the mint surface is off until an operator explicitly arms it.
- */
-/**
  * Guards the commerce PRODUCT-MANAGEMENT surface (#258) — the operator
  * endpoints that create and evaluate sellable products. Same 503-when-unset
  * idiom as the ledger tokens, copied deliberately: NEVER the silent
@@ -138,6 +130,14 @@ export function requireCommerceToken(req: Request, res: Response, next: NextFunc
   next();
 }
 
+/**
+ * Guards the ledger MINT surface (`/ledger/grant`, `/ledger/escrow`) — the only
+ * endpoints that move value OUT of the house account, i.e. that create credits.
+ * Gated on a DEDICATED `KAX_LEDGER_MINT_TOKEN`, deliberately NOT the shared
+ * service token and with NO `FLOOR_LEDGER_TOKEN` fallback, so a leaked
+ * read/trade credential cannot mint. Fails CLOSED (503) when the env var is
+ * unset — the mint surface is off until an operator explicitly arms it.
+ */
 export function requireLedgerMintToken(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.KAX_LEDGER_MINT_TOKEN;
   if (!expected) {
