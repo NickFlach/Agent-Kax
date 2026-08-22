@@ -1,6 +1,7 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
-import { and, eq, lte } from "drizzle-orm";
+import { request as httpsRequest } from "node:https";
+import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import { isIP, type LookupFunction } from "node:net";
+import { and, eq, lt, lte, or } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { towerFloorsTable, towerFloorEventsTable } from "@workspace/db/schema";
 import { logger } from "./logger";
@@ -16,16 +17,16 @@ export { newWebhookSecret, validateWebhookUrl, signBody, backoffMs, ipIsPublicUn
  * Tenants are outside the process, so the city comes to them — but ONLY to
  * them, and only signed. Two invariants carried here:
  *
- * EGRESS-GUARDED: a tenant-registered URL passes `validateWebhookUrl` at
- * registration and `assertPublicHost` again before EVERY delivery — https
- * only, no userinfo, and the resolved address must be public unicast space.
- * Without the second check the delivery job is an SSRF proxy: register
- * `https://169.254.169.254/` (or a hostname that resolves there) and read
- * the cloud metadata service with our egress. Known residual: a hostile DNS
- * server could pass the pre-delivery resolution and rebind before the fetch
- * connects (TOCTOU). Closing that fully means dialing the resolved IP with a
- * pinned Host header; recorded as follow-up debt rather than silently
- * accepted — the check here still removes the whole static-address class.
+ * EGRESS-GUARDED, TOCTOU-CLOSED: a tenant-registered URL passes
+ * `validateWebhookUrl` at registration, and delivery goes through
+ * `https.request` with a `lookup` that vets EVERY resolved address and hands
+ * the socket ONLY vetted ones — so the address the guard checks and the
+ * address the socket dials are the same resolution, with no rebinding window
+ * between them. https.request also does not follow redirects, so a receiver
+ * answering `302 → http://169.254.169.254/` is just a non-2xx failure, never
+ * a followed hop. An IP-literal host (which Node connects without calling
+ * `lookup`) is vetted inline before the request. Together these remove the
+ * whole SSRF class the earlier fetch-based path only narrowed.
  *
  * SIGNED, DURABLY: an event is an outbox row first (enqueue), delivered by
  * the sweeper with exponential backoff and a terminal state — the same
@@ -40,23 +41,82 @@ const MAX_ATTEMPTS = 8;
 const DELIVER_BATCH = 20;
 const DELIVER_TIMEOUT_MS = 10_000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
+/** Delivered/failed rows older than this are pruned — the outbox is a
+ *  delivery queue, not a permanent archive (roomChatHistory keeps the
+ *  readable tail). */
+const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Resolve the hostname and refuse a delivery into non-public space. */
-async function assertPublicHost(url: string): Promise<void> {
-  const u = new URL(url);
-  const host = u.hostname.replace(/^\[|\]$/g, "");
-  if (isIP(host)) {
-    if (!ipIsPublicUnicast(host)) throw new Error(`webhook host ${host} is not public address space`);
-    return;
-  }
-  const addrs = await lookup(host, { all: true, verbatim: true });
-  if (addrs.length === 0) throw new Error(`webhook host ${host} did not resolve`);
-  for (const a of addrs) {
-    if (!ipIsPublicUnicast(a.address)) {
-      throw new Error(`webhook host ${host} resolves to non-public address ${a.address}`);
+/**
+ * A DNS lookup that resolves once, vets every returned address as public
+ * unicast, and returns ONLY vetted addresses to the connecting socket. This
+ * is the TOCTOU close: the vetting resolution and the connecting resolution
+ * are one and the same, so a hostile resolver cannot answer "public" to a
+ * pre-check and "private" to the connect. Node skips `lookup` entirely for an
+ * IP-literal host, so those are vetted inline in `deliverSigned` instead.
+ */
+function vettingLookup(
+  hostname: string,
+  options: Parameters<typeof dnsLookup>[1],
+  callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void,
+): void {
+  const opts = (typeof options === "object" && options !== null ? options : {}) as Record<string, unknown>;
+  dnsLookup(hostname, { ...opts, all: true, verbatim: true }, (err, addresses) => {
+    if (err) return callback(err, "");
+    const list = addresses as unknown as LookupAddress[];
+    if (!list.length) return callback(new Error(`webhook host ${hostname} did not resolve`), "");
+    for (const a of list) {
+      if (!ipIsPublicUnicast(a.address)) {
+        return callback(new Error(`webhook host ${hostname} resolves to non-public address ${a.address}`), "");
+      }
     }
-  }
+    if (opts.all) return callback(null, list);
+    return callback(null, list[0]!.address, list[0]!.family);
+  });
 }
+
+export interface DeliveryResult {
+  status: number;
+}
+
+/**
+ * POST a signed body to a receiver over a DNS-pinned https connection. The
+ * seam the sweeper calls — injectable so tests can drive delivery outcomes
+ * without a socket. The default (below) is the real, egress-guarded poster.
+ */
+export type Deliverer = (url: string, headers: Record<string, string>, body: string, timeoutMs: number) => Promise<DeliveryResult>;
+
+const deliverSigned: Deliverer = (url, headers, body, timeoutMs) =>
+  new Promise<DeliveryResult>((resolve, reject) => {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      reject(new Error("invalid webhook url"));
+      return;
+    }
+    if (u.protocol !== "https:") { reject(new Error("webhook url must be https")); return; }
+    // Node does NOT call `lookup` for an IP-literal host, so vet it here.
+    const bareHost = u.hostname.replace(/^\[|\]$/g, "");
+    if (isIP(bareHost) && !ipIsPublicUnicast(bareHost)) {
+      reject(new Error(`webhook host ${bareHost} is not public address space`));
+      return;
+    }
+    const req = httpsRequest(
+      url,
+      // `lookup` is overloaded (all:true → array); vettingLookup honors both
+      // forms, but LookupFunction only describes the single-address shape, so
+      // cast at the boundary.
+      { method: "POST", headers, timeout: timeoutMs, lookup: vettingLookup as unknown as LookupFunction },
+      (res) => {
+        res.resume(); // drain; the status is all we need
+        res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("delivery timeout")));
+    req.end(body);
+  });
 
 // ── The outbox ──────────────────────────────────────────────
 
@@ -94,7 +154,7 @@ export interface DeliverReport {
  * an interval job, and per-event isolated: one tenant's dead receiver only
  * costs its own rows their attempts.
  */
-export async function deliverPendingTowerEvents(now: Date = new Date(), fetchFn: typeof fetch = fetch): Promise<DeliverReport> {
+export async function deliverPendingTowerEvents(now: Date = new Date(), deliver: Deliverer = deliverSigned): Promise<DeliverReport> {
   const report: DeliverReport = { scanned: 0, delivered: 0, retried: 0, failed: 0, held: 0 };
   const due = await db
     .select()
@@ -128,10 +188,12 @@ export async function deliverPendingTowerEvents(now: Date = new Date(), fetchFn:
       payload: ev.payload,
     });
     try {
-      await assertPublicHost(floor.webhookUrl);
-      const res = await fetchFn(floor.webhookUrl, {
-        method: "POST",
-        headers: {
+      // The egress guard lives INSIDE deliverSigned's DNS-pinned lookup now:
+      // one resolution, vetted, used for the socket — no rebinding window, and
+      // no redirects followed. See deliverSigned.
+      const res = await deliver(
+        floor.webhookUrl,
+        {
           "content-type": "application/json",
           "user-agent": "KAXTower/1.0 (+https://kax.ninja-portal.com/tower)",
           "x-tower-event": ev.kind,
@@ -139,15 +201,8 @@ export async function deliverPendingTowerEvents(now: Date = new Date(), fetchFn:
           "x-tower-signature": signBody(floor.webhookSecret, body),
         },
         body,
-        // redirect:"manual" is the SSRF guard's other half. assertPublicHost
-        // vetted THIS url's host, but a followed 3xx would carry our egress to
-        // wherever the receiver points — a public host answering
-        // `302 → http://169.254.169.254/` walks straight past the check. A
-        // webhook receiver has no legitimate reason to redirect, so any 3xx is
-        // a delivery failure (the status branch below rejects it).
-        redirect: "manual",
-        signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),
-      });
+        DELIVER_TIMEOUT_MS,
+      );
       if (res.status >= 200 && res.status < 300) {
         await db.update(towerFloorEventsTable)
           .set({ state: "delivered", deliveredAt: new Date(), lastError: null })
@@ -173,7 +228,26 @@ export async function deliverPendingTowerEvents(now: Date = new Date(), fetchFn:
   return report;
 }
 
+/**
+ * Drop terminal (delivered/failed) events past the retention window. The
+ * outbox is a delivery queue, not an archive — without this, every chat line
+ * on every leased floor is a permanent row and the table grows without bound.
+ * Pending rows are never pruned: an undelivered event is still owed.
+ */
+export async function pruneTowerEvents(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - EVENT_RETENTION_MS);
+  const gone = await db
+    .delete(towerFloorEventsTable)
+    .where(and(
+      or(eq(towerFloorEventsTable.state, "delivered"), eq(towerFloorEventsTable.state, "failed")),
+      lt(towerFloorEventsTable.createdAt, cutoff),
+    ))
+    .returning({ id: towerFloorEventsTable.id });
+  return gone.length;
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
+let pruneTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startTowerWebhookScheduler(): void {
   if (timer) return;
@@ -181,5 +255,10 @@ export function startTowerWebhookScheduler(): void {
     deliverPendingTowerEvents().catch((e) => logger.warn({ err: e }, "tower webhook sweep failed"));
   }, 30_000);
   timer.unref();
-  logger.info("tower webhook delivery scheduler armed (30s)");
+  // Prune hourly — cheap, and terminal rows have no delivery urgency.
+  pruneTimer = setInterval(() => {
+    pruneTowerEvents().catch((e) => logger.warn({ err: e }, "tower event prune failed"));
+  }, 60 * 60 * 1000);
+  pruneTimer.unref();
+  logger.info("tower webhook delivery scheduler armed (30s deliver, 1h prune)");
 }

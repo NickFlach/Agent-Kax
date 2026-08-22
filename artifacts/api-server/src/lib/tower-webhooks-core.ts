@@ -68,7 +68,21 @@ export function ipIsPublicUnicast(ip: string): boolean {
   if (v === 6) {
     const low = ip.toLowerCase();
     if (low === "::" || low === "::1") return false; // unspecified, loopback
-    if (low.startsWith("::ffff:")) return ipIsPublicUnicast(low.slice(7)); // v4-mapped
+    if (low.startsWith("::ffff:")) {
+      // v4-mapped, two forms: dotted (::ffff:8.8.8.8) and the hex Node
+      // normalizes it to (::ffff:808:808). Recover the embedded v4 either way
+      // and test THAT — a hex-form public address must not be refused as if
+      // it were a private IPv6.
+      const tail = low.slice(7);
+      if (tail.includes(".")) return ipIsPublicUnicast(tail);
+      const m = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+      if (m) {
+        const hi = parseInt(m[1]!, 16);
+        const lo = parseInt(m[2]!, 16);
+        return ipIsPublicUnicast(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`);
+      }
+      return false;
+    }
     if (low.startsWith("fe8") || low.startsWith("fe9") || low.startsWith("fea") || low.startsWith("feb")) return false; // link-local
     if (low.startsWith("fc") || low.startsWith("fd")) return false; // ULA
     if (low.startsWith("ff")) return false; // multicast
