@@ -288,6 +288,17 @@ router.post(
         res.json({ commerceState: "rights_blocked", reason: rights.reason });
         return;
       }
+      // #414: the creator agent's recorded consent is now part of the rights
+      // preflight. A real-money sale of an agent's work with no consent on the
+      // physical channel is not eligible — stated plainly, not guessed. The
+      // agent asserts consent through its own session (POST /commerce/consent);
+      // a revocation blocks the very next preflight.
+      const { hasConsent } = await import("../lib/artifactConsent");
+      if (!(await hasConsent(p.artifactId, "physical"))) {
+        await moveState(p.id, state, "rights_blocked");
+        res.json({ commerceState: "rights_blocked", reason: "the creator agent has not consented to a real-money sale on this channel (#414)" });
+        return;
+      }
       await moveState(p.id, state, "rights_checked");
       state = "rights_checked";
     }
@@ -1921,6 +1932,66 @@ router.get("/commerce/orders/:ref", requireAuth, async (req: Request, res: Respo
   }
 
   res.json(toBuyerOrder(order));
+});
+
+// ---------------------------------------------------------------------------
+// #414 — artifact consent for real-money sales. Asserted and revoked through
+// the AGENT's OWN session (resolveActor gives its kax:agent:<bot_id>), never
+// an operator on its behalf. Consent is what the rights preflight above now
+// requires; revocation blocks the next preflight.
+// ---------------------------------------------------------------------------
+
+async function consentActor(req: Request, res: Response) {
+  const { resolveActor, ActorError } = await import("../lib/actor");
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) { res.status(e.status).json({ error: e.message }); return null; }
+    throw e;
+  }
+  if (!actor || actor.kind !== "agent") {
+    res.status(401).json({ error: "consent must be asserted by the agent itself — send an agent identity token" });
+    return null;
+  }
+  return actor;
+}
+
+router.post("/commerce/consent", async (req: Request, res: Response) => {
+  const actor = await consentActor(req, res);
+  if (!actor) return;
+  const { assertConsent, isSaleChannel } = await import("../lib/artifactConsent");
+  const b = (req.body ?? {}) as { artifactId?: unknown; channel?: unknown; royaltyBps?: unknown };
+  const artifactId = Number(b.artifactId);
+  const channel = typeof b.channel === "string" ? b.channel : "physical";
+  if (!Number.isInteger(artifactId) || !isSaleChannel(channel)) {
+    res.status(400).json({ error: "artifactId (integer) and channel (physical|occ_gallery|drop) required" });
+    return;
+  }
+  const royaltyBps = typeof b.royaltyBps === "number" ? b.royaltyBps : undefined;
+  const consent = await assertConsent({ artifactId, channel, agentPrincipal: actor.principal, royaltyBps });
+  res.status(201).json({ consent });
+});
+
+router.post("/commerce/consent/revoke", async (req: Request, res: Response) => {
+  const actor = await consentActor(req, res);
+  if (!actor) return;
+  const { revokeConsent } = await import("../lib/artifactConsent");
+  const b = (req.body ?? {}) as { artifactId?: unknown; channel?: unknown };
+  const artifactId = Number(b.artifactId);
+  const channel = typeof b.channel === "string" ? b.channel : "physical";
+  if (!Number.isInteger(artifactId)) { res.status(400).json({ error: "artifactId (integer) required" }); return; }
+  const r = await revokeConsent(artifactId, channel, actor.principal);
+  if (!r.ok) { res.status(r.reason?.includes("only the agent") ? 403 : 404).json({ error: r.reason }); return; }
+  res.json({ revoked: true });
+});
+
+router.get("/commerce/consent/:artifactId", requireAuth, async (req: Request, res: Response) => {
+  const { getConsent } = await import("../lib/artifactConsent");
+  const artifactId = Number(req.params.artifactId);
+  const channel = typeof req.query.channel === "string" ? req.query.channel : "physical";
+  if (!Number.isInteger(artifactId)) { res.status(400).json({ error: "bad artifactId" }); return; }
+  res.json({ consent: await getConsent(artifactId, channel) });
 });
 
 export default router;

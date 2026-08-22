@@ -215,3 +215,39 @@ export async function electCreatorShareAsCredits(input: {
   });
   return { creditTxId, commerceTxId };
 }
+
+/**
+ * Pay the agent's royalty at settlement (#414), the split NAMED in the consent
+ * record. Reads the consent (royaltyShareCents) and routes the share through
+ * the SAME creator-share path the rest of commerce uses
+ * (electCreatorShareAsCredits): the fiat side stays merchant → kax_platform,
+ * and the agent — who holds no bank account — receives its share as play
+ * credits. Returns null when there is no active consent, so a mis-sequenced
+ * caller pays nothing on work that was never consented to.
+ *
+ * This lives in the settlement layer, NOT reachable from commerce.ts's route
+ * graph, which is why it may reach the ledger while the consent RECORD
+ * (artifactConsent.ts, imported by the routes) stays ledger-free.
+ */
+export async function settleConsentRoyalty(input: {
+  artifactId: number;
+  channel: "physical" | "occ_gallery" | "drop";
+  saleTotalCents: bigint;
+  merchantId: number;
+  creatorPrincipal: string;
+  commerceOrderRef: string;
+  actor: string;
+}): Promise<{ shareCents: bigint; creditTxId: string; commerceTxId: string } | null> {
+  const { getConsent, royaltyShareCents } = await import("./artifactConsent");
+  const consent = await getConsent(input.artifactId, input.channel);
+  const shareCents = royaltyShareCents(consent, input.saleTotalCents);
+  if (shareCents <= 0n) return null;
+  const r = await electCreatorShareAsCredits({
+    merchantId: input.merchantId,
+    creatorPrincipal: input.creatorPrincipal,
+    shareCents,
+    commerceOrderRef: input.commerceOrderRef,
+    actor: input.actor,
+  });
+  return { shareCents, ...r };
+}
