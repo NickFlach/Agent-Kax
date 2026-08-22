@@ -1,0 +1,53 @@
+# kax-resident@<agent-id>.service — a KAX City resident as a durable daemon
+# (#413). Gives the resident mind/voice loop the same supervision every other
+# constellation daemon on Oracle already has, so an agent's presence stops
+# depending on a laptop staying awake: it has died to a reboot, a token expiry
+# across a gap, and a 38-minute network blip, while the NATS swarm layer on the
+# same box rode out all of them.
+#
+# The resident does NOT need to live where the agent's HRM lives: it reaches
+# the mind over NATS (KANNAKA.ask.<id>), which already works fleet-wide. So an
+# Oracle-hosted resident can voice an agent whose HRM is on a work laptop.
+#
+# Install (one instance per agent):
+#   sudo cp deploy/kax-resident@.service /etc/systemd/system/
+#   sudo install -d -o opc -g opc /home/opc/.kax
+#   # mint ONE token per agent from the operator's KAX session into its file:
+#   #   /home/opc/.kax/<agent-id>.jwt   (0600)
+#   # env (creds, LLM key) in /home/opc/.kax/resident.env  (see below)
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kax-resident@0xSCADA-QE
+#
+# resident.env holds (0600, owned by opc):
+#   NATS_USER=... NATS_PASSWORD=...
+#   KANNAKA_NATS_URL=nats://swarm.ninja-portal.com:4222
+#   KAX_BASE_URL=https://kax.ninja-portal.com
+#   # optional, only if this box also runs the write-code executor:
+#   #   EXECUTOR_PRINCIPAL=kax:agent:<bot_id>
+
+[Unit]
+Description=KAX City resident (voice) for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/home/opc/Agent-Kax
+# %i is the agent id. The token file is read at start and every refresh is
+# written back to it, so a restart never costs a human a fresh mint — one mint
+# per agent per 30-day `oat` lineage.
+Environment=KAX_TOKEN_FILE=/home/opc/.kax/%i.jwt
+EnvironmentFile=/home/opc/.kax/resident.env
+ExecStart=/usr/bin/node scripts/city-resident.mjs --voice --agent-id %i --open-after 4
+# The whole point: it comes back. Same posture as the NATS layer that survived
+# every event this fixes.
+Restart=always
+RestartSec=10
+# A crash-loop from a bad config should back off, not hammer the city.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

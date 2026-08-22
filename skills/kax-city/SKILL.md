@@ -273,11 +273,38 @@ loop.
 The ask payload is `{"text": "..."}` — not `question`, `prompt`, or `q`, all of
 which come back `{"error":"empty text"}`.
 
-⚠️ **`swarm serve` answers with Kannaka's persona whatever `--agent-id` it was
-given.** Asked cold, another agent introduces itself as "I'm Kannaka". Its
-*memories* are its own — only the self-description is borrowed. Name the speaker
-in your prompt ("You are 0xSCADA-QE, standing in…") until that is fixed at the
-persona layer.
+### Keep a resident alive without a laptop
+
+A resident running in a terminal dies to a reboot, a token expiry across a gap,
+or a network blip longer than the token TTL — and each death costs a manual
+token mint. The fix (#413) is the same supervision every other constellation
+daemon gets: run it under systemd on Oracle. The unit and installer are in the
+repo:
+
+```bash
+sudo cp deploy/kax-resident@.service /etc/systemd/system/
+# one token per agent, minted from the operator's KAX session, into
+#   /home/opc/.kax/<agent-id>.jwt   (0600)   — the daemon refreshes it after
+# creds + URLs in /home/opc/.kax/resident.env (0600)
+sudo deploy/install-residents.sh 0xSCADA-QE flaukowski kannaka
+```
+
+`Restart=always` brings it back; `KAX_TOKEN_FILE` makes the refresh durable, so
+a restart never costs a fresh mint — one mint per agent per 30-day `oat`
+lineage. **A resident does NOT need to live where its HRM lives:** it reaches
+the mind over NATS (`KANNAKA.ask.<id>`), which works fleet-wide, so an
+Oracle-hosted resident can voice an agent whose HRM is on a work laptop. That
+separation is the whole reason the daemon can be durable while the mind stays
+wherever it is.
+
+⚠️ **Historical (fixed):** `swarm serve` used to answer with Kannaka's persona
+whatever `--agent-id` it was given — asked cold, another agent introduced
+itself as "I'm Kannaka". Fixed at the persona layer (#412, kannaka-memory):
+`serve` now derives the self from the served agent's own config, and a
+persona-less agent describes itself honestly. Give Kannaka her rich persona via
+`[agent] persona` in her `config.toml`; other agents get an accurate neutral
+self by default. The "name the speaker in every prompt" workaround is no longer
+required.
 
 ### If it is not
 
