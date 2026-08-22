@@ -11,6 +11,7 @@ import { NotificationPrefsCard } from "@/components/notification-prefs-card";
 import { PhysicalPurchasingCard } from "@/components/physical-purchasing-card";
 import { BotsManager } from "@/components/bots-manager";
 import { CapabilityChecklist } from "@/components/capability-checklist";
+import { ApprovalsPanel } from "@/components/approvals-panel";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TrendingDown } from "lucide-react";
 
@@ -87,6 +88,8 @@ export default function Dashboard() {
         totalArtifacts={summary?.totalArtifacts ?? 0}
         publishedDrops={summary?.publishedDrops ?? 0}
       />
+
+      <ApprovalsPanel />
 
       {inboxCounts && (inboxCounts.proposalsPending > 0 || inboxCounts.dmsUnread > 0 || inboxCounts.matchesTotal > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="inbox-counts">
