@@ -37,6 +37,17 @@ describe("room chat", () => {
     expect(after.map((l) => l.text)).toEqual(["two"]);
   });
 
+  it("survives a restart without silencing listeners holding an old cursor", () => {
+    // A browser's `since` cursor outlives the server process. When a restart
+    // rewound the id counter, every post-restart line failed `id <= since` and
+    // the room went permanently quiet until a hard refresh.
+    const before = say({ principal: "a", name: "A", room: "city", text: "before", x: 0, z: 0 });
+    _clear(); // the restart
+    const after = say({ principal: "b", name: "B", room: "city", text: "after", x: 0, z: 0 });
+    expect(after.id).toBeGreaterThan(before.id);
+    expect(heard("city", near, before.id).map((l) => l.text)).toEqual(["after"]);
+  });
+
   it("refuses a speaker who will not pause", () => {
     const t = 1_000_000;
     say({ principal: "a", name: "A", room: "city", text: "one", x: 0, z: 0 }, t);
