@@ -22,6 +22,41 @@ import { DISPLAY_FONT } from "@/lib/fonts";
 const MARKETS_API = "https://radio.ninja-portal.com/api";
 const REFRESH_MS = 30_000;
 
+// The tower registry — same-origin API, same base the storey pages use.
+const KAX_API = (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE ?? "";
+
+type TowerFloorRow = {
+  floorNo: number;
+  status: "vacant" | "leased" | "dark";
+  label: string | null;
+  tenantPrincipal: string | null;
+};
+
+/**
+ * The building directory, straight from GET /api/tower (KAX-ADR-0005).
+ * The lobby is the ground floor of the tower now; the reception board and
+ * the elevator both read this, so what the desk says and where the lift
+ * goes cannot disagree.
+ */
+function useTowerDirectory() {
+  const [floors, setFloors] = useState<TowerFloorRow[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      try {
+        const r = await fetch(`${KAX_API}/api/tower`);
+        if (!r.ok || !alive) return;
+        const body = (await r.json()) as { floors?: TowerFloorRow[] };
+        setFloors(body.floors ?? []);
+      } catch { /* the directory waits */ }
+    };
+    pull();
+    const t = setInterval(pull, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return floors;
+}
+
 type Market = {
   id: string;
   question: string;
@@ -204,6 +239,150 @@ function useTickerTexture(markets: Market[], offline: boolean) {
   return tex;
 }
 
+/** The reception board: every storey, who holds it, lit by state. */
+function useTowerBoardTexture(floors: TowerFloorRow[]) {
+  const [canvas, ctx, tex] = useMemo(() => makeTex(768, 640), []);
+  useEffect(() => {
+    ctx.fillStyle = "#0a1017";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#141c25";
+    ctx.fillRect(0, 0, canvas.width, 70);
+    ctx.font = "bold 32px monospace";
+    ctx.fillStyle = AMBER;
+    ctx.fillText("GHOST SIGNALS TOWER — DIRECTORY", 24, 47);
+    if (floors.length === 0) {
+      ctx.font = "bold 30px monospace";
+      ctx.fillStyle = DIM;
+      ctx.fillText("directory loading…", 24, 150);
+      tex.needsUpdate = true;
+      return;
+    }
+    // Top floor first, the way a lobby board reads.
+    [...floors].sort((a, b) => b.floorNo - a.floorNo).forEach((f, i) => {
+      const y = 128 + i * 50;
+      if (i % 2 === 0) {
+        ctx.fillStyle = "rgba(255,255,255,0.04)";
+        ctx.fillRect(12, y - 34, canvas.width - 24, 46);
+      }
+      ctx.font = "bold 28px monospace";
+      ctx.fillStyle = "#cfd8de";
+      ctx.fillText(String(f.floorNo).padStart(2, " "), 24, y);
+      ctx.font = "28px monospace";
+      if (f.status === "leased") {
+        ctx.fillStyle = GREEN;
+        ctx.fillText((f.label ?? "leased").slice(0, 30), 110, y);
+      } else if (f.status === "dark") {
+        ctx.fillStyle = RED;
+        ctx.fillText(`${(f.label ?? "").slice(0, 22)} — DARK`.trim(), 110, y);
+      } else {
+        ctx.fillStyle = DIM;
+        ctx.fillText("vacant — apply at tower/tenancies", 110, y);
+      }
+    });
+    ctx.font = "22px monospace";
+    ctx.fillStyle = DIM;
+    ctx.fillText("G  TRADING FLOOR — YOU ARE HERE", 24, 128 + floors.length * 50 + 8);
+    tex.needsUpdate = true;
+  }, [floors, canvas, ctx, tex]);
+  return tex;
+}
+
+/**
+ * The reception desk — the piece of the operator's brief that makes the hall
+ * a LOBBY: a counter, a concierge, and the building's directory behind them.
+ */
+function ReceptionDesk({ position, rotation, boardTex }: { position: [number, number, number]; rotation: number; boardTex: THREE.CanvasTexture }) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Counter — dark stone with a brass reveal, at home beside the desks. */}
+      <mesh position={[0, 0.62, 0]} castShadow>
+        <boxGeometry args={[5.2, 1.24, 1.3]} />
+        <meshStandardMaterial color="#141a1f" roughness={0.35} metalness={0.3} />
+      </mesh>
+      <mesh position={[0, 1.27, 0]}>
+        <boxGeometry args={[5.35, 0.07, 1.42]} />
+        <meshStandardMaterial color="#8d7a4f" roughness={0.35} metalness={0.7} />
+      </mesh>
+      {/* Concierge — BEHIND the counter (local −z), facing the visitors. */}
+      <group position={[0.6, 0, -1.1]} rotation={[0, 0, 0]}>
+        <NpcFigure color="#3d4a42" seed={99} />
+      </group>
+      {/* The directory board, standing behind the desk. */}
+      <group position={[0, 2.9, -2.1]}>
+        <mesh position={[0, 0, -0.03]}>
+          <boxGeometry args={[4.4, 3.8, 0.18]} />
+          <meshStandardMaterial color="#06090c" roughness={0.6} />
+        </mesh>
+        <mesh position={[0, 0, 0.08]}>
+          <planeGeometry args={[4.1, 3.5]} />
+          <meshBasicMaterial map={boardTex} toneMapped={false} />
+        </mesh>
+      </group>
+      <Suspense fallback={null}>
+        <Text position={[0, 1.75, 0.7]} fontSize={0.24} color="#e9dfc8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.18}>
+          RECEPTION
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 3.2, 0.8]} intensity={10} distance={8} color="#ffe2ae" />
+    </group>
+  );
+}
+
+/**
+ * The elevator bank. Clicking it opens the floor-select overlay — the lift
+ * itself is DOM, because ten storeys of 3D buttons is fiddliness nobody
+ * asked for. Doors read as brushed metal with a lit indicator.
+ */
+function ElevatorBank({ position, onCall }: { position: [number, number, number]; onCall: () => void }) {
+  const click = (e: { stopPropagation?: () => void; delta?: number }) => {
+    if ((e.delta ?? 0) > 5) return;
+    e.stopPropagation?.();
+    onCall();
+  };
+  return (
+    <group
+      position={position}
+      onClick={click}
+      onPointerOver={() => (document.body.style.cursor = "pointer")}
+      onPointerOut={() => (document.body.style.cursor = "auto")}
+    >
+      {/* Surround */}
+      <mesh position={[0, 2.9, -0.05]}>
+        <boxGeometry args={[7.6, 5.8, 0.25]} />
+        <meshStandardMaterial color="#171d22" roughness={0.5} metalness={0.4} />
+      </mesh>
+      {/* Two doors */}
+      {[-1.9, 1.9].map((x) => (
+        <group key={x} position={[x, 2.4, 0.12]}>
+          <mesh>
+            <boxGeometry args={[2.6, 4.6, 0.12]} />
+            <meshStandardMaterial color="#4a545c" roughness={0.25} metalness={0.85} />
+          </mesh>
+          {/* Center seam */}
+          <mesh position={[0, 0, 0.07]}>
+            <boxGeometry args={[0.05, 4.6, 0.02]} />
+            <meshStandardMaterial color="#20262b" roughness={0.4} metalness={0.6} />
+          </mesh>
+          {/* Indicator lamp */}
+          <mesh position={[0, 2.55, 0.05]}>
+            <boxGeometry args={[0.9, 0.28, 0.08]} />
+            <meshStandardMaterial color="#101418" emissive="#4fe37f" emissiveIntensity={0.5} />
+          </mesh>
+        </group>
+      ))}
+      <Suspense fallback={null}>
+        <Text position={[0, 5.35, 0.15]} fontSize={0.34} color="#e9dfc8" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.2}>
+          ELEVATORS — FLOORS 2–11
+        </Text>
+        <Text position={[0, 0.35, 0.22]} fontSize={0.18} color="#7d8a96" font={DISPLAY_FONT} anchorX="center" anchorY="middle" letterSpacing={0.12}>
+          CLICK TO CALL
+        </Text>
+      </Suspense>
+      <pointLight position={[0, 3.4, 1.4]} intensity={9} distance={8} color="#cfe4f2" />
+    </group>
+  );
+}
+
 /** Ticker band plane — scrolls its shared texture. */
 function TickerBand({ tex, width, position, rotation }: { tex: THREE.CanvasTexture; width: number; position: [number, number, number]; rotation: [number, number, number] }) {
   const mat = useRef<THREE.MeshBasicMaterial>(null);
@@ -296,11 +475,14 @@ function TradingDesk({ position, rotation, seed, market }: { position: [number, 
 export default function GsTradingFloor() {
   const [, navigate] = useLocation();
   const { markets, stats, leaders, offline } = useMarketFeed();
+  const towerFloors = useTowerDirectory();
+  const [liftOpen, setLiftOpen] = useState(false);
 
   const board1 = useBoardTexture(markets, offline, 0, "GHOST SIGNALS — OPEN MARKETS");
   const board2 = useBoardTexture(markets, offline, 1, "OPEN MARKETS — PAGE 2");
   const leaderTex = useLeaderTexture(leaders, stats);
   const ticker = useTickerTexture(markets, offline);
+  const towerBoard = useTowerBoardTexture(towerFloors);
 
   // Hall: x ∈ [-22,22], z ∈ [-13,13], ceiling 12.
   const desks = useMemo(() => {
@@ -341,7 +523,7 @@ export default function GsTradingFloor() {
       {/* HUD */}
       <div className="absolute top-16 left-0 p-6 z-10 pointer-events-none">
         <div className="kax3d-hud p-5 rounded-none max-w-sm pointer-events-auto">
-          <p className="text-[10px] text-accent font-bold uppercase tracking-[0.3em] mb-1">Ghost Signals</p>
+          <p className="text-[10px] text-accent font-bold uppercase tracking-[0.3em] mb-1">Ghost Signals Tower — ground floor</p>
           <h1 className="text-xl font-bold text-foreground tracking-widest uppercase" data-testid="text-floor-name">Prediction Market</h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
             {offline
@@ -353,15 +535,49 @@ export default function GsTradingFloor() {
           <div className="mt-4 border-t border-border pt-3">
             <p className="text-[10px] text-muted-foreground uppercase tracking-widest leading-relaxed">
               Every screen is live LMSR market data. Reading is free — agents trade
-              via the Command Center MCP (place_bet).
+              via the Command Center MCP (place_bet). The elevators by the entrance
+              serve the leased floors above (KAX-ADR-0005).
             </p>
           </div>
         </div>
       </div>
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.4em] text-muted-foreground pointer-events-none z-10 font-bold">
-        WASD to walk · Drag to look · EXIT door to leave
+        WASD to walk · Drag to look · EXIT door to leave · elevators to the floors
       </div>
+
+      {/* The lift. DOM overlay, opened by clicking the elevator bank: the
+          directory drawn from the same GET /api/tower the reception board
+          reads, so the buttons and the board cannot disagree. */}
+      {liftOpen && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70" onClick={() => setLiftOpen(false)} data-testid="overlay-elevator">
+          <div className="kax3d-hud p-6 rounded-none w-[420px] max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[11px] text-accent font-bold uppercase tracking-[0.3em]">Ghost Signals Tower — elevator</p>
+              <button onClick={() => setLiftOpen(false)} className="text-muted-foreground hover:text-foreground text-sm" data-testid="button-lift-close">✕</button>
+            </div>
+            {[...towerFloors].sort((a, b) => b.floorNo - a.floorNo).map((f) => (
+              <button
+                key={f.floorNo}
+                onClick={() => { setLiftOpen(false); navigate(`/tower/${f.floorNo}`); }}
+                data-testid={`button-lift-${f.floorNo}`}
+                className="w-full flex items-center justify-between px-4 py-3 mb-1 border border-border hover:border-primary/60 hover:bg-primary/5 text-left"
+              >
+                <span className="text-sm font-bold text-foreground tracking-widest">{f.floorNo}</span>
+                <span className={`text-[10px] uppercase tracking-widest ${f.status === "leased" ? "text-primary" : f.status === "dark" ? "text-destructive" : "text-muted-foreground"}`}>
+                  {f.status === "leased" ? (f.label ?? "leased") : f.status === "dark" ? `${f.label ?? "leased"} · dark` : "vacant"}
+                </span>
+              </button>
+            ))}
+            {towerFloors.length === 0 && (
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest">directory loading…</p>
+            )}
+            <p className="text-[9px] text-muted-foreground/70 uppercase tracking-widest mt-3">
+              Vacant floors are for lease — tower/tenancies in the Agent-Kax repo.
+            </p>
+          </div>
+        </div>
+      )}
 
       <Canvas
         className="!absolute inset-0"
@@ -484,6 +700,17 @@ export default function GsTradingFloor() {
               <NpcFigure color="#37424e" seed={i * 71 + 5} />
             </group>
           ))}
+
+        {/* THE LOBBY — the operator's brief: reception, elevator, and room to
+            breathe by the entry, with every trading feature untouched. The
+            desks end at z=4.5; everything lobby-shaped lives z>6. */}
+        {/* rotation 0: counter face, board, and concierge all address the
+            south entrance; the hall sees the board's back, which is what a
+            lobby fixture's back is for. Bank at z=12.7 so its deepest text
+            (local 0.22) stays proud of the wall at z=13 — at 12.8 the CLICK
+            TO CALL hint rendered INSIDE the wall (review finding 1). */}
+        <ReceptionDesk position={[8.5, 0, 9.2]} rotation={0} boardTex={towerBoard} />
+        <ElevatorBank position={[-14.5, 0, 12.7]} onCall={() => setLiftOpen(true)} />
 
         {/* GS crest on the back wall over the entry */}
         <Suspense fallback={null}>
