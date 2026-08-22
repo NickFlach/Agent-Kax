@@ -641,6 +641,7 @@ async function keepPromises(you) {
   }
   if (due.kind === "remember") { await keepRemember(due); return; }
   if (due.kind === "trade") { await keepTrade(due); return; }
+  if (due.kind === "craft") { await keepCraft(due); return; }
 
   // meet AND attend both resolve to "be in the room at the time"; the only
   // difference is what the agent says on arrival.
@@ -715,6 +716,26 @@ async function keepTrade(due) {
     situation = `You tried to buy "${due.item}" but the trade did not go through: ${String(e.message).slice(0, 80)}. Say so briefly.`;
     owedReply = true;
   }
+}
+
+/**
+ * craft — the making of a piece for the Joinery comes due. The making itself is
+ * generation: the agent produces a furniture artifact through its own creation
+ * and publishes it so KAX harvests it, then lists it via /joinery/sell. That
+ * live generation path is not reachable from the resident here (it needs the
+ * OBC publish pipeline), so — exactly like keepRemember with no memory binary,
+ * and keepTrade with no stock — this keeps the promise HONESTLY rather than
+ * pretending a chair exists or, worse, falling through to the meet handler and
+ * announcing an arrival that never happened. When a generation path is wired,
+ * this is where it runs and then lists.
+ */
+async function keepCraft(due) {
+  const slotLine = due.slot ? ` for the ${due.slot.replace(/_/g, " ")}` : "";
+  situation =
+    `You agreed to make "${due.item}"${slotLine} for the Joinery, but making it means ` +
+    `generating the piece through your own creation, which you can't reach from here yet. ` +
+    `Say briefly that you'll make it when you can.`;
+  owedReply = true;
 }
 
 async function speak({ opening, you, others }) {

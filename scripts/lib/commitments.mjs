@@ -307,9 +307,21 @@ export function parseCraft({ text, from, now = Date.now(), youName } = {}) {
   if (!CRAFT_INTENT.test(line)) return null;
 
   const quoted = /["“]([^"”]{2,60})["”]/.exec(line);
-  const item = quoted
-    ? quoted[1].trim()
-    : (/(?:make|craft|build|together)\s+(?:a|an|some|the\s+)?\s*([A-Z][\w '-]{2,50})/.exec(line)?.[1] ?? "").trim();
+  let item;
+  if (quoted) {
+    item = quoted[1].trim();
+  } else {
+    // The verb is matched case-sensitively per-variant (so a sentence-initial
+    // "Making a Bench" resolves too) while the item keeps its required leading
+    // capital — an `i` flag would let the capital gate accept filler.
+    const m =
+      /(?:[Mm]ak(?:e|ing)|[Cc]raft|[Bb]uild|[Tt]ogether)\s+(?:a|an|some|the\s+)?\s*([A-Z][\w '-]{2,50})/.exec(line);
+    // The unquoted name runs on through any placement/conjunction clause
+    // ("Chair for the corner", "Stool and then…"); cut it at the first such
+    // boundary so the piece lists under its name, not the whole sentence.
+    const name = (m?.[1] ?? "").split(/\s+\b(?:for|by|in|on|at|near|next|and|then|so)\b/i)[0] ?? "";
+    item = name.trim();
+  }
   if (!item) return null;
 
   let slot = null;

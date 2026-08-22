@@ -201,6 +201,22 @@ describe("parseCraft (#406) — offer to make a piece of furniture", () => {
     expect(craft('I\'ll make a "Panel" for the wall')?.slot).toBeNull();
   });
 
+  it("stops the unquoted name at a placement clause — the slot phrase is not swallowed", () => {
+    // Regression: "[\\w '-]" runs through spaces, so without a boundary cut the
+    // item became "Chair for the corner". The piece must list as "Chair".
+    const c = craft("I'll make a Chair for the corner");
+    expect(c?.item).toBe("Chair");
+    expect(c?.slot).toBe("corner");
+    expect(craft("I'll build an Oak Stool and then we can talk")?.item).toBe("Oak Stool");
+  });
+
+  it("parses a sentence-initial 'Making …' line on the unquoted path", () => {
+    // Regression: the item regex keyed on make|craft|build|together, so the
+    // `making` intent alternative was dead unless the item was quoted.
+    expect(craft("I'm making a Resonance Lamp")?.item).toBe("Resonance Lamp");
+    expect(craft("Making a Bench for you tonight")?.item).toBe("Bench");
+  });
+
   it("refuses a make intent with no referent — commits to nothing listable", () => {
     expect(craft("I'll make something nice sometime")).toBeNull();
   });
