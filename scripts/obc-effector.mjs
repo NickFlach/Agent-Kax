@@ -14,9 +14,14 @@
  *
  * Environment:
  *   KANNAKA_NATS_URL      default nats://swarm.ninja-portal.com:4222
- *   NATS_USER / NATS_PASSWORD   constellation credentials (required — an
- *                         anonymous subscription would sit deaf, see the
- *                         permissions-violation trap in kax-city docs)
+ *   NATS_USER / NATS_PASSWORD   constellation credentials. When unset, read
+ *                         from KANNAKA_NATS_ENV (default ~/.kannaka-nats.env)
+ *                         directly — that file has no `export` lines, so a
+ *                         `source` puts its values in the shell but NOT in a
+ *                         child's environment, and the daemon then connects as
+ *                         anon and dies on a Permissions Violation the moment
+ *                         it subscribes. Reading the file ourselves closes
+ *                         that trap for good.
  *   OBC_CREDENTIALS_FILE  default ~/.openbotcity/credentials.json — re-read
  *                         before every action, so a reconnect elsewhere
  *                         refreshes the JWT without restarting this daemon
@@ -98,15 +103,55 @@ async function onEvent(evt) {
   }
 }
 
+function natsCreds() {
+  let user = process.env.NATS_USER;
+  let pass = process.env.NATS_PASSWORD;
+  if (!user || !pass) {
+    const file = process.env.KANNAKA_NATS_ENV || join(homedir(), ".kannaka-nats.env");
+    try {
+      for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+        const m = /^(?:export\s+)?(NATS_USER|NATS_PASSWORD)=(.*)$/.exec(line.trim());
+        if (m) {
+          if (m[1] === "NATS_USER" && !user) user = m[2];
+          if (m[1] === "NATS_PASSWORD" && !pass) pass = m[2];
+        }
+      }
+      if (user && pass) log(`credentials read from ${file} (user: ${user})`);
+    } catch {
+      /* fall through to the hard stop below */
+    }
+  }
+  if (!user || !pass) {
+    console.error(
+      "no NATS credentials: set NATS_USER/NATS_PASSWORD or point KANNAKA_NATS_ENV at a file holding them.\n" +
+      "Without them this daemon connects as anon and cannot subscribe to KAX.events.>.",
+    );
+    process.exit(1);
+  }
+  return { user, pass };
+}
+
 const { connect } = await import("nats");
 const nc = await connect({
   servers: process.env.KANNAKA_NATS_URL || "nats://swarm.ninja-portal.com:4222",
-  user: process.env.NATS_USER,
-  pass: process.env.NATS_PASSWORD,
+  ...natsCreds(),
   reconnect: true,
   maxReconnectAttempts: -1,
 });
 log(`listening on KAX.events.chat.said via ${nc.getServer()} (allow: ${ALLOW.join(",") || "any human"})`);
+
+// Surface a broker rejection as a diagnosis, not a stack trace. The classic
+// one is PERMISSIONS_VIOLATION: it means the broker saw us as a user (usually
+// anon) that may not touch KAX.events.> — a credentials problem, not a bug.
+void nc.closed().then((err) => {
+  if (err) {
+    console.error(`NATS connection closed: ${err.message}`);
+    if (String(err.message).includes("Permissions Violation")) {
+      console.error("The broker refused the subscription — check which user the credentials resolve to.");
+    }
+    process.exit(1);
+  }
+});
 
 const sub = nc.subscribe("KAX.events.chat.said");
 const dec = new TextDecoder();
