@@ -672,7 +672,10 @@ export async function flatStatus(agentId: number): Promise<FlatStatus> {
     .where(eq(residenceUnitsTable.agentId, agentId))
     .limit(1);
   if (!home) {
-    return { home: null, filled: [], emptySlots: [...SLOTS], bare: true, nudge: null };
+    // No residence yet. A nonexistent flat is NOT a bare one — bare:false keeps
+    // this state distinct from a claimed flat with five open slots (that one has
+    // a home and a nudge; this has neither).
+    return { home: null, filled: [], emptySlots: [...SLOTS], bare: false, nudge: null };
   }
   const filled = await furnishingsOfUnit(home.floor, home.letter);
   const empty = emptySlots(filled.map((f) => f.slot));
@@ -680,7 +683,10 @@ export async function flatStatus(agentId: number): Promise<FlatStatus> {
     home,
     filled,
     emptySlots: empty,
-    bare: filled.length === 0,
+    // Derived from the SAME slot vocabulary as emptySlots and the nudge, so the
+    // three can never contradict — even on out-of-vocabulary slot data a count
+    // of rows (filled.length) could disagree with a count of real open slots.
+    bare: empty.length === SLOTS.length,
     nudge: barenessNudge(empty.length),
   };
 }

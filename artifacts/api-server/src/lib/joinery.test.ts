@@ -203,6 +203,8 @@ describe("joinery purchase", () => {
     expect(s.home).toBeNull();
     expect(s.nudge).toBeNull();
     expect(s.emptySlots).toHaveLength(5);
+    // A nonexistent flat is not a bare one — distinct from a claimed empty flat.
+    expect(s.bare).toBe(false);
   });
 
   it("moves the credits and puts the piece in the room", async () => {
