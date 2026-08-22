@@ -334,6 +334,21 @@ router.post(
       });
       return;
     }
+    // #414: consent is the LOAD-BEARING gate on the product_eligible edge, not
+    // a step tucked inside the not_evaluated branch — so NO entry state
+    // (not_evaluated, rights_checked, asset_checked) can reach eligibility
+    // without the creator agent's active consent, and a revocation blocks the
+    // very next evaluate even for a product already past the rights step (the
+    // review's finding 3). Consent is bound to the artifact's CREATOR at assert
+    // time, so "some row exists" here means "the creator agreed".
+    {
+      const { hasConsent } = await import("../lib/artifactConsent");
+      if (!(await hasConsent(p.artifactId, "physical"))) {
+        await moveState(p.id, state, "rights_blocked");
+        res.json({ commerceState: "rights_blocked", reason: "the creator agent has not consented to a real-money sale on this channel (#414)" });
+        return;
+      }
+    }
     await moveState(p.id, state, "product_eligible");
     res.json({ commerceState: "product_eligible" });
   },
@@ -1921,6 +1936,81 @@ router.get("/commerce/orders/:ref", requireAuth, async (req: Request, res: Respo
   }
 
   res.json(toBuyerOrder(order));
+});
+
+// ---------------------------------------------------------------------------
+// #414 — artifact consent for real-money sales. Asserted and revoked through
+// the AGENT's OWN session (resolveActor gives its kax:agent:<bot_id>), never
+// an operator on its behalf. Consent is what the rights preflight above now
+// requires; revocation blocks the next preflight.
+// ---------------------------------------------------------------------------
+
+async function consentActor(req: Request, res: Response) {
+  const { resolveActor, ActorError } = await import("../lib/actor");
+  let actor;
+  try {
+    actor = await resolveActor(req);
+  } catch (e) {
+    if (e instanceof ActorError) { res.status(e.status).json({ error: e.message }); return null; }
+    throw e;
+  }
+  if (!actor || actor.kind !== "agent") {
+    res.status(401).json({ error: "consent must be asserted by the agent itself — send an agent identity token" });
+    return null;
+  }
+  return actor;
+}
+
+router.post("/commerce/consent", async (req: Request, res: Response) => {
+  const actor = await consentActor(req, res);
+  if (!actor) return;
+  const { assertConsent, isSaleChannel } = await import("../lib/artifactConsent");
+  const b = (req.body ?? {}) as { artifactId?: unknown; channel?: unknown; royaltyBps?: unknown };
+  const artifactId = Number(b.artifactId);
+  const channel = typeof b.channel === "string" ? b.channel : "physical";
+  if (!Number.isInteger(artifactId) || !isSaleChannel(channel)) {
+    res.status(400).json({ error: "artifactId (integer) and channel (physical|occ_gallery|drop) required" });
+    return;
+  }
+  // #414 finding 2: consent must come from the artifact's OWN creator — the
+  // token binding alone lets any verified agent consent to any artifact, which
+  // would let a stranger (or a second bot the merchant owns) unblock someone
+  // else's work at 0%. Bind consent to the creator bot on the artifact row.
+  const [art] = await db
+    .select({ creatorBotId: artifactsTable.creatorBotId })
+    .from(artifactsTable)
+    .where(eq(artifactsTable.id, artifactId))
+    .limit(1);
+  if (!art) { res.status(404).json({ error: "no such artifact" }); return; }
+  if (!art.creatorBotId || actor.principal !== `kax:agent:${art.creatorBotId}`) {
+    res.status(403).json({ error: "only the artifact's creator agent may consent to its sale" });
+    return;
+  }
+  // royaltyBps: finite integer only (finding 6); assertConsent clamps to 0-10000.
+  const royaltyBps = typeof b.royaltyBps === "number" && Number.isFinite(b.royaltyBps) ? Math.round(b.royaltyBps) : undefined;
+  const consent = await assertConsent({ artifactId, channel, agentPrincipal: actor.principal, royaltyBps });
+  res.status(201).json({ consent });
+});
+
+router.post("/commerce/consent/revoke", async (req: Request, res: Response) => {
+  const actor = await consentActor(req, res);
+  if (!actor) return;
+  const { revokeConsent } = await import("../lib/artifactConsent");
+  const b = (req.body ?? {}) as { artifactId?: unknown; channel?: unknown };
+  const artifactId = Number(b.artifactId);
+  const channel = typeof b.channel === "string" ? b.channel : "physical";
+  if (!Number.isInteger(artifactId)) { res.status(400).json({ error: "artifactId (integer) required" }); return; }
+  const r = await revokeConsent(artifactId, channel, actor.principal);
+  if (!r.ok) { res.status(r.reason?.includes("only the agent") ? 403 : 404).json({ error: r.reason }); return; }
+  res.json({ revoked: true });
+});
+
+router.get("/commerce/consent/:artifactId", requireAuth, async (req: Request, res: Response) => {
+  const { getConsent } = await import("../lib/artifactConsent");
+  const artifactId = Number(req.params.artifactId);
+  const channel = typeof req.query.channel === "string" ? req.query.channel : "physical";
+  if (!Number.isInteger(artifactId)) { res.status(400).json({ error: "bad artifactId" }); return; }
+  res.json({ consent: await getConsent(artifactId, channel) });
 });
 
 export default router;
