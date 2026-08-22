@@ -21,6 +21,7 @@ import {
   dueCommitment,
   parseProposal,
   parseAttend,
+  parseCraft,
   parseRemember,
   parseTrade,
   parseWhen,
@@ -172,6 +173,62 @@ describe("parseTrade (#411) — buy a named piece", () => {
 
   it("ignores its own voice", () => {
     expect(parseTrade({ text: "buy the Chair", from: "Kannaka", now: NOW, youName: "Kannaka" })).toBeNull();
+  });
+});
+
+describe("parseCraft (#406) — offer to make a piece of furniture", () => {
+  const craft = (text: string, from = "Nick") => parseCraft({ text, from, now: NOW, youName: "Kannaka" });
+
+  it("takes a make intent naming a quoted piece", () => {
+    expect(craft('I\'ll make a "Standing Wave Chair" for the corner')).toMatchObject({
+      kind: "craft",
+      item: "Standing Wave Chair",
+      slot: "corner",
+    });
+  });
+
+  it("captures a capitalised piece name when unquoted", () => {
+    expect(craft("I'll craft a Resonance Lamp")?.item).toBe("Resonance Lamp");
+  });
+
+  it("leaves slot null when no flat position is named", () => {
+    expect(craft('let me build the "Oak Stool"')?.slot).toBeNull();
+  });
+
+  it("maps only unambiguous slot words; a bare 'wall' stays null", () => {
+    expect(craft('I\'ll make a "Lamp" by the window')?.slot).toBe("window");
+    expect(craft('I\'ll make a "Shelf" for the left wall')?.slot).toBe("wall_left");
+    expect(craft('I\'ll make a "Panel" for the wall')?.slot).toBeNull();
+  });
+
+  it("stops the unquoted name at a placement clause — the slot phrase is not swallowed", () => {
+    // Regression: "[\\w '-]" runs through spaces, so without a boundary cut the
+    // item became "Chair for the corner". The piece must list as "Chair".
+    const c = craft("I'll make a Chair for the corner");
+    expect(c?.item).toBe("Chair");
+    expect(c?.slot).toBe("corner");
+    expect(craft("I'll build an Oak Stool and then we can talk")?.item).toBe("Oak Stool");
+  });
+
+  it("parses a sentence-initial 'Making …' line on the unquoted path", () => {
+    // Regression: the item regex keyed on make|craft|build|together, so the
+    // `making` intent alternative was dead unless the item was quoted.
+    expect(craft("I'm making a Resonance Lamp")?.item).toBe("Resonance Lamp");
+    expect(craft("Making a Bench for you tonight")?.item).toBe("Bench");
+  });
+
+  it("refuses a make intent with no referent — commits to nothing listable", () => {
+    expect(craft("I'll make something nice sometime")).toBeNull();
+  });
+
+  it("does not parse an artifact or listing id from chat", () => {
+    const c = craft('I\'ll make an "Ash Bench"');
+    expect(c).not.toHaveProperty("artifactId");
+    expect(c).not.toHaveProperty("listingId");
+  });
+
+  it("ignores its own voice", () => {
+    expect(parseCraft({ text: "I'll make a Chair", from: "Kannaka", now: NOW, youName: "Kannaka" })).toBeNull();
   });
 });
 

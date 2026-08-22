@@ -148,6 +148,7 @@ import {
   dueCommitment,
   parseProposal,
   parseAttend,
+  parseCraft,
   parseRemember,
   parseTrade,
   pruneCommitments,
@@ -582,6 +583,28 @@ async function considerTrade(t) {
 }
 
 /**
+ * The supply side (#406): agreeing to MAKE a piece for the Joinery.
+ *
+ * Records the intent as a commitment, the same as a trade — the resident's own
+ * yes before it acts. The actual making (generating the furniture artifact
+ * through the agent's own generation and publishing it so KAX harvests it, then
+ * listing it on the Joinery) is the live executor step downstream, so this
+ * function makes no external call: it is the funnel, not the workshop.
+ */
+async function considerCraft(c) {
+  const slotLine = c.slot ? ` for the ${c.slot.replace(/_/g, " ")}` : "";
+  const answer = await askOwnMind(
+    `${c.from} suggested you make "${c.item}"${slotLine} for the Joinery.\n` +
+      `Do you want to make this piece? Answer ONE WORD: ACCEPT to make it, DECLINE otherwise.`,
+  );
+  if (answer === null || !acceptedFrom(answer)) { log(`declined to craft ${c.item}`); return false; }
+  commitments = withCommitment(commitments, c);
+  log(`agreed to make "${c.item}"${slotLine}`);
+  situation = `You have just agreed to make "${c.item}"${slotLine} for the Joinery. Say briefly that you'll get to work.`;
+  return true;
+}
+
+/**
  * Fire the executor for a due write-code commitment. Detached: the executor
  * speaks its own report or failure in the room (D8), holds the revocation
  * cadence (D6), and writes the action record (D5) — the resident's only job
@@ -618,6 +641,7 @@ async function keepPromises(you) {
   }
   if (due.kind === "remember") { await keepRemember(due); return; }
   if (due.kind === "trade") { await keepTrade(due); return; }
+  if (due.kind === "craft") { await keepCraft(due); return; }
 
   // meet AND attend both resolve to "be in the room at the time"; the only
   // difference is what the agent says on arrival.
@@ -692,6 +716,26 @@ async function keepTrade(due) {
     situation = `You tried to buy "${due.item}" but the trade did not go through: ${String(e.message).slice(0, 80)}. Say so briefly.`;
     owedReply = true;
   }
+}
+
+/**
+ * craft — the making of a piece for the Joinery comes due. The making itself is
+ * generation: the agent produces a furniture artifact through its own creation
+ * and publishes it so KAX harvests it, then lists it via /joinery/sell. That
+ * live generation path is not reachable from the resident here (it needs the
+ * OBC publish pipeline), so — exactly like keepRemember with no memory binary,
+ * and keepTrade with no stock — this keeps the promise HONESTLY rather than
+ * pretending a chair exists or, worse, falling through to the meet handler and
+ * announcing an arrival that never happened. When a generation path is wired,
+ * this is where it runs and then lists.
+ */
+async function keepCraft(due) {
+  const slotLine = due.slot ? ` for the ${due.slot.replace(/_/g, " ")}` : "";
+  situation =
+    `You agreed to make "${due.item}"${slotLine} for the Joinery, but making it means ` +
+    `generating the piece through your own creation, which you can't reach from here yet. ` +
+    `Say briefly that you'll make it when you can.`;
+  owedReply = true;
 }
 
 async function speak({ opening, you, others }) {
@@ -846,6 +890,9 @@ async function checkIn() {
 
         const trade = parseTrade({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
         if (trade && warrantedFor(trade.from)) { await considerTrade(trade); break; }
+
+        const craft = parseCraft({ text: line.text, from: line.from, youName: you.name ?? AGENT_ID });
+        if (craft && warrantedFor(craft.from)) { await considerCraft(craft); break; }
       }
     }
 
