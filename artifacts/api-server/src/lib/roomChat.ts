@@ -33,7 +33,17 @@ export const MIN_GAP_MS = 1200;
 
 const rooms = new Map<string, ChatLine[]>();
 const lastSpoke = new Map<string, number>();
-let nextId = 1;
+/**
+ * Seeded from the clock, not from 1. A listener's `since` cursor lives in the
+ * browser and survives this process: when a redeploy (or an autoscale recycle
+ * on an idle deployment) restarted the counter at 1, every line said after the
+ * restart had an id below the cursor and was filtered out as already-heard —
+ * the room went permanently silent for anyone who didn't hard-refresh. Ids
+ * only need to be monotonic ACROSS restarts for the cursor to keep meaning
+ * "after this", and a millisecond clock restarts further along than any
+ * plausible per-instance message count ever reached.
+ */
+let nextId = Date.now();
 
 export class ChatRefused extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -79,9 +89,13 @@ export function heard(
   });
 }
 
-/** Test seam. */
+/**
+ * Test seam. Behaves like the process restart it stands in for: state is gone,
+ * but ids never rewind past ones already handed out — that rewind was the bug
+ * that silenced rooms for every listener holding a pre-restart cursor.
+ */
 export function _clear(): void {
   rooms.clear();
   lastSpoke.clear();
-  nextId = 1;
+  nextId = Math.max(Date.now(), nextId);
 }
