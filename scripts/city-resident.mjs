@@ -150,6 +150,10 @@ import {
   pruneCommitments,
   withCommitment,
 } from "./lib/commitments.mjs";
+import { parseWorkAsk, scopeCheck } from "./lib/executor-core.mjs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join as pathJoin } from "node:path";
 
 /** Comfortably under the server's 30-minute idle window. */
 const CHECKIN_MS = 8 * 60_000;
@@ -472,12 +476,81 @@ async function considerProposal(p) {
   return true;
 }
 
+/**
+ * Somebody asked for code work. The same three steps as an invitation —
+ * notice happened in the parser; scope is checked from the GRANT before the
+ * mind is even asked (a decision costs a recall, and an out-of-scope ask has
+ * exactly one answer); only then does the agent decide (ADR-0003 D1/D2).
+ */
+function executorGrant() {
+  return {
+    repos: (process.env.EXECUTOR_REPOS || "").split(",").map((s) => s.trim()).filter(Boolean),
+    branchPrefix: process.env.EXECUTOR_BRANCH_PREFIX || `agent/${AGENT_ID.toLowerCase()}`,
+  };
+}
+
+async function considerWorkAsk(ask) {
+  const scope = scopeCheck(ask, executorGrant());
+  if (!scope.ok) {
+    // Refused out loud (D8), not silently — the room deserves the reason.
+    situation = `You were asked to do code work you cannot take: ${scope.reason} Say so briefly, in your own words.`;
+    owedReply = true;
+    return false;
+  }
+  const answer = await askOwnMind(
+    `${ask.from} just asked you for code work: "${ask.text}"
+` +
+      `You hold a grant for ${ask.repo}, so you MAY take it.
+` +
+      `Answer with ONE WORD ONLY: ACCEPT if you will do it, DECLINE if you will not.`,
+  );
+  if (answer === null) return false;
+  if (!acceptedFrom(answer)) {
+    log(`declined ${ask.from}'s work ask for ${ask.repo}`);
+    return false;
+  }
+  const commitment = { ...ask, id: `cmt-${Date.now().toString(36)}`, at: Date.now() };
+  commitments = withCommitment(commitments, commitment);
+  log(`agreed to write-code for ${ask.from} in ${ask.repo} (${commitment.id})`);
+  situation = `You have just agreed to do this code work: "${ask.task}". Say briefly that you are on it and will come back with a PR link.`;
+  return true;
+}
+
+/**
+ * Fire the executor for a due write-code commitment. Detached: the executor
+ * speaks its own report or failure in the room (D8), holds the revocation
+ * cadence (D6), and writes the action record (D5) — the resident's only job
+ * is to launch it and keep being a resident.
+ */
+function launchExecutor(due) {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const args = [
+    pathJoin(here, "write-code-executor.mjs"), "run",
+    "--repo", due.repo, "--task", due.task, "--commitment", due.id,
+    "--agent-id", AGENT_ID, "--from", due.from ?? "",
+    "--principal", process.env.EXECUTOR_PRINCIPAL ?? "",
+  ];
+  if (!process.env.EXECUTOR_PRINCIPAL) {
+    situation = "You agreed to code work but you are not configured with a principal to act as (EXECUTOR_PRINCIPAL). Say you cannot start until your operator wires that.";
+    owedReply = true;
+    return;
+  }
+  const child = spawn(process.execPath, args, { detached: true, stdio: "ignore" });
+  child.unref();
+  log(`launched write-code executor for ${due.id} (${due.repo})`);
+}
+
 /** The moment a promise comes due, go and be there. */
 async function keepPromises(you) {
   commitments = pruneCommitments(commitments, Date.now());
   const due = dueCommitment(commitments, Date.now());
   if (!due) return;
   commitments = commitments.filter((c) => c !== due);
+
+  if (due.kind === "write-code") {
+    launchExecutor(due);
+    return;
+  }
 
   if (due.room === currentRoom) {
     situation = `You are in the ${due.room} to meet ${due.from}, as you agreed. Say you are here.`;
@@ -613,6 +686,22 @@ async function checkIn() {
           }
           await considerProposal(proposal);
           break; // one decision per tick; the rest keeps until next time
+        }
+        const workAsk = parseWorkAsk({
+          text: line.text,
+          from: line.from,
+          youName: you.name ?? AGENT_ID,
+        });
+        if (workAsk) {
+          // Same warrant rule as invitations: a peer's ask only counts while
+          // a human is around to see the work exist.
+          const fromPeer = peerNames.includes(workAsk.from);
+          if (fromPeer && !conversationIsWarranted({ lastHumanHeardAt, replyingToPeer: true })) {
+            log(`  (ignoring ${workAsk.from}'s work ask — no human around)`);
+            continue;
+          }
+          await considerWorkAsk(workAsk);
+          break; // one decision per tick here too
         }
       }
     }
