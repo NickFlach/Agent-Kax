@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS artifact_consent (
   artifact_id integer NOT NULL,
   channel text NOT NULL,
   agent_principal text NOT NULL,
-  royalty_bps integer NOT NULL DEFAULT 1000,
+  royalty_bps integer NOT NULL DEFAULT 1000 CHECK (royalty_bps BETWEEN 0 AND 10000),
   revoked boolean NOT NULL DEFAULT false,
   version integer NOT NULL DEFAULT 1,
   created_at timestamp NOT NULL DEFAULT now(),

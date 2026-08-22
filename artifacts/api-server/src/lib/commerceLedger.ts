@@ -188,9 +188,18 @@ export async function electCreatorShareAsCredits(input: {
   shareCents: bigint;
   commerceOrderRef: string;
   actor: string;
+  /**
+   * An idempotency discriminator folded into the txIds (#414 finding 4). The
+   * default `elect:<ref>:<merchant>` collides when one order settles more than
+   * one creator share — a royalty per line item, say. Callers that pay per
+   * ARTIFACT pass the artifactId here so each share gets its own idempotent
+   * key; the bare creator-share election keeps the old key (suffix absent).
+   */
+  idemSuffix?: string;
 }): Promise<{ creditTxId: string; commerceTxId: string }> {
   if (input.shareCents <= 0n) throw new Error("shareCents must be positive");
-  const commerceTxId = `elect:${input.commerceOrderRef}:${input.merchantId}`;
+  const suffix = input.idemSuffix ? `:${input.idemSuffix}` : "";
+  const commerceTxId = `elect:${input.commerceOrderRef}:${input.merchantId}${suffix}`;
   await postCommerceTransaction({
     txId: commerceTxId,
     currency: "usd",
@@ -202,7 +211,7 @@ export async function electCreatorShareAsCredits(input: {
   });
   // 1 cent = 1 credit at the frozen peg; creditsToMinor carries it to minor units.
   const credits = input.shareCents;
-  const creditTxId = `grant:elect:${input.commerceOrderRef}:${input.merchantId}`;
+  const creditTxId = `grant:elect:${input.commerceOrderRef}:${input.merchantId}${suffix}`;
   await postTransaction({
     txId: creditTxId,
     asset: "play_credit",
@@ -217,37 +226,42 @@ export async function electCreatorShareAsCredits(input: {
 }
 
 /**
- * Pay the agent's royalty at settlement (#414), the split NAMED in the consent
- * record. Reads the consent (royaltyShareCents) and routes the share through
- * the SAME creator-share path the rest of commerce uses
- * (electCreatorShareAsCredits): the fiat side stays merchant → kax_platform,
- * and the agent — who holds no bank account — receives its share as play
- * credits. Returns null when there is no active consent, so a mis-sequenced
- * caller pays nothing on work that was never consented to.
+ * Pay the agent's royalty at settlement (#414), the split agreed AT SALE.
  *
- * This lives in the settlement layer, NOT reachable from commerce.ts's route
- * graph, which is why it may reach the ledger while the consent RECORD
- * (artifactConsent.ts, imported by the routes) stays ledger-free.
+ * The rate is FROZEN by the caller: it passes `shareCents`, computed from the
+ * sale-time consent (royaltyShareCents(consentAtSale, saleTotal)) and captured
+ * when the buyer was charged — NOT re-read here, so a later re-assert or
+ * revocation cannot swing what was owed on a completed sale (the review's
+ * finding 5). The share is paid through the same creator-share path the rest
+ * of commerce uses: the fiat side stays merchant → kax_platform, and the agent
+ * — holding no bank account — receives its share as play credits. The txId is
+ * scoped by artifactId (finding 4) so an order with several consented line
+ * items pays each once instead of colliding on one key. A zero/absent share
+ * pays nothing.
+ *
+ * Lives in the settlement layer, NOT reachable from commerce.ts's route graph,
+ * which is why it may reach the ledger while the consent RECORD
+ * (artifactConsent.ts, imported by the routes) stays ledger-free. NOTE: the
+ * commerce fiat ledger (#265) is still DARK — no live order settlement posts
+ * legs yet — so this is the correct, tested royalty path READY for when that
+ * settlement is wired, which is where the sale-time snapshot is captured.
  */
 export async function settleConsentRoyalty(input: {
   artifactId: number;
-  channel: "physical" | "occ_gallery" | "drop";
-  saleTotalCents: bigint;
+  shareCents: bigint;
   merchantId: number;
   creatorPrincipal: string;
   commerceOrderRef: string;
   actor: string;
 }): Promise<{ shareCents: bigint; creditTxId: string; commerceTxId: string } | null> {
-  const { getConsent, royaltyShareCents } = await import("./artifactConsent");
-  const consent = await getConsent(input.artifactId, input.channel);
-  const shareCents = royaltyShareCents(consent, input.saleTotalCents);
-  if (shareCents <= 0n) return null;
+  if (input.shareCents <= 0n) return null;
   const r = await electCreatorShareAsCredits({
     merchantId: input.merchantId,
     creatorPrincipal: input.creatorPrincipal,
-    shareCents,
+    shareCents: input.shareCents,
     commerceOrderRef: input.commerceOrderRef,
     actor: input.actor,
+    idemSuffix: `royalty:${input.artifactId}`,
   });
-  return { shareCents, ...r };
+  return { shareCents: input.shareCents, ...r };
 }

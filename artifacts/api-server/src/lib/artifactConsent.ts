@@ -68,7 +68,10 @@ export interface AssertConsentInput {
  * changing its mind back. Royalty is clamped to a sane range.
  */
 export async function assertConsent(input: AssertConsentInput): Promise<Consent> {
-  const royaltyBps = Math.max(0, Math.min(10_000, input.royaltyBps ?? 1000));
+  // Guard NaN/fractional BEFORE clamping — Math.min(10000, NaN) is NaN, which
+  // would land in the integer column as a 500 (finding 6). Round, then clamp.
+  const raw = Number.isFinite(input.royaltyBps) ? Math.round(input.royaltyBps as number) : 1000;
+  const royaltyBps = Math.max(0, Math.min(10_000, raw));
   await db
     .insert(artifactConsentTable)
     .values({ artifactId: input.artifactId, channel: input.channel, agentPrincipal: input.agentPrincipal, royaltyBps, revoked: false })

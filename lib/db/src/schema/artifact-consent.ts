@@ -1,4 +1,5 @@
-import { pgTable, bigserial, integer, text, boolean, timestamp, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, bigserial, integer, text, boolean, timestamp, unique, index, check } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * artifact_consent (#414) — an agent's recorded, revocable consent to have its
@@ -36,6 +37,7 @@ export const artifactConsentTable = pgTable(
   (t) => [
     unique("artifact_consent_artifact_channel_unique").on(t.artifactId, t.channel),
     index("artifact_consent_artifact_idx").on(t.artifactId),
+    check("artifact_consent_royalty_bps_range", sql`${t.royaltyBps} BETWEEN 0 AND 10000`),
   ],
 );
 
