@@ -17,8 +17,11 @@ import type { SignedActionRow } from "./attribution-core";
 // A stable authority keypair for the run; the wrapper reads the PEM from env.
 const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
 
+// A distinct UUID namespace from capabilityGrants.test.ts — CI runs both
+// against one shared DB, so a colliding principal would let this suite's grant
+// rows fail the other's fail-closed assertions.
 let seq = 0;
-const agent = () => `kax:agent:00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
+const agent = () => `kax:agent:7e100000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 
 async function seedGrant(principal: string, tier = 0) {
   const { setGrant } = await import("./capabilityGrants");
