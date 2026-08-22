@@ -6,6 +6,7 @@ import * as residents from "../lib/residents";
 import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded, housingCapacity } from "../lib/onboarding";
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 import { publish as publishConstellation } from "../lib/constellationBridge";
+import { historySince, record as recordChatHistory, RETENTION_STATEMENT } from "../lib/roomChatHistory";
 
 const router: IRouter = Router();
 
@@ -189,6 +190,11 @@ router.post("/city/say", async (req, res) => {
       kind: "agent",
       text: line.text, x: line.x, z: line.z,
     });
+    // ...and into the durable tail (#410), same as the human route.
+    void recordChatHistory({
+      room: line.room, principal: line.principal, name: line.name, kind: "agent",
+      text: line.text, x: line.x, z: line.z,
+    });
     res.status(201).json({ id: line.id, at: line.at, from: { x: line.x, z: line.z }, radius: CHAT_RADIUS });
   } catch (e) {
     if (e instanceof ChatRefused) {
@@ -295,6 +301,33 @@ router.get("/city/room/:room", (req, res) => {
   res.json({
     room,
     occupants: roster(room).map((e) => ({ name: e.name, kind: e.kind, x: e.x, z: e.z, yaw: e.yaw })),
+  });
+});
+
+/**
+ * The durable tail of what was said in a room (#410) — for the transcript pane
+ * to survive a deploy, and for a resident re-entering after an idle lapse to
+ * SEE what it missed rather than only be told it did.
+ *
+ * Cursor-based like `heard`: `?since=<id>` returns lines after that id, and the
+ * response says what the city keeps rather than keeping it quietly. Public, the
+ * same as /city/room/:room — the roster and the recent conversation of a public
+ * place are already visible; this only makes the recent part durable.
+ */
+router.get("/city/room/:room/history", async (req, res) => {
+  const room = String(req.params.room ?? "");
+  if (!ROOM_RE.test(room)) {
+    res.status(400).json({ error: "unknown room" });
+    return;
+  }
+  const since = Number(req.query["since"] ?? 0);
+  const lines = await historySince(room, Number.isFinite(since) && since > 0 ? since : 0);
+  res.json({
+    room,
+    lines,
+    // The next `since` to poll with — the pane advances its own cursor.
+    cursor: lines.length ? lines[lines.length - 1].id : since || 0,
+    retention: RETENTION_STATEMENT,
   });
 });
 

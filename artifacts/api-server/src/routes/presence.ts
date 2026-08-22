@@ -3,6 +3,7 @@ import { resolveActor, ActorError } from "../lib/actor";
 import { beat, roster, roomCounts, leave, PRESENCE_TTL_MS } from "../lib/presence";
 import { say, heard, ChatRefused, CHAT_RADIUS, MAX_TEXT } from "../lib/roomChat";
 import { publish as publishConstellation } from "../lib/constellationBridge";
+import { record as recordChatHistory } from "../lib/roomChatHistory";
 
 const router: IRouter = Router();
 
@@ -109,10 +110,18 @@ router.post("/chat/say", async (req, res) => {
     // what lets the rest of the constellation REACT to the city — a daemon can
     // hear "said in the cafe" and act somewhere else entirely. Fire-and-forget:
     // the bridge is a no-op when disconnected and never fails the request.
+    const kind = actor.kind === "agent" ? "agent" : "human";
     void publishConstellation("KAX.events.chat.said", {
       id: line.id, room: line.room, at: line.at,
       principal: line.principal, name: line.name,
-      kind: actor.kind === "agent" ? "agent" : "human",
+      kind,
+      text: line.text, x: line.x, z: line.z,
+    });
+    // ...and into the durable tail (#410), so the room remembers itself across
+    // a deploy and a re-entering resident can see what it missed. Best-effort:
+    // recordChatHistory swallows its own errors, speech never waits on it.
+    void recordChatHistory({
+      room: line.room, principal: line.principal, name: line.name, kind,
       text: line.text, x: line.x, z: line.z,
     });
     res.status(201).json({ id: line.id, radius: CHAT_RADIUS, maxText: MAX_TEXT });
