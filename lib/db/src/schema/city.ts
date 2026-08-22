@@ -1,4 +1,4 @@
-import { pgTable, text, real, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, real, timestamp, bigserial, index } from "drizzle-orm/pg-core";
 
 /**
  * Who is living in the city, across restarts.
@@ -39,3 +39,41 @@ export const cityResidentsTable = pgTable("city_residents", {
 
 export type CityResident = typeof cityResidentsTable.$inferSelect;
 export type InsertCityResident = typeof cityResidentsTable.$inferInsert;
+
+/**
+ * A durable tail of what was said in each room (#410).
+ *
+ * Speech stays ephemeral where it matters — the in-memory radius/hearing
+ * model in lib/roomChat.ts is unchanged, and a passing remark is still not an
+ * artifact. This table exists for CONTEXT, not surveillance: a mid-conversation
+ * deploy used to wipe every room's words at once (the residents' `look`
+ * cursors survived, the speech did not), a resident idling out for 30 minutes
+ * re-entered a room it could be TOLD about but not SEE, and the commitments
+ * funnel (ADR-0003 D5) cites "the line that caused it" into a buffer that
+ * evaporated in two minutes.
+ *
+ * So the tail is durable and bounded: the reader keeps only a recent window
+ * (last N lines / 24h), pruned on write, and the id is the cursor — a
+ * bigserial that is monotonic across restarts natively, unlike the in-memory
+ * id which is per-process. The room can wake up remembering itself.
+ */
+export const cityRoomChatTable = pgTable(
+  "city_room_chat",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    room: text("room").notNull(),
+    /** `kax:agent:<bot_id>` or a signed-in user's principal. */
+    principal: text("principal").notNull(),
+    name: text("name").notNull(),
+    /** "agent" | "human". */
+    kind: text("kind").notNull(),
+    text: text("text").notNull(),
+    x: real("x").notNull().default(0),
+    z: real("z").notNull().default(0),
+    at: timestamp("at").notNull().defaultNow(),
+  },
+  (t) => [index("city_room_chat_room_idx").on(t.room, t.id)],
+);
+
+export type CityRoomChatLine = typeof cityRoomChatTable.$inferSelect;
+export type InsertCityRoomChatLine = typeof cityRoomChatTable.$inferInsert;
