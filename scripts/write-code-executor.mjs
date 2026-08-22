@@ -154,6 +154,23 @@ async function assertNotRevoked(state) {
   if (!revocationCheckDue(state.lastRevocationCheckAt)) return;
   const token = kaxToken();
   if (!token) throw new Error("no KAX token for the revocation probe — refusing to act unverifiable");
+
+  // The fleet-wide kill switch (#403, D6), checked on the SAME cadence so a
+  // halt flipped mid-run stops the next stage. Fail closed: if it can't be
+  // read, or reads halted, stop. This is not revocation — the agent keeps its
+  // identity and its home, it just stops acting and says why.
+  try {
+    const a = await fetch(`${KAX_API}/city/autonomy`);
+    if (!a.ok) throw new Error(`autonomy status ${a.status}`);
+    const status = await a.json();
+    if (status.halted) {
+      throw new Error(`autonomous execution is halted fleet-wide${status.reason ? ` (${status.reason})` : ""} — standing down`);
+    }
+  } catch (e) {
+    if (String(e.message).includes("halted")) throw e;
+    throw new Error(`could not read the autonomy kill switch (${e.message}) — stopping rather than acting`);
+  }
+
   let res;
   try {
     res = await fetch(`${KAX_API}/city/onboarding`, { headers: { Authorization: `Bearer ${token}` } });

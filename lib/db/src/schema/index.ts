@@ -16,6 +16,7 @@ export * from "./credit-ledger"
 export * from "./authority";
 export * from "./residences";
 export * from "./city";
+export * from "./autonomy";
 export * from "./furnishings";
 export * from "./purchasing";
 export * from "./commerce";

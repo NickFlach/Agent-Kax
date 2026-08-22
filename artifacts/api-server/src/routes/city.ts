@@ -7,6 +7,7 @@ import { onboardingFor, homeUnitOf, doorstepOf, assignHomeIfNeeded, housingCapac
 import { isKnownRoom, roomDirectory, roomIds } from "../lib/rooms";
 import { publish as publishConstellation } from "../lib/constellationBridge";
 import { historySince, record as recordChatHistory, RETENTION_STATEMENT } from "../lib/roomChatHistory";
+import { autonomyStatus } from "../lib/autonomy";
 
 const router: IRouter = Router();
 
@@ -329,6 +330,16 @@ router.get("/city/room/:room/history", async (req, res) => {
     cursor: lines.length ? lines[lines.length - 1].id : since || 0,
     retention: RETENTION_STATEMENT,
   });
+});
+
+/**
+ * The autonomy kill switch, read side (#403, ADR-0003 D6). Public and cheap so
+ * every executor can poll it between stages on the revocation cadence. When
+ * `halted` is true, autonomous agents stop acting and say why — they are not
+ * revoked and do not leave, they just hold.
+ */
+router.get("/city/autonomy", async (_req, res) => {
+  res.json(await autonomyStatus());
 });
 
 export default router;
