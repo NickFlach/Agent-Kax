@@ -7,6 +7,7 @@ import { VenuePresence } from "@/components/presence";
 import { SpeakControl, useSpeak } from "@/components/speak-control";
 import { ChatPane } from "@/components/chat-pane";
 import { DISPLAY_FONT } from "@/lib/fonts";
+import { preferredAudioSource } from "@/lib/radio-source";
 
 /**
  * THE LISTENING ROOM (#408).
@@ -32,6 +33,10 @@ export default function ListeningRoom() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [radio, setRadio] = useState<RadioState>({ stream: "https://radio.ninja-portal.com/stream", nowPlaying: null });
   const [playing, setPlaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The continuous /stream mount is ADR-0004 (Proposed) and 400s; until it
+  // ships, the reachable source is the current track's own file.
+  const src = preferredAudioSource(radio);
 
   useEffect(() => {
     let stop = false;
@@ -50,8 +55,12 @@ export default function ListeningRoom() {
   const toggle = () => {
     const a = audioRef.current;
     if (!a) return;
-    if (playing) { a.pause(); setPlaying(false); }
-    else { a.play().then(() => setPlaying(true)).catch(() => setPlaying(false)); }
+    if (playing) { a.pause(); setPlaying(false); return; }
+    if (!src) { setError("Nothing is on air right now — the radio is quiet."); return; }
+    setError(null);
+    a.play()
+      .then(() => { setPlaying(true); setError(null); })
+      .catch(() => { setPlaying(false); setError("Couldn't start the stream — it may be offline."); });
   };
 
   const np = radio.nowPlaying;
@@ -64,8 +73,15 @@ export default function ListeningRoom() {
 
   return (
     <div className="relative h-screen w-full bg-[#0b0710] overflow-hidden kax3d-font">
-      {/* The live stream. DOM, not Canvas — a human gesture starts it. */}
-      <audio ref={audioRef} src={radio.stream} preload="none" crossOrigin="anonymous" />
+      {/* The live stream. DOM, not Canvas — a human gesture starts it. No
+          crossOrigin: the room only plays the audio, and forcing a CORS check
+          the radio host does not answer is itself a way to make play() fail. */}
+      <audio
+        ref={audioRef}
+        src={src ?? undefined}
+        preload="none"
+        onError={() => { if (src) { setPlaying(false); setError("The stream is offline right now."); } }}
+      />
 
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4 pointer-events-none">
         <Link href="/city" className="font-bold tracking-[0.3em] uppercase text-primary pointer-events-auto hover:text-primary/80" data-testid="link-back-city">
@@ -85,6 +101,9 @@ export default function ListeningRoom() {
           <p className="text-[10px] text-accent font-bold uppercase tracking-[0.3em] mb-1">Kannaka Radio</p>
           <h1 className="text-xl font-bold text-foreground tracking-widest uppercase" data-testid="text-listening-title">The Listening Room</h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-2 truncate" data-testid="text-now-playing">{marquee}</p>
+          {error && (
+            <p className="text-[10px] text-destructive uppercase tracking-widest mt-1" data-testid="text-radio-error">{error}</p>
+          )}
         </div>
       </div>
 

@@ -24,8 +24,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   FOOTPRINT_MARGIN,
+  LISTENING_POS,
   MAX_STREET_STOREFRONTS,
   MONUMENT_Z_OFFSET,
+  OBSERVATORY_POS,
   STREET_SHOP_Y,
   VENUE_SHELLS,
   footprintFor,
@@ -33,6 +35,7 @@ import {
   monumentZFor,
   streetDepthFor,
   venueFootprint,
+  type Footprint,
   type VenueKey,
 } from "./city-layout";
 
@@ -91,6 +94,10 @@ describe("venue footprints", () => {
       // next person to rediscover.
       scada: { hx: 3.1 + FOOTPRINT_MARGIN, hz: 4.3 + FOOTPRINT_MARGIN },
       undercroft: { hx: 1.5 + FOOTPRINT_MARGIN, hz: 1.5 + FOOTPRINT_MARGIN },
+      // The two constellation venues (#407, #408). Square-ish halls on the
+      // outer lane; footprints derived from their own [w,h,d] and rotation.
+      observatory: { hx: 4.0 + FOOTPRINT_MARGIN, hz: 4.0 + FOOTPRINT_MARGIN },
+      listening: { hx: 3.5 + FOOTPRINT_MARGIN, hz: 4.25 + FOOTPRINT_MARGIN },
     };
     // And the loop is keyed off the SHELLS, so the next omission fails here
     // instead of being skipped. This is the same fix #318 applied to the
@@ -124,6 +131,8 @@ describe("venue footprints", () => {
       joinery: "<JoineryVenue",
       scada: "<ScadaVenue",
       undercroft: "<UndercroftMouth",
+      observatory: "<ObservatoryVenue",
+      listening: "<ListeningRoomVenue",
     };
     // Keyed by VenueKey rather than a hand-written list, so a shell added
     // without a mount here is a TYPE error rather than a venue this guard
@@ -155,6 +164,34 @@ describe("venue footprints", () => {
     expect(a.hz).toBeCloseTo(b.hz);
     expect(a.hx).toBeCloseTo(a.hz);
     expect(SCENE.split("<UndercroftMouth").length - 1, "there should be exactly two ways down").toBe(2);
+  });
+
+  it("stands the two constellation venues clear of their neighbours (#407, #408)", () => {
+    // Observatory and Listening Room were placed blind — no screenshot in CI —
+    // so the placement is checked as arithmetic: their derived footprints must
+    // not overlap the nearest already-standing venues, or each other. A drift
+    // into 0xSCADA or the residences fails here rather than clipping in a walk.
+    const box = (pos: readonly [number, number, number], fp: Footprint) => ({
+      minX: pos[0] - fp.hx, maxX: pos[0] + fp.hx, minZ: pos[2] - fp.hz, maxZ: pos[2] + fp.hz,
+    });
+    const overlaps = (a: ReturnType<typeof box>, b: ReturnType<typeof box>) =>
+      a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
+
+    const obs = box(OBSERVATORY_POS, venueFootprint("observatory"));
+    const lis = box(LISTENING_POS, venueFootprint("listening"));
+    // The nearest standing neighbours, at their scene coordinates.
+    const neighbours: Array<[string, ReturnType<typeof box>]> = [
+      ["scada", box([17.6, STREET_SHOP_Y, -8.5], venueFootprint("scada"))],
+      ["residences", box([12.5, STREET_SHOP_Y, 3], venueFootprint("residences"))],
+      ["joinery", box([-12.5, STREET_SHOP_Y, 3], venueFootprint("joinery"))],
+      // Flaukowski's No. 2 shares the Observatory's outer lane, deeper down.
+      ["flaukowski-2", box([-17.6, STREET_SHOP_Y, -18.4], { hx: 3.9, hz: 3.3 })],
+    ];
+    for (const [name, nb] of neighbours) {
+      expect(overlaps(obs, nb), `Observatory overlaps ${name}`).toBe(false);
+      expect(overlaps(lis, nb), `Listening Room overlaps ${name}`).toBe(false);
+    }
+    expect(overlaps(obs, lis), "the two constellation venues overlap each other").toBe(false);
   });
 });
 
