@@ -303,8 +303,8 @@ function ReceptionDesk({ position, rotation, boardTex }: { position: [number, nu
         <boxGeometry args={[5.35, 0.07, 1.42]} />
         <meshStandardMaterial color="#8d7a4f" roughness={0.35} metalness={0.7} />
       </mesh>
-      {/* Concierge */}
-      <group position={[0.6, 0, -1.1]} rotation={[0, Math.PI, 0]}>
+      {/* Concierge — BEHIND the counter (local −z), facing the visitors. */}
+      <group position={[0.6, 0, -1.1]} rotation={[0, 0, 0]}>
         <NpcFigure color="#3d4a42" seed={99} />
       </group>
       {/* The directory board, standing behind the desk. */}
@@ -704,8 +704,13 @@ export default function GsTradingFloor() {
         {/* THE LOBBY — the operator's brief: reception, elevator, and room to
             breathe by the entry, with every trading feature untouched. The
             desks end at z=4.5; everything lobby-shaped lives z>6. */}
-        <ReceptionDesk position={[8.5, 0, 9.2]} rotation={Math.PI} boardTex={towerBoard} />
-        <ElevatorBank position={[-14.5, 0, 12.8]} onCall={() => setLiftOpen(true)} />
+        {/* rotation 0: counter face, board, and concierge all address the
+            south entrance; the hall sees the board's back, which is what a
+            lobby fixture's back is for. Bank at z=12.7 so its deepest text
+            (local 0.22) stays proud of the wall at z=13 — at 12.8 the CLICK
+            TO CALL hint rendered INSIDE the wall (review finding 1). */}
+        <ReceptionDesk position={[8.5, 0, 9.2]} rotation={0} boardTex={towerBoard} />
+        <ElevatorBank position={[-14.5, 0, 12.7]} onCall={() => setLiftOpen(true)} />
 
         {/* GS crest on the back wall over the entry */}
         <Suspense fallback={null}>
