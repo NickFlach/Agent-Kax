@@ -96,4 +96,32 @@ describe("ReplayCursor", () => {
     await rc.onProcessed("b");
     expect(rc.failures).toBe(0);
   });
+
+  it("reports how it pinned a deferral", async () => {
+    const withPos = new ReplayCursor("seed", "dm.received");
+    expect(await withPos.onDeferred()).toBe("pinned");
+    expect(await withPos.onDeferred()).toBe("held"); // already holding
+    const fromNull = new ReplayCursor(null, "dm.received");
+    expect(await fromNull.onDeferred()).toBe("unpinnable"); // nothing to pin to
+  });
+
+  describe("non-persisting mode (admin catch-up must not clobber the cursor)", () => {
+    it("never writes the stored cursor, on any path", async () => {
+      const rc = new ReplayCursor("seed", "dm.received", false);
+      await rc.onProcessed("a");
+      await rc.onPageBoundary("p2");
+      await rc.onFailed("b");
+      await rc.onDeferred();
+      expect(recorded).toEqual([]); // the operator tool touched nothing durable
+    });
+
+    it("still holds the deferral for its own pagination", async () => {
+      const rc = new ReplayCursor("seed", "dm.received", false);
+      await rc.onProcessed("a");
+      await rc.onDeferred();
+      // held, so onProcessed is a no-op for the fetch position past the hold
+      await rc.onProcessed("b");
+      expect(rc.held).toBe(true);
+    });
+  });
 });

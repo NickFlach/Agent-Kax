@@ -373,8 +373,14 @@ export async function replayMissedEventsOnStartup(): Promise<void> {
           // (skip the type this run, re-seed next boot) rather than inflating
           // the failure counter.
           if (result.status === "deferred") {
-            logger.info({ eventType, eventUuid: ev.event_uuid, reason: result.reason }, "holding replay cursor at deferred event");
-            await rc.onDeferred();
+            const pin = await rc.onDeferred();
+            logger.info({ eventType, eventUuid: ev.event_uuid, reason: result.reason, pin }, "holding replay cursor at deferred event");
+            if (pin === "unpinnable") {
+              // Fresh DB, first event of this type defers, nothing to pin to.
+              // Re-offered next boot only if a concurrent type has not advanced
+              // the legacy fallback first — surface it so a stuck type is seen.
+              logger.warn({ eventType, eventUuid: ev.event_uuid }, "deferred event has no per-type cursor to pin — re-offer depends on the legacy fallback not advancing");
+            }
           } else {
             await rc.onProcessed(ev.event_uuid);
             if (result.status === "handled" || result.status === "unhandled") processed++;

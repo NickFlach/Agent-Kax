@@ -354,13 +354,14 @@ router.post("/admin/obc/replay", requireAdmin, async (req, res) => {
   let deferredCount = 0;
   const errors: Array<{ event_uuid: string; error: string }> = [];
 
-  // The SAME cursor discipline the startup replay uses (#418): a deferred
-  // event freezes the persisted cursor so it is re-offered, while the fetch
-  // position keeps moving. This loop is exactly the catch-up-a-new-handler
-  // case — where a cursor-less type is most likely to hit a deferral — so it
-  // must not be the copy that skips them. Per-type, so it pins onto
-  // eventCursors[type] instead of only the shared lastEventUuid.
-  const rc = new ReplayCursor(sinceUuid, eventType);
+  // The SAME deferral discipline the startup replay uses (#418) — a deferred
+  // event freezes the run's cursor so its own pagination does not skip it —
+  // but NON-PERSISTING. This is an operator catch-up from a caller-supplied
+  // position; the startup replay owns the authoritative per-type cursor, and
+  // persisting from an arbitrary `sinceUuid` could advance eventCursors[type]
+  // past a startup-held deferral (or regress it). Dispatch stays idempotent
+  // via processed_events, so a non-persisting replay is safe to re-run.
+  const rc = new ReplayCursor(sinceUuid, eventType, /* persist */ false);
 
   // Loop up to 10 pages to stay safely under the daily budget; OBC's
   // /events/recent has a 7-day retention window so this is enough to
